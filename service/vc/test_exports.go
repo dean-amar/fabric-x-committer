@@ -255,7 +255,6 @@ func (env *DatabaseTestEnv) populateDataWithCleanup( //nolint:revive
 	batchStatus *protoblocktx.TransactionsStatus,
 	txIDToHeight transactionIDToHeight,
 ) {
-
 	require.NoError(t,
 		initDatabaseTables(t.Context(), &operation{
 			pool:         env.DB.pool,

@@ -247,7 +247,10 @@ func initDatabaseTables(ctx context.Context, op *operation, nsIDs []string) erro
 	logger.Info("Created tx status table, metadata table, and its methods.")
 
 	op.operationName = "metadata_table_initialization"
-	if execErr := poolExecOperation(ctx, op, initializeMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), nil); execErr != nil {
+	if execErr := poolExecOperation(ctx,
+		op,
+		initializeMetadataPrepStmt,
+		[]byte(lastCommittedBlockNumberKey), nil); execErr != nil {
 		return fmt.Errorf("failed initialization metadata table: %w", execErr) //nolint:wrapcheck
 	}
 
