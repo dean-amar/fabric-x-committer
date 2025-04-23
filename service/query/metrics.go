@@ -114,7 +114,7 @@ func newQueryServiceMetrics() *perfMetrics {
 			Namespace: "queryservice",
 			Subsystem: "database_retry",
 			Name:      "per_operation_total",
-			Help:      "Total number of successes or failures retries per operation",
+			Help:      "Total number of retries successes or failures per operation",
 		}, []string{"operation_name", "status"}),
 	}
 }

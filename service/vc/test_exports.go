@@ -255,13 +255,13 @@ func (env *DatabaseTestEnv) populateDataWithCleanup( //nolint:revive
 	batchStatus *protoblocktx.TransactionsStatus,
 	txIDToHeight transactionIDToHeight,
 ) {
+
 	require.NoError(t,
-		initDatabaseTables(t.Context(),
-			env.DB.pool,
-			env.DBConf,
-			env.DB.metrics.retryOperationStatusCounter,
-			nsIDs,
-		),
+		initDatabaseTables(t.Context(), &operation{
+			pool:         env.DB.pool,
+			config:       env.DBConf,
+			retryMetrics: env.DB.metrics.retryOperationStatusCounter,
+		}, nsIDs),
 	)
 
 	_, _, err := env.DB.commit(t.Context(), &statesToBeCommitted{batchStatus: batchStatus, txIDToHeight: txIDToHeight})

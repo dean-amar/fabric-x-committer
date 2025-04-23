@@ -15,7 +15,7 @@ import (
 type operation struct {
 	config        *DatabaseConfig
 	operationName string
-	retryCounter  *prometheus.CounterVec
+	retryMetrics  *prometheus.CounterVec
 	pool          *pgxpool.Pool
 }
 
@@ -237,30 +237,17 @@ func NewDatabasePool(ctx context.Context,
 	return pool, nil
 }
 
-func initDatabaseTables(ctx context.Context,
-	pool *pgxpool.Pool,
-	config *DatabaseConfig,
-	retryMetrics *prometheus.CounterVec,
-	nsIDs []string,
-) error {
+func initDatabaseTables(ctx context.Context, op *operation, nsIDs []string) error {
 	for _, stmt := range initStatements {
-		if execErr := poolExecOperation(ctx, &operation{
-			config:        config,
-			operationName: "database_init_statement",
-			retryCounter:  retryMetrics,
-			pool:          pool,
-		}, stmt); execErr != nil {
+		op.operationName = "database_init_statement"
+		if execErr := poolExecOperation(ctx, op, stmt); execErr != nil {
 			return fmt.Errorf("failed initializing tables: %w", execErr) //nolint:wrapcheck
 		}
 	}
 	logger.Info("Created tx status table, metadata table, and its methods.")
 
-	if execErr := poolExecOperation(ctx, &operation{
-		config:        config,
-		operationName: "metadata_table_initialization",
-		retryCounter:  retryMetrics,
-		pool:          pool,
-	}, initializeMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), nil); execErr != nil {
+	op.operationName = "metadata_table_initialization"
+	if execErr := poolExecOperation(ctx, op, initializeMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), nil); execErr != nil {
 		return fmt.Errorf("failed initialization metadata table: %w", execErr) //nolint:wrapcheck
 	}
 
@@ -268,12 +255,8 @@ func initDatabaseTables(ctx context.Context,
 	for _, nsID := range nsIDs {
 		tableName := TableName(nsID)
 		for _, stmt := range initStatementsWithTemplate {
-			if execErr := poolExecOperation(ctx, &operation{
-				config:        config,
-				operationName: fmt.Sprintf("creating_table_and_its_methods_for%s", nsID),
-				retryCounter:  retryMetrics,
-				pool:          pool,
-			}, fmt.Sprintf(stmt, tableName)); execErr != nil {
+			op.operationName = fmt.Sprintf("creating_table_and_its_methods_for%s", nsID)
+			if execErr := poolExecOperation(ctx, op, fmt.Sprintf(stmt, tableName)); execErr != nil {
 				return fmt.Errorf("failed creating meta-namespace for namespace %s: %w", //nolint:wrapcheck
 					nsID, execErr)
 			}
@@ -284,7 +267,7 @@ func initDatabaseTables(ctx context.Context,
 }
 
 func poolExecOperation(ctx context.Context, op *operation, stmt string, args ...any) error {
-	return op.config.Retry.Execute(ctx, op.operationName, op.retryCounter, func() error {
+	return op.config.Retry.Execute(ctx, op.operationName, op.retryMetrics, func() error {
 		_, err := op.pool.Exec(ctx, stmt, args...)
 		return errors.Wrapf(err, "db exec failed: %s", stmt)
 	})

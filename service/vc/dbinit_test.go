@@ -17,7 +17,11 @@ func Test_DbInit(t *testing.T) {
 	env := NewDatabaseTestEnv(t)
 
 	ns := []string{"0", "1", "2", "3"}
-	require.NoError(t, initDatabaseTables(t.Context(), env.DB.pool, env.DBConf, nil, ns))
+	require.NoError(t, initDatabaseTables(t.Context(), &operation{
+		pool:         env.DB.pool,
+		config:       env.DBConf,
+		retryMetrics: nil,
+	}, ns))
 
 	_, err := env.DB.pool.Exec(t.Context(), `insert into ns_0 values (UNNEST($1::bytea[]));`, [][]byte{
 		[]byte("tx1"), []byte("tx2"), []byte("tx3"), []byte("tx4"),

@@ -85,12 +85,11 @@ func newDatabase(ctx context.Context, config *DatabaseConfig, metrics *perfMetri
 		}
 	}()
 
-	if err = initDatabaseTables(ctx,
-		pool,
-		config,
-		metrics.retryOperationStatusCounter,
-		nil,
-	); err != nil {
+	if err = initDatabaseTables(ctx, &operation{
+		pool:         pool,
+		config:       config,
+		retryMetrics: metrics.retryOperationStatusCounter,
+	}, nil); err != nil {
 		return nil, err
 	}
 
