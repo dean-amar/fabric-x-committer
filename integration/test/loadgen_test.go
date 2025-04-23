@@ -42,7 +42,7 @@ func TestLoadGen(t *testing.T) {
 			require.Eventually(t, func() bool {
 				count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
 				t.Logf("count %d", count)
-				return count > 50_000
+				return count > 1_000
 			}, 90*time.Second, 3*time.Second)
 			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 		})

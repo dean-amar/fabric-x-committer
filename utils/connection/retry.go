@@ -47,27 +47,26 @@ const (
 // It returns nil on success, or the error returned by the final attempt on timeout.
 func (p *RetryProfile) Execute(ctx context.Context,
 	operationName string,
-	counterVec *prometheus.CounterVec,
+	retryMetrics *prometheus.CounterVec,
 	o backoff.Operation,
 ) error {
-	retryCount := 0
-	status := successStatus
-
 	return errors.Wrapf(
 		backoff.Retry(
 			func() error {
-				var err error
+				var (
+					err    error
+					status operationStatus
+				)
 				if err = o(); err != nil {
 					status = failureStatus
 				} else {
 					status = successStatus
 				}
-				if counterVec != nil {
-					promutil.AddToCounterVec(counterVec,
+				if retryMetrics != nil {
+					promutil.AddToCounterVec(retryMetrics,
 						[]string{operationName, status},
 						1)
 				}
-				retryCount++
 				return err
 			}, backoff.WithContext(p.NewBackoff(), ctx),
 		), "multiple retries failed")

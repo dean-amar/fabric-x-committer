@@ -171,7 +171,7 @@ func (env *DatabaseTestEnv) getRowCount(t *testing.T, query string) int {
 	require.NoError(t,
 		env.DB.retry.Execute(t.Context(),
 			"get_row_count",
-			env.DB.metrics.databaseRetryCounterByOperation, func() error {
+			env.DB.metrics.retryOperationStatusCounter, func() error {
 				row := env.DB.pool.QueryRow(t.Context(), query)
 				return row.Scan(&count)
 			}))
@@ -259,7 +259,7 @@ func (env *DatabaseTestEnv) populateDataWithCleanup( //nolint:revive
 		initDatabaseTables(t.Context(),
 			env.DB.pool,
 			env.DBConf,
-			env.DB.metrics.databaseRetryCounterByOperation,
+			env.DB.metrics.retryOperationStatusCounter,
 			nsIDs,
 		),
 	)

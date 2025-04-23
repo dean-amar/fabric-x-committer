@@ -72,9 +72,7 @@ func (s *statesToBeCommitted) Debug() {
 
 // newDatabase creates a new database.
 func newDatabase(ctx context.Context, config *DatabaseConfig, metrics *perfMetrics) (*database, error) {
-	retryCounterPerOp := metrics.databaseRetryCounterByOperation
-
-	pool, err := NewDatabasePool(ctx, config, retryCounterPerOp)
+	pool, err := NewDatabasePool(ctx, config, metrics.retryOperationStatusCounter)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +85,12 @@ func newDatabase(ctx context.Context, config *DatabaseConfig, metrics *perfMetri
 		}
 	}()
 
-	if err = initDatabaseTables(ctx, pool, config, retryCounterPerOp, nil); err != nil {
+	if err = initDatabaseTables(ctx,
+		pool,
+		config,
+		metrics.retryOperationStatusCounter,
+		nil,
+	); err != nil {
 		return nil, err
 	}
 
@@ -163,7 +166,7 @@ func (db *database) getBlockInfoMetadata(ctx context.Context, key string) (*prot
 	var value []byte
 	if retryErr := db.retry.Execute(ctx,
 		"get_block_info_metadata",
-		db.metrics.databaseRetryCounterByOperation, func() error {
+		db.metrics.retryOperationStatusCounter, func() error {
 			r = db.pool.QueryRow(ctx, getMetadataPrepStmt, []byte(key))
 			return r.Scan(&value)
 		}); retryErr != nil {
@@ -192,7 +195,7 @@ func (db *database) setLastCommittedBlockNumber(ctx context.Context, bInfo *prot
 	binary.BigEndian.PutUint64(v, bInfo.Number)
 	return db.retry.Execute(ctx,
 		"set_last_committed_block_number",
-		db.metrics.databaseRetryCounterByOperation, func() error {
+		db.metrics.retryOperationStatusCounter, func() error {
 			_, err := db.pool.Exec(ctx, setMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), v)
 			return errors.Wrapf(err, "failed to set the last committed block number")
 		})
@@ -471,7 +474,7 @@ func (db *database) readStatusWithHeight(
 	txIDs [][]byte,
 ) (map[string]*protoblocktx.StatusWithHeight, error) {
 	var rows map[string]*protoblocktx.StatusWithHeight
-	retryErr := db.retry.Execute(ctx, "read_status_with_height", db.metrics.databaseRetryCounterByOperation, func() error {
+	retryErr := db.retry.Execute(ctx, "read_status_with_height", db.metrics.retryOperationStatusCounter, func() error {
 		r, err := db.pool.Query(ctx, queryTxIDsStatus, txIDs)
 		if err != nil {
 			return errors.Wrap(err, "failed to query txIDs from the tx_status table")
@@ -542,7 +545,7 @@ func (db *database) retryQueryAndReadRows(
 		values [][]byte
 		keys   [][]byte
 	)
-	retryErr := db.retry.Execute(ctx, "query_and_read_rows", db.metrics.databaseRetryCounterByOperation, func() error {
+	retryErr := db.retry.Execute(ctx, "query_and_read_rows", db.metrics.retryOperationStatusCounter, func() error {
 		rows, err := db.pool.Query(ctx, query, args...)
 		if err != nil {
 			return errors.Wrap(err, "failed to query rows")

@@ -36,7 +36,7 @@ type perfMetrics struct {
 	requestAssignmentLatencySeconds prometheus.Histogram
 	queryLatencySeconds             prometheus.Histogram
 
-	databaseRetryCounterByOperation *prometheus.CounterVec
+	retryOperationStatusCounter *prometheus.CounterVec
 }
 
 func newQueryServiceMetrics() *perfMetrics {
@@ -110,11 +110,11 @@ func newQueryServiceMetrics() *perfMetrics {
 			Help:      "The latency of the queries' batches",
 			Buckets:   timeBuckets,
 		}),
-		databaseRetryCounterByOperation: p.NewCounterVec(prometheus.CounterOpts{
+		retryOperationStatusCounter: p.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "queryservice",
 			Subsystem: "database_retry",
 			Name:      "per_operation_total",
-			Help:      "Total number of retries per operation name and status",
+			Help:      "Total number of successes or failures retries per operation",
 		}, []string{"operation_name", "status"}),
 	}
 }

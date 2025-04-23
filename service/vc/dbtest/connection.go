@@ -70,7 +70,7 @@ func (y *Connection) Open(ctx context.Context) (*pgxpool.Pool, error) {
 	poolConfig.MinConns = 1
 
 	var pool *pgxpool.Pool
-	if retryErr := DefaultRetry.Execute(ctx, "test_pool_connection", nil, func() error {
+	if retryErr := DefaultRetry.Execute(ctx, "pool_creation_test", nil, func() error {
 		pool, err = pgxpool.ConnectConfig(ctx, poolConfig)
 		return err
 	}); retryErr != nil {

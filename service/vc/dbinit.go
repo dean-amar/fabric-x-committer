@@ -214,7 +214,7 @@ var systemNamespaces = []string{
 // NewDatabasePool creates a new pool from a database config.
 func NewDatabasePool(ctx context.Context,
 	config *DatabaseConfig,
-	retryCounter *prometheus.CounterVec,
+	retryMetrics *prometheus.CounterVec,
 ) (*pgxpool.Pool, error) {
 	logger.Infof("DB source: %s", config.DataSourceName())
 	poolConfig, err := pgxpool.ParseConfig(config.DataSourceName())
@@ -226,7 +226,7 @@ func NewDatabasePool(ctx context.Context,
 	poolConfig.MinConns = config.MinConnections
 
 	var pool *pgxpool.Pool
-	if retryErr := config.Retry.Execute(ctx, "pool_connection", retryCounter, func() error {
+	if retryErr := config.Retry.Execute(ctx, "pool_creation", retryMetrics, func() error {
 		pool, err = pgxpool.ConnectConfig(ctx, poolConfig)
 		return errors.Wrap(err, "failed to connect to the database")
 	}); retryErr != nil {
@@ -240,14 +240,14 @@ func NewDatabasePool(ctx context.Context,
 func initDatabaseTables(ctx context.Context,
 	pool *pgxpool.Pool,
 	config *DatabaseConfig,
-	retryCounter *prometheus.CounterVec,
+	retryMetrics *prometheus.CounterVec,
 	nsIDs []string,
 ) error {
 	for _, stmt := range initStatements {
 		if execErr := poolExecOperation(ctx, &operation{
 			config:        config,
 			operationName: "database_init_statement",
-			retryCounter:  retryCounter,
+			retryCounter:  retryMetrics,
 			pool:          pool,
 		}, stmt); execErr != nil {
 			return fmt.Errorf("failed initializing tables: %w", execErr) //nolint:wrapcheck
@@ -258,7 +258,7 @@ func initDatabaseTables(ctx context.Context,
 	if execErr := poolExecOperation(ctx, &operation{
 		config:        config,
 		operationName: "metadata_table_initialization",
-		retryCounter:  retryCounter,
+		retryCounter:  retryMetrics,
 		pool:          pool,
 	}, initializeMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), nil); execErr != nil {
 		return fmt.Errorf("failed initialization metadata table: %w", execErr) //nolint:wrapcheck
@@ -271,7 +271,7 @@ func initDatabaseTables(ctx context.Context,
 			if execErr := poolExecOperation(ctx, &operation{
 				config:        config,
 				operationName: fmt.Sprintf("creating_table_and_its_methods_for%s", nsID),
-				retryCounter:  retryCounter,
+				retryCounter:  retryMetrics,
 				pool:          pool,
 			}, fmt.Sprintf(stmt, tableName)); execErr != nil {
 				return fmt.Errorf("failed creating meta-namespace for namespace %s: %w", //nolint:wrapcheck

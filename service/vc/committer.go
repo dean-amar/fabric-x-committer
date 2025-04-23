@@ -137,7 +137,7 @@ func (c *transactionCommitter) commitTransactions(
 		)
 		if retryErr := c.db.retry.Execute(ctx,
 			"transactions_commit",
-			c.metrics.databaseRetryCounterByOperation, func() error {
+			c.metrics.retryOperationStatusCounter, func() error {
 				mismatch, duplicated, err = c.db.commit(ctx, info)
 				return err
 			}); retryErr != nil {
