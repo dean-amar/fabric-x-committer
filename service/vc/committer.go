@@ -135,10 +135,12 @@ func (c *transactionCommitter) commitTransactions(
 			duplicated []TxID
 			err        error
 		)
-		if retryErr := c.db.retry.Execute(ctx, func() error {
-			mismatch, duplicated, err = c.db.commit(ctx, info)
-			return err
-		}); retryErr != nil {
+		if retryErr := c.db.retry.Execute(ctx,
+			"transactions_commit",
+			c.metrics.databaseRetryCounterByOperation, func() error {
+				mismatch, duplicated, err = c.db.commit(ctx, info)
+				return err
+			}); retryErr != nil {
 			return nil, fmt.Errorf("failed to commit transactions: %w", err) //nolint:wrapcheck
 		}
 

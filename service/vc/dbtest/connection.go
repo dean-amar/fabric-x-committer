@@ -70,7 +70,7 @@ func (y *Connection) Open(ctx context.Context) (*pgxpool.Pool, error) {
 	poolConfig.MinConns = 1
 
 	var pool *pgxpool.Pool
-	if retryErr := DefaultRetry.Execute(ctx, func() error {
+	if retryErr := DefaultRetry.Execute(ctx, "test_pool_connection", nil, func() error {
 		pool, err = pgxpool.ConnectConfig(ctx, poolConfig)
 		return err
 	}); retryErr != nil {
@@ -159,7 +159,7 @@ func execDropIfExitsDB(ctx context.Context, pool *pgxpool.Pool, dbName string) e
 }
 
 func PoolExecOperation(ctx context.Context, pool *pgxpool.Pool, stmt string, args ...any) error {
-	return DefaultRetry.Execute(ctx, func() error {
+	return DefaultRetry.Execute(ctx, "pool_exec", nil, func() error {
 		_, err := pool.Exec(ctx, stmt, args...)
 		return errors.Wrapf(err, "db exec failed: %s", stmt)
 	})

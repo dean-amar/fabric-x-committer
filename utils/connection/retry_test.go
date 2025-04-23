@@ -108,7 +108,7 @@ func TestExecute(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			op, callCount := makeOp(tc.failUntil)
-			err := tc.profile.Execute(t.Context(), op)
+			err := tc.profile.Execute(t.Context(), "test_retry", nil, op)
 			if tc.expectError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.expectedErrorSubstring)

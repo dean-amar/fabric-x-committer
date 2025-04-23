@@ -5,11 +5,19 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 )
+
+type operation struct {
+	config        *DatabaseConfig
+	operationName string
+	retryCounter  *prometheus.CounterVec
+	pool          *pgxpool.Pool
+}
 
 const createTxTableStmt = `
 CREATE TABLE IF NOT EXISTS tx_status (
@@ -204,7 +212,10 @@ var systemNamespaces = []string{
 }
 
 // NewDatabasePool creates a new pool from a database config.
-func NewDatabasePool(ctx context.Context, config *DatabaseConfig) (*pgxpool.Pool, error) {
+func NewDatabasePool(ctx context.Context,
+	config *DatabaseConfig,
+	retryCounter *prometheus.CounterVec,
+) (*pgxpool.Pool, error) {
 	logger.Infof("DB source: %s", config.DataSourceName())
 	poolConfig, err := pgxpool.ParseConfig(config.DataSourceName())
 	if err != nil {
@@ -215,7 +226,7 @@ func NewDatabasePool(ctx context.Context, config *DatabaseConfig) (*pgxpool.Pool
 	poolConfig.MinConns = config.MinConnections
 
 	var pool *pgxpool.Pool
-	if retryErr := config.Retry.Execute(ctx, func() error {
+	if retryErr := config.Retry.Execute(ctx, "pool_connection", retryCounter, func() error {
 		pool, err = pgxpool.ConnectConfig(ctx, poolConfig)
 		return errors.Wrap(err, "failed to connect to the database")
 	}); retryErr != nil {
@@ -226,30 +237,30 @@ func NewDatabasePool(ctx context.Context, config *DatabaseConfig) (*pgxpool.Pool
 	return pool, nil
 }
 
-// ClearDatabase clears the DB tables and methods.
-func ClearDatabase(ctx context.Context, config *DatabaseConfig, nsIDs []string) error {
-	pool, err := NewDatabasePool(ctx, config)
-	if err != nil {
-		return fmt.Errorf("failed clearing database: %w", err) //nolint:wrapcheck
-	}
-	defer pool.Close()
-
-	if err = clearDatabaseTables(ctx, pool, nsIDs); err != nil {
-		return fmt.Errorf("failed clearing database %s tables: %w", config.Database, err) //nolint:wrapcheck
-	}
-
-	return nil
-}
-
-func initDatabaseTables(ctx context.Context, pool *pgxpool.Pool, nsIDs []string) error {
+func initDatabaseTables(ctx context.Context,
+	pool *pgxpool.Pool,
+	config *DatabaseConfig,
+	retryCounter *prometheus.CounterVec,
+	nsIDs []string,
+) error {
 	for _, stmt := range initStatements {
-		if execErr := dbtest.PoolExecOperation(ctx, pool, stmt); execErr != nil {
+		if execErr := poolExecOperation(ctx, &operation{
+			config:        config,
+			operationName: "database_init_statement",
+			retryCounter:  retryCounter,
+			pool:          pool,
+		}, stmt); execErr != nil {
 			return fmt.Errorf("failed initializing tables: %w", execErr) //nolint:wrapcheck
 		}
 	}
 	logger.Info("Created tx status table, metadata table, and its methods.")
-	if execErr := dbtest.PoolExecOperation(ctx, pool,
-		initializeMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), nil); execErr != nil {
+
+	if execErr := poolExecOperation(ctx, &operation{
+		config:        config,
+		operationName: "metadata_table_initialization",
+		retryCounter:  retryCounter,
+		pool:          pool,
+	}, initializeMetadataPrepStmt, []byte(lastCommittedBlockNumberKey), nil); execErr != nil {
 		return fmt.Errorf("failed initialization metadata table: %w", execErr) //nolint:wrapcheck
 	}
 
@@ -257,7 +268,12 @@ func initDatabaseTables(ctx context.Context, pool *pgxpool.Pool, nsIDs []string)
 	for _, nsID := range nsIDs {
 		tableName := TableName(nsID)
 		for _, stmt := range initStatementsWithTemplate {
-			if execErr := dbtest.PoolExecOperation(ctx, pool, fmt.Sprintf(stmt, tableName)); execErr != nil {
+			if execErr := poolExecOperation(ctx, &operation{
+				config:        config,
+				operationName: fmt.Sprintf("creating_table_and_its_methods_for%s", nsID),
+				retryCounter:  retryCounter,
+				pool:          pool,
+			}, fmt.Sprintf(stmt, tableName)); execErr != nil {
 				return fmt.Errorf("failed creating meta-namespace for namespace %s: %w", //nolint:wrapcheck
 					nsID, execErr)
 			}
@@ -265,6 +281,13 @@ func initDatabaseTables(ctx context.Context, pool *pgxpool.Pool, nsIDs []string)
 		logger.Infof("namespace %s: created table '%s' and its methods.", nsID, tableName)
 	}
 	return nil
+}
+
+func poolExecOperation(ctx context.Context, op *operation, stmt string, args ...any) error {
+	return op.config.Retry.Execute(ctx, op.operationName, op.retryCounter, func() error {
+		_, err := op.pool.Exec(ctx, stmt, args...)
+		return errors.Wrapf(err, "db exec failed: %s", stmt)
+	})
 }
 
 func clearDatabaseTables(ctx context.Context, pool *pgxpool.Pool, nsIDs []string) error {
@@ -280,7 +303,6 @@ func clearDatabaseTables(ctx context.Context, pool *pgxpool.Pool, nsIDs []string
 	for _, nsID := range nsIDs {
 		tableName := TableName(nsID)
 		logger.Infof("Namespace %s: Dropping table '%s' and its methods.", nsID, tableName)
-
 		for _, stmt := range dropStatementsWithTemplate {
 			if execErr := dbtest.PoolExecOperation(ctx, pool, fmt.Sprintf(stmt, tableName)); execErr != nil {
 				return fmt.Errorf("namespace %s: failed clearing database tables: %w", nsID, execErr) //nolint:wrapcheck

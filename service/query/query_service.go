@@ -46,7 +46,7 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
-	pool, poolErr := vc.NewDatabasePool(ctx, q.config.Database)
+	pool, poolErr := vc.NewDatabasePool(ctx, q.config.Database, q.metrics.databaseRetryCounterByOperation)
 	if poolErr != nil {
 		return poolErr
 	}

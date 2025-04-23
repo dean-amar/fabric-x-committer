@@ -30,15 +30,6 @@ func TestVCServiceCmd(t *testing.T) {
 			System:            s,
 		},
 		{
-			Name:              "clear",
-			Args:              []string{"clear", "--namespaces", "0"},
-			CmdStdOutput:      "Clearing database",
-			CmdLoggerOutputs:  []string{fmt.Sprintf("Table 'ns_%s' is cleared", "0")},
-			Err:               nil,
-			UseConfigTemplate: config.TemplateVC,
-			System:            s,
-		},
-		{
 			Name:         "print version",
 			Args:         []string{"version"},
 			CmdStdOutput: fmt.Sprintf("%v %v", serviceName, serviceVersion),

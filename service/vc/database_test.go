@@ -293,8 +293,11 @@ func TestDBCommit(t *testing.T) {
 
 func commit(t *testing.T, dbEnv *DatabaseTestEnv, states *statesToBeCommitted) {
 	t.Helper()
-	require.NoError(t, dbEnv.DBConf.Retry.Execute(t.Context(), func() error {
-		_, _, err := dbEnv.DB.commit(t.Context(), states)
-		return err
-	}))
+	require.NoError(t, dbEnv.DBConf.Retry.Execute(
+		t.Context(),
+		"test_commit",
+		dbEnv.DB.metrics.databaseRetryCounterByOperation, func() error {
+			_, _, err := dbEnv.DB.commit(t.Context(), states)
+			return err
+		}))
 }

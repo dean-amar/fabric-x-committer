@@ -318,7 +318,7 @@ func newQueryServiceTestEnv(t *testing.T) *queryServiceTestEnv {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute*10)
 	t.Cleanup(cancel)
 
-	pool, err := vc.NewDatabasePool(ctx, config.Database)
+	pool, err := vc.NewDatabasePool(ctx, config.Database, qs.metrics.databaseRetryCounterByOperation)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 

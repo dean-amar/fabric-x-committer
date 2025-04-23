@@ -29,6 +29,7 @@ type perfMetrics struct {
 	validatorTxBatchLatencySeconds prometheus.Histogram
 	committerTxBatchLatencySeconds prometheus.Histogram
 
+	// database metrics
 	databaseTxBatchValidationLatencySeconds                     prometheus.Histogram
 	databaseTxBatchQueryVersionLatencySeconds                   prometheus.Histogram
 	databaseTxBatchCommitLatencySeconds                         prometheus.Histogram
@@ -36,6 +37,8 @@ type perfMetrics struct {
 	databaseTxBatchCommitUpdateLatencySeconds                   prometheus.Histogram
 	databaseTxBatchCommitInsertNewKeyWithoutValueLatencySeconds prometheus.Histogram
 	databaseTxBatchCommitInsertNewKeyWithValueLatencySeconds    prometheus.Histogram
+
+	databaseRetryCounterByOperation *prometheus.CounterVec
 }
 
 func newVCServiceMetrics() *perfMetrics {
@@ -167,5 +170,11 @@ func newVCServiceMetrics() *perfMetrics {
 				"inserting new keys without values",
 			Buckets: buckets,
 		}),
+		databaseRetryCounterByOperation: p.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "vcservice",
+			Subsystem: "database_retry",
+			Name:      "per_operation_total",
+			Help:      "Total number of retries per operation name and status",
+		}, []string{"operation_name", "status"}),
 	}
 }

@@ -38,7 +38,6 @@ func vcserviceCmd() *cobra.Command {
 
 	cmd.AddCommand(config.VersionCmd(serviceName, serviceVersion))
 	cmd.AddCommand(startCmd())
-	cmd.AddCommand(clearCmd())
 	return cmd
 }
 
@@ -68,31 +67,5 @@ func startCmd() *cobra.Command {
 		},
 	}
 	utils.Must(config.SetDefaultFlags(v, cmd, &configPath))
-	return cmd
-}
-
-func clearCmd() *cobra.Command {
-	v := config.NewViperWithVCDefaults()
-
-	var (
-		configPath string
-		namespaces []string
-	)
-	cmd := &cobra.Command{
-		Use:   "clear",
-		Short: "Clear the database",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			conf, err := config.ReadVCYamlAndSetupLogging(v, configPath)
-			if err != nil {
-				return err
-			}
-			cmd.SilenceUsage = true
-			cmd.Printf("Clearing database: %v\n", namespaces)
-			return vc.ClearDatabase(cmd.Context(), conf.Database, namespaces)
-		},
-	}
-	utils.Must(config.SetDefaultFlags(v, cmd, &configPath))
-	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "set the namespaces to clear")
 	return cmd
 }

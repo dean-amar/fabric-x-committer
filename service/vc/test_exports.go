@@ -168,10 +168,13 @@ func (env *DatabaseTestEnv) CountAlternateStatus(t *testing.T, status protoblock
 func (env *DatabaseTestEnv) getRowCount(t *testing.T, query string) int {
 	t.Helper()
 	var count int
-	require.NoError(t, env.DB.retry.Execute(t.Context(), func() error {
-		row := env.DB.pool.QueryRow(t.Context(), query)
-		return row.Scan(&count)
-	}))
+	require.NoError(t,
+		env.DB.retry.Execute(t.Context(),
+			"get_row_count",
+			env.DB.metrics.databaseRetryCounterByOperation, func() error {
+				row := env.DB.pool.QueryRow(t.Context(), query)
+				return row.Scan(&count)
+			}))
 
 	return count
 }
@@ -252,7 +255,14 @@ func (env *DatabaseTestEnv) populateDataWithCleanup( //nolint:revive
 	batchStatus *protoblocktx.TransactionsStatus,
 	txIDToHeight transactionIDToHeight,
 ) {
-	require.NoError(t, initDatabaseTables(context.Background(), env.DB.pool, nsIDs))
+	require.NoError(t,
+		initDatabaseTables(t.Context(),
+			env.DB.pool,
+			env.DBConf,
+			env.DB.metrics.databaseRetryCounterByOperation,
+			nsIDs,
+		),
+	)
 
 	_, _, err := env.DB.commit(t.Context(), &statesToBeCommitted{batchStatus: batchStatus, txIDToHeight: txIDToHeight})
 	require.NoError(t, err)

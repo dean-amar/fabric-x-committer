@@ -87,7 +87,7 @@ func PrepareTestEnvWithConnection(t *testing.T, conn *Connection) *Connection {
 		//nolint:usetesting // t.Context is finishing right after the test resulting in context.Deadline error.
 		cleanUpCtx, cleanUpCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cleanUpCancel()
-		assert.NoError(t, DefaultRetry.Execute(cleanUpCtx, func() error {
+		assert.NoError(t, DefaultRetry.Execute(cleanUpCtx, "drop_database", nil, func() error {
 			return conn.DropDB(cleanUpCtx, dbName)
 		}))
 	})
