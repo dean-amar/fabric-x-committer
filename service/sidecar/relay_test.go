@@ -2,7 +2,6 @@ package sidecar
 
 import (
 	"context"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"testing"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/mock"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 

@@ -2,7 +2,6 @@ package dependencygraph
 
 import (
 	"context"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"testing"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"runtime"
 	"strings"
 	"testing"
@@ -28,6 +27,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier/policy"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )

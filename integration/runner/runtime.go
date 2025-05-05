@@ -133,6 +133,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	} else {
 		c.dbEnv = vc.NewDatabaseTestEnvWithCluster(t, conf.DBCluster)
 	}
+
 	t.Log("Allocating ports")
 	s := &c.SystemConfig
 	s.Endpoints.Database = c.dbEnv.DBConf.Endpoints

@@ -30,9 +30,10 @@ type (
 		MaxElapsedTime time.Duration `mapstructure:"max-elapsed-time" yaml:"max-elapsed-time"`
 	}
 
-	SqlExecutionBundle struct {
+	// SQLExecutionBundle contains required information for 'ExecuteSQL' method.
+	SQLExecutionBundle struct {
 		OperationName string
-		SqlStmt       string
+		Stmt          string
 		Pool          *pgxpool.Pool
 		RetryMetrics  *prometheus.CounterVec
 	}
@@ -70,10 +71,10 @@ func (p *RetryProfile) Execute(
 }
 
 // ExecuteSQL executes the given SQL statement until it succeeds or a timeout occurs.
-func (p *RetryProfile) ExecuteSQL(ctx context.Context, execBundle *SqlExecutionBundle, args ...any) error {
+func (p *RetryProfile) ExecuteSQL(ctx context.Context, execBundle *SQLExecutionBundle, args ...any) error {
 	err := p.Execute(ctx, execBundle.OperationName, execBundle.RetryMetrics, func() error {
-		_, err := execBundle.Pool.Exec(ctx, execBundle.SqlStmt, args...)
-		err = errors.Wrapf(err, "failed to execute the SQL statement [%s]", execBundle.SqlStmt)
+		_, err := execBundle.Pool.Exec(ctx, execBundle.Stmt, args...)
+		err = errors.Wrapf(err, "failed to execute the SQL statement [%s]", execBundle.Stmt)
 		if err != nil {
 			logger.Warn(err)
 		}

@@ -121,9 +121,9 @@ func (c *Connection) execute(ctx context.Context, stmt string) error {
 	}
 	defer pool.Close()
 
-	return defaultRetry.ExecuteSQL(ctx, &connection.SqlExecutionBundle{
+	return defaultRetry.ExecuteSQL(ctx, &connection.SQLExecutionBundle{
 		OperationName: "create or drop db",
-		SqlStmt:       stmt,
+		Stmt:          stmt,
 		Pool:          pool,
 	})
 }

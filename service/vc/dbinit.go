@@ -3,13 +3,13 @@ package vc
 import (
 	"context"
 	"fmt"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
 const (
@@ -223,9 +223,9 @@ func NewDatabasePool(ctx context.Context,
 // TODO: merge this file with database.go.
 func (db *database) setupSystemTablesAndNamespaces(ctx context.Context) error {
 	executeSQL := func(operationName, sqlStmt string, args ...any) error {
-		return db.retry.ExecuteSQL(ctx, &connection.SqlExecutionBundle{
+		return db.retry.ExecuteSQL(ctx, &connection.SQLExecutionBundle{
 			OperationName: operationName,
-			SqlStmt:       sqlStmt,
+			Stmt:          sqlStmt,
 			Pool:          db.pool,
 			RetryMetrics:  db.metrics.failedRetriesCounter,
 		}, args...)
@@ -238,14 +238,17 @@ func (db *database) setupSystemTablesAndNamespaces(ctx context.Context) error {
 	}
 	logger.Info("Created tx status table, metadata table, and its methods.")
 
-	if err := executeSQL("metadata_table_initialization", initializeMetadataPrepSQLStmt, []byte(lastCommittedBlockNumberKey), nil); err != nil {
+	if err := executeSQL("metadata_table_initialization",
+		initializeMetadataPrepSQLStmt,
+		[]byte(lastCommittedBlockNumberKey), nil); err != nil {
 		return fmt.Errorf("failed to initialize metadata table: %w", err)
 	}
 
 	for _, nsID := range systemNamespaces {
 		tableName := TableName(nsID)
 		for _, stmt := range createNsTablesAndFuncsTemplates {
-			if err := executeSQL(fmt.Sprintf("creating_table_and_its_methods_for%s", nsID), fmt.Sprintf(stmt, tableName)); err != nil {
+			if err := executeSQL(fmt.Sprintf("creating_table_and_its_methods_for%s", nsID),
+				fmt.Sprintf(stmt, tableName)); err != nil {
 				return fmt.Errorf("failed to create tables and functions for system namespaces: %w", err)
 			}
 		}

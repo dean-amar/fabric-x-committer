@@ -279,9 +279,9 @@ func (env *DatabaseTestEnv) populateData( //nolint:revive
 		}))
 
 	for nsID, writes := range nsToWrites {
-		require.NoError(t, env.DB.retry.ExecuteSQL(t.Context(), &connection.SqlExecutionBundle{
+		require.NoError(t, env.DB.retry.ExecuteSQL(t.Context(), &connection.SQLExecutionBundle{
 			OperationName: fmt.Sprintf("write_to_ns_%v", nsID),
-			SqlStmt:       fmt.Sprintf(insertTemplate, TableName(nsID)),
+			Stmt:          fmt.Sprintf(insertTemplate, TableName(nsID)),
 			Pool:          env.DB.pool,
 			RetryMetrics:  env.DB.metrics.failedRetriesCounter,
 		},

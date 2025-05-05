@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"maps"
 	"strconv"
 	"testing"
@@ -21,6 +20,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator/dependencygraph"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
