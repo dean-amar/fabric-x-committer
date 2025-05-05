@@ -186,7 +186,7 @@ func (db *database) setLastCommittedBlockNumber(ctx context.Context, bInfo *prot
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, bInfo.Number)
 	return db.retry.ExecuteSQL(ctx, &connection.SQLExecutionBundle{
-		OperationName: "setLastCommittedBlockNumber",
+		OperationName: "set_last_committed_block_number",
 		Stmt:          setMetadataPrepSQLStmt,
 		Pool:          db.pool,
 		RetryMetrics:  db.metrics.failedRetriesCounter,
