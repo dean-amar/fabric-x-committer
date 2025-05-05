@@ -22,12 +22,19 @@ func FileExists(path string) bool {
 
 // LazyJSON will lazily marshal a struct for logging purposes.
 type LazyJSON struct {
-	O any
+	O      any
+	Indent string
 }
 
 // String marshals the give object as JSON.
 func (lj *LazyJSON) String() string {
-	p, err := json.Marshal(lj.O)
+	var p []byte
+	var err error
+	if lj.Indent != "" {
+		p, err = json.MarshalIndent(lj.O, "", lj.Indent)
+	} else {
+		p, err = json.Marshal(lj.O)
+	}
 	if err != nil {
 		return fmt.Sprintf("cannot marshal object: %v", err)
 	}
@@ -64,4 +71,14 @@ func Range[T constraints.Integer](start, end T) []T {
 		results = append(results, i)
 	}
 	return results
+}
+
+// ProcessErr wraps a non-nil error with a message using %w for unwrapping.
+// Returns nil if the error is nil, otherwise returns the wrapped error.
+// Example to the call of the function: utils.ProcessErr(g.Wait(), "sidecar has been stopped").
+func ProcessErr(err error, msg string) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", msg, err) //nolint:wrapcheck
+	}
+	return nil
 }

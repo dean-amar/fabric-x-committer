@@ -14,6 +14,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
 )
 
+//nolint:paralleltest // Reduce tests load.
 func TestCreateUpdateNamespace(t *testing.T) {
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
@@ -210,7 +211,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			for _, tx := range tt.txs {
 				c.AddSignatures(t, tx)

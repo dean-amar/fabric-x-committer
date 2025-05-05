@@ -47,6 +47,7 @@ func testSetup(t *testing.T) *runner.CommitterRuntime {
 	return c
 }
 
+//nolint:paralleltest // Reduce tests load.
 func TestDependentHappyPath(t *testing.T) {
 	c := testSetup(t)
 
@@ -147,7 +148,7 @@ func TestDependentHappyPath(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			for _, tx := range tt.txs {
 				for _, ns := range tx.Namespaces {
@@ -164,6 +165,7 @@ func TestDependentHappyPath(t *testing.T) {
 	fmt.Println("done")
 }
 
+//nolint:paralleltest // Reduce tests load.
 func TestReadOnlyConflictsWithCommittedStates(t *testing.T) {
 	c := testSetup(t)
 
@@ -233,7 +235,7 @@ func TestReadOnlyConflictsWithCommittedStates(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			t.Log(tt.name)
 			tx := &protoblocktx.Tx{
@@ -259,6 +261,7 @@ func TestReadOnlyConflictsWithCommittedStates(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // Reduce tests load.
 func TestReadWriteConflictsWithCommittedStates(t *testing.T) {
 	c := testSetup(t)
 
@@ -329,7 +332,7 @@ func TestReadWriteConflictsWithCommittedStates(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			t.Log(tt.name)
 			tx := &protoblocktx.Tx{
@@ -350,6 +353,7 @@ func TestReadWriteConflictsWithCommittedStates(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // Reduce tests load.
 func TestReadWriteConflictsAmongActiveTransactions(t *testing.T) {
 	c := testSetup(t)
 
@@ -500,7 +504,7 @@ func TestReadWriteConflictsAmongActiveTransactions(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			for _, tx := range tt.txs {
 				for _, ns := range tx.Namespaces {
@@ -516,6 +520,7 @@ func TestReadWriteConflictsAmongActiveTransactions(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // Reduce tests load.
 func TestWriteWriteConflictsAmongActiveTransactions(t *testing.T) {
 	c := testSetup(t)
 
@@ -608,7 +613,7 @@ func TestWriteWriteConflictsAmongActiveTransactions(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			for _, tx := range tt.txs {
 				for _, ns := range tx.Namespaces {

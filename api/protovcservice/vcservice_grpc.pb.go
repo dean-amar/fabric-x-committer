@@ -20,12 +20,13 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	ValidationAndCommitService_StartValidateAndCommitStream_FullMethodName = "/protovcservice.ValidationAndCommitService/StartValidateAndCommitStream"
-	ValidationAndCommitService_SetLastCommittedBlockNumber_FullMethodName  = "/protovcservice.ValidationAndCommitService/SetLastCommittedBlockNumber"
-	ValidationAndCommitService_GetLastCommittedBlockNumber_FullMethodName  = "/protovcservice.ValidationAndCommitService/GetLastCommittedBlockNumber"
-	ValidationAndCommitService_GetTransactionsStatus_FullMethodName        = "/protovcservice.ValidationAndCommitService/GetTransactionsStatus"
-	ValidationAndCommitService_GetNamespacePolicies_FullMethodName         = "/protovcservice.ValidationAndCommitService/GetNamespacePolicies"
-	ValidationAndCommitService_GetConfigTransaction_FullMethodName         = "/protovcservice.ValidationAndCommitService/GetConfigTransaction"
+	ValidationAndCommitService_StartValidateAndCommitStream_FullMethodName   = "/protovcservice.ValidationAndCommitService/StartValidateAndCommitStream"
+	ValidationAndCommitService_SetLastCommittedBlockNumber_FullMethodName    = "/protovcservice.ValidationAndCommitService/SetLastCommittedBlockNumber"
+	ValidationAndCommitService_GetLastCommittedBlockNumber_FullMethodName    = "/protovcservice.ValidationAndCommitService/GetLastCommittedBlockNumber"
+	ValidationAndCommitService_GetTransactionsStatus_FullMethodName          = "/protovcservice.ValidationAndCommitService/GetTransactionsStatus"
+	ValidationAndCommitService_GetNamespacePolicies_FullMethodName           = "/protovcservice.ValidationAndCommitService/GetNamespacePolicies"
+	ValidationAndCommitService_GetConfigTransaction_FullMethodName           = "/protovcservice.ValidationAndCommitService/GetConfigTransaction"
+	ValidationAndCommitService_SetupSystemTablesAndNamespaces_FullMethodName = "/protovcservice.ValidationAndCommitService/SetupSystemTablesAndNamespaces"
 )
 
 // ValidationAndCommitServiceClient is the client API for ValidationAndCommitService service.
@@ -38,6 +39,7 @@ type ValidationAndCommitServiceClient interface {
 	GetTransactionsStatus(ctx context.Context, in *protoblocktx.QueryStatus, opts ...grpc.CallOption) (*protoblocktx.TransactionsStatus, error)
 	GetNamespacePolicies(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.NamespacePolicies, error)
 	GetConfigTransaction(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.ConfigTransaction, error)
+	SetupSystemTablesAndNamespaces(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type validationAndCommitServiceClient struct {
@@ -124,6 +126,15 @@ func (c *validationAndCommitServiceClient) GetConfigTransaction(ctx context.Cont
 	return out, nil
 }
 
+func (c *validationAndCommitServiceClient) SetupSystemTablesAndNamespaces(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, ValidationAndCommitService_SetupSystemTablesAndNamespaces_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ValidationAndCommitServiceServer is the server API for ValidationAndCommitService service.
 // All implementations must embed UnimplementedValidationAndCommitServiceServer
 // for forward compatibility
@@ -134,6 +145,7 @@ type ValidationAndCommitServiceServer interface {
 	GetTransactionsStatus(context.Context, *protoblocktx.QueryStatus) (*protoblocktx.TransactionsStatus, error)
 	GetNamespacePolicies(context.Context, *Empty) (*protoblocktx.NamespacePolicies, error)
 	GetConfigTransaction(context.Context, *Empty) (*protoblocktx.ConfigTransaction, error)
+	SetupSystemTablesAndNamespaces(context.Context, *Empty) (*Empty, error)
 	mustEmbedUnimplementedValidationAndCommitServiceServer()
 }
 
@@ -158,6 +170,9 @@ func (UnimplementedValidationAndCommitServiceServer) GetNamespacePolicies(contex
 }
 func (UnimplementedValidationAndCommitServiceServer) GetConfigTransaction(context.Context, *Empty) (*protoblocktx.ConfigTransaction, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetConfigTransaction not implemented")
+}
+func (UnimplementedValidationAndCommitServiceServer) SetupSystemTablesAndNamespaces(context.Context, *Empty) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetupSystemTablesAndNamespaces not implemented")
 }
 func (UnimplementedValidationAndCommitServiceServer) mustEmbedUnimplementedValidationAndCommitServiceServer() {
 }
@@ -289,6 +304,24 @@ func _ValidationAndCommitService_GetConfigTransaction_Handler(srv interface{}, c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ValidationAndCommitService_SetupSystemTablesAndNamespaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ValidationAndCommitServiceServer).SetupSystemTablesAndNamespaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ValidationAndCommitService_SetupSystemTablesAndNamespaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ValidationAndCommitServiceServer).SetupSystemTablesAndNamespaces(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ValidationAndCommitService_ServiceDesc is the grpc.ServiceDesc for ValidationAndCommitService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -315,6 +348,10 @@ var ValidationAndCommitService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConfigTransaction",
 			Handler:    _ValidationAndCommitService_GetConfigTransaction_Handler,
+		},
+		{
+			MethodName: "SetupSystemTablesAndNamespaces",
+			Handler:    _ValidationAndCommitService_SetupSystemTablesAndNamespaces_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

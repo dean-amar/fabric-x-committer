@@ -145,7 +145,7 @@ func openConnections(config *ConnectionConfig) (*tls.Config, []*OrdererConnectio
 		tlsCredentials = insecure.NewCredentials()
 	}
 
-	grpcConnections, err := connection.OpenLazyConnections(config.Endpoints, tlsCredentials)
+	grpcConnections, err := connection.OpenConnections(config.Endpoints, tlsCredentials)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to open connections")
 	}

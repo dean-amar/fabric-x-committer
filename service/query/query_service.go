@@ -46,7 +46,7 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
-	pool, poolErr := vc.NewDatabasePool(ctx, q.config.Database, q.metrics.retryOperationStatusCounter)
+	pool, poolErr := vc.NewDatabasePool(ctx, q.config.Database, q.metrics.failedRetriesCounter)
 	if poolErr != nil {
 		return poolErr
 	}
@@ -92,7 +92,7 @@ func (q *Service) BeginView(
 		if err != nil {
 			return nil, err
 		}
-		if q.batcher.makeView(viewID, params) {
+		if q.batcher.makeView(viewID, params) { //nolint:contextcheck // false positive.
 			return &protoqueryservice.View{Id: viewID}, nil
 		}
 	}

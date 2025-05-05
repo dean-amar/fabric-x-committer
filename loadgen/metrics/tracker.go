@@ -1,12 +1,12 @@
 package metrics
 
 import (
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 )
 
@@ -14,7 +14,7 @@ var logger = logging.New("tracker")
 
 // latencyReceiverSender is used to track TX E2E latency.
 type latencyReceiverSender struct {
-	latencyTracker sync.Map
+	latencyTracker utils.SyncMap[string, time.Time]
 	validLatency   prometheus.Histogram
 	invalidLatency prometheus.Histogram
 	blockSampler   NumberTracingSampler
@@ -25,16 +25,11 @@ type latencyReceiverSender struct {
 //
 //nolint:revive // parameter 'success' seems to be a control flag, but it is not.
 func (c *latencyReceiverSender) onReceiveTransaction(txID string, success bool) {
-	t, loaded := c.latencyTracker.LoadAndDelete(txID)
+	start, loaded := c.latencyTracker.LoadAndDelete(txID)
 	if !loaded {
 		return
 	}
 	logger.Debugf("Tracked transaction %s returned with status: %v", txID, success)
-	start, okCast := t.(time.Time)
-	if !okCast {
-		// Should never happen.
-		return
-	}
 	duration := time.Since(start).Seconds()
 	if success {
 		c.validLatency.Observe(duration)

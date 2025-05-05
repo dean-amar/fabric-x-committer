@@ -14,6 +14,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
 )
 
+//nolint:paralleltest // Reduce tests load.
 func TestQueryService(t *testing.T) {
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
@@ -24,7 +25,7 @@ func TestQueryService(t *testing.T) {
 	c.Start(t, runner.FullTxPathWithQuery)
 	c.CreateNamespacesAndCommit(t, "1", "2")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute*5)
 	t.Cleanup(cancel)
 
 	insertions := []struct {

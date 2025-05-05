@@ -1,11 +1,11 @@
 package monitoring
 
 import (
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"math"
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
@@ -52,9 +52,7 @@ func RequireConnectionMetrics(
 	connFailure, err := connMetrics.FailureTotal.GetMetricWithLabelValues(label)
 	require.NoError(t, err)
 
-	require.Eventuallyf(t, func() bool {
-		return math.Abs(testutil.ToFloat64(connStatus)-float64(expected.Status)) < 1e-10
-	}, 30*time.Second, 200*time.Millisecond, "connection status does not match expected: %d", expected.Status)
-	require.InDelta(t, float64(expected.FailureTotal), testutil.ToFloat64(connFailure), 1e-10)
-	require.InDelta(t, float64(expected.Status), testutil.ToFloat64(connStatus), 1e-10)
+	promutil.EventuallyIntMetric(t, expected.Status, connStatus, 30*time.Second, 200*time.Millisecond)
+	promutil.RequireIntMetricValue(t, expected.FailureTotal, connFailure)
+	promutil.RequireIntMetricValue(t, expected.Status, connStatus)
 }

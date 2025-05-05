@@ -11,6 +11,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
 )
 
+//nolint:paralleltest // Reduce tests load.
 func TestMixOfValidAndInvalidSign(t *testing.T) { //nolint:gocognit
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
@@ -94,7 +95,7 @@ func TestMixOfValidAndInvalidSign(t *testing.T) { //nolint:gocognit
 	}
 
 	v0 := types.VersionNumber(0).Bytes()
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			for i, tx := range tt.txs {
 				for _, ns := range tx.Namespaces {

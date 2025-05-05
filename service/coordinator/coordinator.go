@@ -15,6 +15,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator/dependencygraph"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
@@ -215,19 +216,29 @@ func (c *Service) Run(ctx context.Context) error {
 		return g.Wait()
 	}
 
-	if err := c.validatorCommitterMgr.recoverPolicyManagerFromStateDB(ctx); err != nil {
+	// We attempt to recover the policy manager and the last committed block number from the state DB.
+	// To prevent crashing due to intermittent connectivity issues to the VC, we retry the recovery.
+	// TODO: add retry policy to config.
+	r := connection.RetryProfile{}
+	if err := r.Execute(ctx, "recover_policy_from_state", nil, func() error {
+		return c.validatorCommitterMgr.recoverPolicyManagerFromStateDB(ctx)
+	}); err != nil {
 		return err
 	}
-
-	lastCommittedBlock, err := c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
-	if err != nil {
-		if !grpcerror.HasCode(err, codes.NotFound) {
-			return err
+	if err := r.Execute(ctx, "get_last_committed_block_number", nil, func() error {
+		lastCommittedBlock, getErr := c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
+		if grpcerror.HasCode(getErr, codes.NotFound) {
+			// no block has been committed.
+			c.nextExpectedBlockNumberToBeReceived.Store(0)
+			return nil
 		}
-		// no block has been committed.
-		c.nextExpectedBlockNumberToBeReceived.Store(0)
-	} else {
+		if getErr != nil {
+			return getErr
+		}
 		c.nextExpectedBlockNumberToBeReceived.Store(lastCommittedBlock.Number + 1)
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	c.initializationDone.SignalReady()

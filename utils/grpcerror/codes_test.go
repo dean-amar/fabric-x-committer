@@ -71,7 +71,7 @@ func TestHasCodeWithGRPCService(t *testing.T) {
 		protovcservice.RegisterValidationAndCommitServiceServer(server, vc)
 	})
 
-	conn, err := connection.LazyConnect(connection.NewDialConfig(&vcGrpc.Configs[0].Endpoint))
+	conn, err := connection.Connect(connection.NewDialConfig(&vcGrpc.Configs[0].Endpoint))
 	require.NoError(t, err)
 
 	client := protovcservice.NewValidationAndCommitServiceClient(conn)

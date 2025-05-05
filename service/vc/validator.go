@@ -92,12 +92,12 @@ func (v *transactionValidator) validate(ctx context.Context) error {
 		logger.Debug("Batch of prepared TXs in the validator.")
 		prepTx.Debug()
 		start := time.Now()
-		// Step 1: we validate reads and collect mismatching reads per namespace.
+		// Step 1: we validate reads and collect conflicting reads per namespace.
 		// TODO: We can run per namespace validation in parallel. However, we should not
 		// 		 over parallelize and make contention among preparer, validator, and committer
 		//       goroutines to acquire the CPU. Based on performance evaluation, we can decide
 		//       to run per namespace validation in parallel.
-		nsToMismatchingReads, valErr := v.validateReads(ctx, prepTx.nsToReads)
+		nsToReadConflicts, valErr := v.validateReads(ctx, prepTx.nsToReads)
 		if valErr != nil {
 			return valErr
 		}
@@ -111,8 +111,8 @@ func (v *transactionValidator) validate(ctx context.Context) error {
 			invalidTxStatus:       prepTx.invalidTxIDStatus,
 			txIDToHeight:          prepTx.txIDToHeight,
 		}
-		if matchErr := vTxs.updateMismatch(nsToMismatchingReads); matchErr != nil {
-			return matchErr
+		if err := vTxs.invalidateTxsOnReadConflicts(nsToReadConflicts); err != nil {
+			return err
 		}
 
 		promutil.Observe(v.metrics.validatorTxBatchLatencySeconds, time.Since(start))
@@ -127,22 +127,22 @@ func (v *transactionValidator) validate(ctx context.Context) error {
 func (v *transactionValidator) validateReads(
 	ctx context.Context,
 	nsToReads namespaceToReads,
-) (namespaceToReads /* mismatched */, error) {
-	// nsToMismatchingReads maintains all mismatching reads per namespace.
-	// nsID -> mismatchingReads{keys, versions}.
-	nsToMismatchingReads := make(namespaceToReads)
+) (namespaceToReads /* conflicts */, error) {
+	// nsToReadConflicts maintains all conflicting reads per namespace.
+	// nsID -> readConflicts{keys, versions}.
+	nsToReadConflicts := make(namespaceToReads)
 
 	for nsID, r := range nsToReads {
-		mismatch, err := v.db.validateNamespaceReads(ctx, nsID, r)
+		conflicts, err := v.db.validateNamespaceReads(ctx, nsID, r)
 		if err != nil {
 			return nil, err
 		}
 
-		mismatchingReads := nsToMismatchingReads.getOrCreate(nsID)
-		mismatchingReads.appendMany(mismatch.keys, mismatch.versions)
+		readConflicts := nsToReadConflicts.getOrCreate(nsID)
+		readConflicts.appendMany(conflicts.keys, conflicts.versions)
 	}
 
-	return nsToMismatchingReads, nil
+	return nsToReadConflicts, nil
 }
 
 func (p *preparedTransactions) Debug() {
@@ -157,16 +157,16 @@ func (p *preparedTransactions) Debug() {
 		len(p.txIDToNsNewWrites), len(p.readToTxIDs))
 }
 
-func (v *validatedTransactions) updateMismatch(nsToMismatchingReads namespaceToReads) error {
-	// For each mismatching read, we find the transactions which made the
+func (v *validatedTransactions) invalidateTxsOnReadConflicts(nsToReadConflicts namespaceToReads) error {
+	// For each conflicting read, we find the transactions which made the
 	// read and mark them as invalid. Further, the writes of those invalid
 	// transactions are removed from the valid writes.
-	for nsID, mismatchingReads := range nsToMismatchingReads {
-		for index, key := range mismatchingReads.keys {
+	for nsID, readConflicts := range nsToReadConflicts {
+		for index, key := range readConflicts.keys {
 			r := comparableRead{
 				nsID:    nsID,
 				key:     string(key),
-				version: string(mismatchingReads.versions[index]),
+				version: string(readConflicts.versions[index]),
 			}
 
 			txIDs, ok := v.readToTxIDs[r]

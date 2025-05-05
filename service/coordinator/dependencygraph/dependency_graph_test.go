@@ -82,7 +82,7 @@ func TestDependencyGraph(t *testing.T) {
 
 	// t1 has 3 dependent transactions, t2, t3, and t4
 	require.Eventually(t, func() bool {
-		return getLengthOfDependentTx(t, actualT1.dependentTxs) == 3
+		return actualT1.dependentTxs.Count() == 3
 	}, 2*time.Second, 200*time.Millisecond)
 
 	validatedTxs <- TxNodeBatch{actualT1}
@@ -94,7 +94,7 @@ func TestDependencyGraph(t *testing.T) {
 	require.Equal(t, t2.Id, actualT2.Tx.ID)
 
 	// t2 has 2 dependent transactions, t3 and t4
-	require.Equal(t, 2, getLengthOfDependentTx(t, actualT2.dependentTxs))
+	require.Equal(t, 2, actualT2.dependentTxs.Count())
 
 	validatedTxs <- TxNodeBatch{actualT2}
 
@@ -160,7 +160,7 @@ func TestDependencyGraph(t *testing.T) {
 
 	// t0 has 2 dependent transactions: t1, and t2
 	require.Eventually(t, func() bool {
-		return getLengthOfDependentTx(t, actualT0.dependentTxs) == 2
+		return actualT0.dependentTxs.Count() == 2
 	}, 2*time.Second, 200*time.Millisecond)
 
 	validatedTxs <- TxNodeBatch{actualT0}
@@ -173,7 +173,7 @@ func TestDependencyGraph(t *testing.T) {
 
 	// t1 has 3 dependent transactions, t2, t3, and t4
 	require.Eventually(t, func() bool {
-		return getLengthOfDependentTx(t, actualT1.dependentTxs) == 3
+		return actualT1.dependentTxs.Count() == 3
 	}, 2*time.Second, 200*time.Millisecond)
 
 	validatedTxs <- TxNodeBatch{actualT1}
@@ -185,7 +185,7 @@ func TestDependencyGraph(t *testing.T) {
 	require.Equal(t, t2.Id, actualT2.Tx.ID)
 
 	// t2 has 2 dependent transactions, t3 and t4
-	require.Equal(t, 2, getLengthOfDependentTx(t, actualT2.dependentTxs))
+	require.Equal(t, 2, actualT2.dependentTxs.Count())
 
 	validatedTxs <- TxNodeBatch{actualT2}
 

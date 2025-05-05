@@ -7,7 +7,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
@@ -65,22 +64,13 @@ func NewDialConfig(endpoint WithAddress) *DialConfig {
 func NewDialConfigWithCreds(endpoint WithAddress, creds credentials.TransportCredentials) *DialConfig {
 	return &DialConfig{
 		WithAddress: endpoint,
-		DialOpts:    newDialOptionWithCreds(creds),
-	}
-}
-
-// newDialOptionWithCreds creates the default dial options with the given credentials.
-func newDialOptionWithCreds(creds credentials.TransportCredentials) []grpc.DialOption {
-	return []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(maxMsgSize),
-			grpc.MaxCallSendMsgSize(maxMsgSize),
-		),
-		//nolint:staticcheck // TODO: remove once all use of [Connect] are removed.
-		grpc.WithBlock(),
-		//nolint:staticcheck // TODO: remove once all use of [Connect] are removed.
-		grpc.WithReturnConnectionError(),
+		DialOpts: []grpc.DialOption{
+			grpc.WithTransportCredentials(creds),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(maxMsgSize),
+				grpc.MaxCallSendMsgSize(maxMsgSize),
+			),
+		},
 	}
 }
 
@@ -124,28 +114,8 @@ func filterAcceptableCloseErr(err error) error {
 }
 
 // Connect creates a new [grpc.ClientConn] with the given [DialConfig].
-// It attempts to connect immediately.
-//
-// Deprecated: use LazyConnect instead. Will be supported throughout 1.x.
-func Connect(config *DialConfig) (*grpc.ClientConn, error) {
-	config.DialOpts = append(config.DialOpts, grpc.WithDefaultServiceConfig(GrpcConfig))
-	ctx, cancel := context.WithTimeout(context.TODO(), 90*time.Second)
-	defer cancel()
-
-	address := config.Address()
-	cc, err := grpc.DialContext(ctx, address, config.DialOpts...)
-	if err != nil {
-		logger.Errorf("Error connecting to %s: %v", address, err)
-		return nil, err
-	}
-
-	return cc, nil
-}
-
-// LazyConnect creates a new [grpc.ClientConn] with the given [DialConfig].
 // It will not attempt to create a connection with the remote.
-// TODO: rename to Connect once all calls to [Connect] will be removed.
-func LazyConnect(config *DialConfig) (*grpc.ClientConn, error) {
+func Connect(config *DialConfig) (*grpc.ClientConn, error) {
 	address := config.Address()
 	config.DialOpts = append(config.DialOpts, grpc.WithDefaultServiceConfig(GrpcConfig))
 	cc, err := grpc.NewClient(address, config.DialOpts...)
@@ -156,16 +126,15 @@ func LazyConnect(config *DialConfig) (*grpc.ClientConn, error) {
 	return cc, nil
 }
 
-// OpenLazyConnections opens connections with multiple remotes.
-// TODO: rename to OpenConnections once all calls to [Connect] will be removed.
-func OpenLazyConnections[T WithAddress](
+// OpenConnections opens connections with multiple remotes.
+func OpenConnections[T WithAddress](
 	endpoints []T,
 	transportCredentials credentials.TransportCredentials,
 ) ([]*grpc.ClientConn, error) {
 	logger.Infof("Opening connections to %d endpoints: %v.\n", len(endpoints), endpoints)
 	connections := make([]*grpc.ClientConn, len(endpoints))
 	for i, endpoint := range endpoints {
-		conn, err := LazyConnect(NewDialConfigWithCreds(endpoint, transportCredentials))
+		conn, err := Connect(NewDialConfigWithCreds(endpoint, transportCredentials))
 		if err != nil {
 			logger.Errorf("Error connecting: %v", err)
 			CloseConnectionsLog(connections[:i]...)

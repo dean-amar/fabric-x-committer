@@ -2,16 +2,12 @@ package test
 
 import (
 	"context"
-	"io"
-	"net/http"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/onsi/gomega"
-	"github.com/prometheus/client_golang/prometheus"
-	promgo "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -43,51 +39,6 @@ func FailHandler(t *testing.T) {
 		t.Errorf("received error message: %s", message)
 		t.FailNow()
 	})
-}
-
-// CheckMetrics checks the metrics endpoint for the expected metrics.
-func CheckMetrics(t *testing.T, client *http.Client, url string, expectedMetrics []string) {
-	t.Helper()
-	resp, err := client.Get(url)
-	require.NoError(t, err)
-
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	bys, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	metricsOutput := string(bys)
-
-	for _, expected := range expectedMetrics {
-		require.Contains(t, metricsOutput, expected)
-	}
-}
-
-// GetMetricValue returns the value of a prometheus metric.
-func GetMetricValue(t *testing.T, m prometheus.Metric) float64 {
-	t.Helper()
-	gm := promgo.Metric{}
-	require.NoError(t, m.Write(&gm))
-
-	switch {
-	case gm.Gauge != nil:
-		return gm.Gauge.GetValue()
-	case gm.Counter != nil:
-		return gm.Counter.GetValue()
-	case gm.Untyped != nil:
-		return gm.Untyped.GetValue()
-	case gm.Summary != nil:
-		return gm.Summary.GetSampleSum()
-	case gm.Histogram != nil:
-		return gm.Histogram.GetSampleSum()
-	default:
-		require.Fail(t, "unsupported metric")
-		return 0
-	}
 }
 
 // RunGrpcServerForTest starts a GRPC server using a register method.

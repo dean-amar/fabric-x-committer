@@ -37,8 +37,6 @@ type DBClusterController struct {
 // StartYugaCluster creates a Yugabyte cluster in a Docker environment and returns the first node connection properties.
 func StartYugaCluster(ctx context.Context, t *testing.T, clusterSize uint) (*DBClusterController, *dbtest.Connection) {
 	t.Helper()
-	require.GreaterOrEqual(t, clusterSize, uint(0))
-
 	cluster := &DBClusterController{}
 
 	t.Logf("starting yuga cluster of size: %d", clusterSize)

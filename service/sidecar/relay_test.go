@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"testing"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/mock"
-	sidecartest "github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/test"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
@@ -73,34 +73,29 @@ func newRelayTestEnv(t *testing.T) *relayTestEnv {
 func TestRelayNormalBlock(t *testing.T) {
 	t.Parallel()
 	relayEnv := newRelayTestEnv(t)
-	blk0 := sidecartest.CreateBlockForTest(nil, 0, nil, [3]string{"tx1", "tx2", "tx3"})
+	blk0 := createBlockForTest(0, nil, [3]string{"tx1", "tx2", "tx3"})
 	require.Nil(t, blk0.Metadata)
 	relayEnv.incomingBlockToBeCommitted <- blk0
-	require.Eventually(t, func() bool {
-		return float64(3) == test.GetMetricValue(t, relayEnv.metrics.transactionsSentTotal)
-	}, 5*time.Second, 10*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.transactionsSentTotal, 5*time.Second, 10*time.Millisecond)
 	committedBlock0 := <-relayEnv.committedBlock
-	require.InEpsilon(
-		t,
-		float64(3),
-		test.GetMetricValue(t, relayEnv.metrics.transactionsStatusReceivedTotal.WithLabelValues(
-			protoblocktx.Status_COMMITTED.String())),
-		1e-10,
-	)
+	promutil.RequireIntMetricValue(t, 3, relayEnv.metrics.transactionsStatusReceivedTotal.WithLabelValues(
+		protoblocktx.Status_COMMITTED.String(),
+	))
 	expectedMetadata := &common.BlockMetadata{
 		Metadata: [][]byte{nil, nil, {valid, valid, valid}},
 	}
 	require.Equal(t, expectedMetadata, committedBlock0.Metadata)
 	require.Equal(t, blk0, committedBlock0)
 
-	require.Greater(t, test.GetMetricValue(t, relayEnv.metrics.blockProcessingInRelaySeconds), float64(0))
-	require.Greater(t, test.GetMetricValue(t, relayEnv.metrics.transactionStatusesProcessingInRelaySeconds), float64(0))
+	m := relayEnv.metrics
+	require.Greater(t, promutil.GetMetricValue(t, m.blockProcessingInRelaySeconds), float64(0))
+	require.Greater(t, promutil.GetMetricValue(t, m.transactionStatusesProcessingInRelaySeconds), float64(0))
 }
 
 func TestBlockWithDuplicateTransactions(t *testing.T) {
 	t.Parallel()
 	relayEnv := newRelayTestEnv(t)
-	blk0 := sidecartest.CreateBlockForTest(nil, 0, nil, [3]string{"tx1", "tx1", "tx1"})
+	blk0 := createBlockForTest(0, nil, [3]string{"tx1", "tx1", "tx1"})
 	require.Nil(t, blk0.Metadata)
 	relayEnv.incomingBlockToBeCommitted <- blk0
 	committedBlock0 := <-relayEnv.committedBlock
@@ -110,7 +105,7 @@ func TestBlockWithDuplicateTransactions(t *testing.T) {
 	require.Equal(t, expectedMetadata, committedBlock0.Metadata)
 	require.Equal(t, blk0, committedBlock0)
 
-	blk1 := sidecartest.CreateBlockForTest(nil, 1, nil, [3]string{"tx2", "tx3", "tx2"})
+	blk1 := createBlockForTest(1, nil, [3]string{"tx2", "tx3", "tx2"})
 	require.Nil(t, blk1.Metadata)
 	relayEnv.incomingBlockToBeCommitted <- blk1
 	committedBlock1 := <-relayEnv.committedBlock
@@ -152,4 +147,37 @@ func createConfigBlockForTest(_ *testing.T, number uint64) *common.Block {
 		Header: &common.BlockHeader{Number: number},
 		Data:   &common.BlockData{Data: [][]byte{data}},
 	}
+}
+
+// createBlockForTest creates sample block with three txIDs.
+func createBlockForTest(number uint64, preBlockHash []byte, txIDs [3]string) *common.Block {
+	return &common.Block{
+		Header: &common.BlockHeader{
+			Number:       number,
+			PreviousHash: preBlockHash,
+		},
+		Data: &common.BlockData{
+			Data: [][]byte{
+				createEnvelopeBytesForTest(txIDs[0]),
+				createEnvelopeBytesForTest(txIDs[1]),
+				createEnvelopeBytesForTest(txIDs[2]),
+			},
+		},
+	}
+}
+
+func createEnvelopeBytesForTest(txID string) []byte {
+	header := &common.Header{
+		ChannelHeader: protoutil.MarshalOrPanic(&common.ChannelHeader{
+			ChannelId: "ch1",
+			TxId:      txID,
+			Type:      int32(common.HeaderType_MESSAGE),
+		}),
+	}
+	return protoutil.MarshalOrPanic(&common.Envelope{
+		Payload: protoutil.MarshalOrPanic(&common.Payload{
+			Header: header,
+			Data:   protoutil.MarshalOrPanic(&protoblocktx.Tx{Id: txID}),
+		}),
+	})
 }

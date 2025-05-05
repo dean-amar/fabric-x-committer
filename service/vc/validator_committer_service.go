@@ -241,6 +241,14 @@ func (vc *ValidatorCommitterService) GetConfigTransaction(
 	return policies, grpcerror.WrapInternalError(err)
 }
 
+// SetupSystemTablesAndNamespaces creates the required system tables and namespaces.
+func (vc *ValidatorCommitterService) SetupSystemTablesAndNamespaces(
+	ctx context.Context,
+	_ *protovcservice.Empty,
+) (*protovcservice.Empty, error) {
+	return nil, grpcerror.WrapInternalError(vc.db.setupSystemTablesAndNamespaces(ctx))
+}
+
 // StartValidateAndCommitStream is the function that starts the stream between the client and the service.
 // It receives transactions from the client, prepares them, validates them and commits them to the database.
 // It also sends the status of the transactions to the client.
@@ -357,7 +365,7 @@ func (vc *ValidatorCommitterService) sendTransactionStatus(
 			}
 		}
 
-		logger.Debug("Sent transaction status update: Committed: %d, MVCC Conflicts: %d, Duplicates: %d, Total: %d",
+		logger.Debugf("Sent transaction status update: Committed: %d, MVCC Conflicts: %d, Duplicates: %d, Total: %d",
 			committed, mvcc, dup, len(txStatus.Status))
 		promutil.AddToCounter(vc.metrics.transactionCommittedTotal, committed)
 		promutil.AddToCounter(vc.metrics.transactionMVCCConflictTotal, mvcc)

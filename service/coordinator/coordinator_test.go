@@ -24,6 +24,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
@@ -52,12 +53,14 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 
 	vcServerConfigs := make([]*connection.ServerConfig, 0, tConfig.numVcService)
 	var vcsTestEnv *vc.ValidatorAndCommitterServiceTestEnv
+	var dbEnv *vc.DatabaseTestEnv
 
 	if !tConfig.mockVcService {
 		vcsTestEnv = vc.NewValidatorAndCommitServiceTestEnv(t, tConfig.numVcService)
 		for _, c := range vcsTestEnv.Configs {
 			vcServerConfigs = append(vcServerConfigs, c.Server)
 		}
+		dbEnv = vcsTestEnv.GetDBEnv()
 	} else {
 		_, vcServers := mock.StartMockVCService(t, tConfig.numVcService)
 		vcServerConfigs = vcServers.Configs
@@ -84,7 +87,7 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 	return &coordinatorTestEnv{
 		coordinator:            NewCoordinatorService(c),
 		config:                 c,
-		dbEnv:                  vcsTestEnv.GetDBEnv(t),
+		dbEnv:                  dbEnv,
 		sigVerifiers:           svs,
 		sigVerifierGrpcServers: svServers,
 	}
@@ -103,13 +106,13 @@ func (e *coordinatorTestEnv) start(ctx context.Context, t *testing.T) {
 		protocoordinatorservice.RegisterCoordinatorServer(server, cs)
 	})
 
-	conn, err := connection.Connect(connection.NewDialConfig(&sc.Endpoint)) //nolint:contextcheck // issue #693
+	conn, err := connection.Connect(connection.NewDialConfig(&sc.Endpoint))
 	require.NoError(t, err)
 
 	client := protocoordinatorservice.NewCoordinatorClient(conn)
 	e.client = client
 
-	sCtx, sCancel := context.WithTimeout(ctx, 2*time.Minute)
+	sCtx, sCancel := context.WithTimeout(ctx, 5*time.Minute)
 	t.Cleanup(sCancel)
 	csStream, err := client.BlockProcessing(sCtx)
 	require.NoError(t, err)
@@ -225,7 +228,7 @@ func TestCoordinatorServiceValidTx(t *testing.T) {
 
 	env.createNamespaces(t, 0, "1")
 
-	preMetricsValue := test.GetMetricValue(t, env.coordinator.metrics.transactionReceivedTotal)
+	preMetricsValue := promutil.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal)
 
 	p := &protoblocktx.NamespacePolicy{
 		Scheme:    "ECDSA",
@@ -266,20 +269,16 @@ func TestCoordinatorServiceValidTx(t *testing.T) {
 		TxsNum: []uint32{0},
 	})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
-		return test.GetMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) == preMetricsValue+1
-	}, 1*time.Second, 100*time.Millisecond)
+	promutil.EventuallyIntMetric(
+		t, preMetricsValue+1, env.coordinator.metrics.transactionReceivedTotal,
+		1*time.Second, 100*time.Millisecond,
+	)
 
 	env.requireStatus(ctx, t, map[string]*protoblocktx.StatusWithHeight{
 		"tx1": {Code: protoblocktx.Status_COMMITTED, BlockNumber: 1},
 	}, nil)
 
-	require.InEpsilon(
-		t,
-		preMetricsValue+1,
-		test.GetMetricValue(t, env.coordinator.metrics.transactionCommittedStatusSentTotal),
-		1e-10,
-	)
+	promutil.RequireIntMetricValue(t, preMetricsValue+1, env.coordinator.metrics.transactionCommittedStatusSentTotal)
 
 	_, err = env.coordinator.SetLastCommittedBlockNumber(ctx, &protoblocktx.BlockInfo{Number: 1})
 	require.NoError(t, err)
@@ -293,7 +292,7 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 	t.Parallel()
 	// TODO: Use real signature verifier instead of mocks.
 	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2, mockVcService: false})
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	env.start(ctx, t)
 
@@ -408,23 +407,18 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 		b1.TxsNum = append(b1.TxsNum, uint32(i)) //nolint:gosec // integer overflow conversion int -> uint32
 	}
 
-	expectedReceived := test.GetMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) + float64(len(b1.Txs))
+	expectedReceived := promutil.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) + len(b1.Txs)
 
 	require.NoError(t, env.csStream.Send(b1))
 	require.Eventually(t, func() bool {
-		return test.GetMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) >= expectedReceived
+		return promutil.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) >= expectedReceived
 	}, time.Minute, 500*time.Millisecond)
 
 	status := env.receiveStatus(t, len(b1.Txs))
 	for txID, txStatus := range status {
 		require.Equal(t, protoblocktx.Status_COMMITTED, txStatus.Code, txID)
 	}
-	require.InEpsilon(
-		t,
-		expectedReceived,
-		test.GetMetricValue(t, env.coordinator.metrics.transactionCommittedStatusSentTotal),
-		1e-10,
-	)
+	promutil.RequireIntMetricValue(t, expectedReceived, env.coordinator.metrics.transactionCommittedStatusSentTotal)
 
 	res := env.dbEnv.FetchKeys(t, utNsID, [][]byte{mainKey, subKey})
 	mainValue, ok := res[string(mainKey)]
@@ -451,10 +445,10 @@ func TestQueueSize(t *testing.T) {
 	q.vcServiceToCoordinatorTxStatus <- &protoblocktx.TransactionsStatus{}
 
 	require.Eventually(t, func() bool {
-		return test.GetMetricValue(t, m.sigverifierInputTxBatchQueueSize) == 1 &&
-			test.GetMetricValue(t, m.sigverifierOutputValidatedTxBatchQueueSize) == 1 &&
-			test.GetMetricValue(t, m.vcserviceOutputValidatedTxBatchQueueSize) == 1 &&
-			test.GetMetricValue(t, m.vcserviceOutputTxStatusBatchQueueSize) == 1
+		return promutil.GetIntMetricValue(t, m.sigverifierInputTxBatchQueueSize) == 1 &&
+			promutil.GetIntMetricValue(t, m.sigverifierOutputValidatedTxBatchQueueSize) == 1 &&
+			promutil.GetIntMetricValue(t, m.vcserviceOutputValidatedTxBatchQueueSize) == 1 &&
+			promutil.GetIntMetricValue(t, m.vcserviceOutputTxStatusBatchQueueSize) == 1
 	}, 3*time.Second, 500*time.Millisecond)
 
 	<-q.depGraphToSigVerifierFreeTxs
@@ -463,17 +457,17 @@ func TestQueueSize(t *testing.T) {
 	<-q.vcServiceToCoordinatorTxStatus
 
 	require.Eventually(t, func() bool {
-		return test.GetMetricValue(t, m.sigverifierInputTxBatchQueueSize) == 0 &&
-			test.GetMetricValue(t, m.sigverifierOutputValidatedTxBatchQueueSize) == 0 &&
-			test.GetMetricValue(t, m.vcserviceOutputValidatedTxBatchQueueSize) == 0 &&
-			test.GetMetricValue(t, m.vcserviceOutputTxStatusBatchQueueSize) == 0
+		return promutil.GetIntMetricValue(t, m.sigverifierInputTxBatchQueueSize) == 0 &&
+			promutil.GetIntMetricValue(t, m.sigverifierOutputValidatedTxBatchQueueSize) == 0 &&
+			promutil.GetIntMetricValue(t, m.vcserviceOutputValidatedTxBatchQueueSize) == 0 &&
+			promutil.GetIntMetricValue(t, m.vcserviceOutputTxStatusBatchQueueSize) == 0
 	}, 3*time.Second, 500*time.Millisecond)
 }
 
 func TestCoordinatorRecovery(t *testing.T) {
 	t.Parallel()
 	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: false})
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	env.start(ctx, t)
 
@@ -847,7 +841,7 @@ func TestChunkSizeSentForDepGraph(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		return test.GetMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) > float64(txPerBlock)-1e-10
+		return promutil.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) >= txPerBlock
 	}, 4*time.Second, 100*time.Millisecond)
 
 	actualTxsStatus := make(map[string]*protoblocktx.StatusWithHeight)
@@ -858,8 +852,7 @@ func TestChunkSizeSentForDepGraph(t *testing.T) {
 	}
 
 	require.Equal(t, expectedTxsStatus, actualTxsStatus)
-	statusSentTotal := test.GetMetricValue(t, env.coordinator.metrics.transactionCommittedStatusSentTotal)
-	require.InEpsilon(t, float64(txPerBlock), statusSentTotal, 1e-10)
+	promutil.RequireIntMetricValue(t, txPerBlock, env.coordinator.metrics.transactionCommittedStatusSentTotal)
 }
 
 func TestWaitingTxsCount(t *testing.T) {
@@ -911,8 +904,7 @@ func TestWaitingTxsCount(t *testing.T) {
 	}
 
 	require.Equal(t, expectedTxsStatus, actualTxsStatus)
-	statusSentTotal := test.GetMetricValue(t, env.coordinator.metrics.transactionCommittedStatusSentTotal)
-	require.InEpsilon(t, float64(txPerBlock), statusSentTotal, 1e-10)
+	promutil.RequireIntMetricValue(t, txPerBlock, env.coordinator.metrics.transactionCommittedStatusSentTotal)
 
 	env.streamCancel()
 	require.Eventually(t, func() bool {

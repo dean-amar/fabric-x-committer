@@ -36,7 +36,8 @@ type (
 	}
 	sharedLazyTx struct {
 		pgx.Tx
-		m       sync.Mutex
+		m sync.Mutex
+		//nolint:containedctx // used to restrict jobs to the batcher context.
 		ctx     context.Context
 		metrics *perfMetrics
 		options *pgx.TxOptions
@@ -69,7 +70,7 @@ func (t *sharedLazyTx) Acquire(ctx context.Context) (acquiredQuerier, error) {
 		}
 		t.Tx = dbTx
 		m.Inc()
-		context.AfterFunc(t.ctx, func() {
+		context.AfterFunc(t.ctx, func() { //nolint:contextcheck // false positive.
 			m.Dec()
 			// We use background context to rollback transactions to avoid
 			// dangling transactions in the database.

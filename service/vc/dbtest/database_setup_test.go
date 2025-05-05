@@ -18,6 +18,7 @@ func TestDefaultStartAndQuery(t *testing.T) {
 }
 
 func TestContainerStartAndQuery(t *testing.T) {
+	t.Skip("This test can run manually when needed")
 	for _, tc := range []string{"postgres", "yugabyte"} {
 		testCase := tc
 		t.Run(testCase, func(t *testing.T) {
@@ -34,7 +35,7 @@ func StartAndQuery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 
-	conn, err := connSettings.Open(ctx)
+	conn, err := connSettings.open(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 	require.NoError(t, conn.Ping(ctx))

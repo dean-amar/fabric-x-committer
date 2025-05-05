@@ -34,16 +34,14 @@ func Sustain(ctx context.Context, op func() error) error {
 	b := p.NewBackoff()
 
 	for ctx.Err() == nil {
-		err := op()
-		if errors.Is(err, ErrNonRetryable) {
-			return err
+		opErr := op()
+		logger.Warnf("Sustained operation error: %s", opErr)
+		if errors.Is(opErr, ErrNonRetryable) {
+			return opErr
 		}
-		if !errors.Is(err, ErrBackOff) {
+		if !errors.Is(opErr, ErrBackOff) {
 			b.Reset()
 		}
-
-		logger.ErrorStackTrace(err)
-
 		if err := waitForNextBackOffDuration(ctx, b); err != nil {
 			return err
 		}

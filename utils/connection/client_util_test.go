@@ -13,7 +13,6 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -29,21 +28,6 @@ import (
 
 func TestGRPCRetry(t *testing.T) {
 	t.Parallel()
-	t.Run("eager connect", func(t *testing.T) {
-		t.Parallel()
-		commonGrpcRetryTest(t, connection.Connect)
-	})
-	t.Run("lazy connect", func(t *testing.T) {
-		t.Parallel()
-		commonGrpcRetryTest(t, connection.LazyConnect)
-	})
-}
-
-func commonGrpcRetryTest(
-	t *testing.T,
-	connectionSetup func(config *connection.DialConfig) (*grpc.ClientConn, error),
-) {
-	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
@@ -53,7 +37,7 @@ func commonGrpcRetryTest(
 
 	vcGrpc := test.StartGrpcServersForTest(ctx, t, 1, regService)
 
-	conn, err := connectionSetup(connection.NewDialConfig(&vcGrpc.Configs[0].Endpoint))
+	conn, err := connection.Connect(connection.NewDialConfig(&vcGrpc.Configs[0].Endpoint))
 	require.NoError(t, err)
 
 	connStatus := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -75,11 +59,11 @@ func commonGrpcRetryTest(
 	label := []string{conn.CanonicalTarget()}
 	connStatusM, err := connStatus.GetMetricWithLabelValues(label...)
 	require.NoError(t, err)
-	require.InDelta(t, connection.Connected, testutil.ToFloat64(connStatusM), 0)
+	promutil.RequireIntMetricValue(t, connection.Connected, connStatusM)
 
 	connFailureM, err := failureCount.GetMetricWithLabelValues(label...)
 	require.NoError(t, err)
-	require.Zero(t, testutil.ToFloat64(connFailureM))
+	promutil.RequireIntMetricValue(t, 0, connFailureM)
 
 	// stopping the grpc server
 	cancel()
@@ -101,13 +85,13 @@ func commonGrpcRetryTest(
 
 	time.Sleep(5 * time.Second)
 
-	require.InDelta(t, float64(1), testutil.ToFloat64(connFailureM), 0)
-	require.InDelta(t, connection.Disconnected, testutil.ToFloat64(connStatusM), 0)
+	promutil.RequireIntMetricValue(t, 1, connFailureM)
+	promutil.RequireIntMetricValue(t, connection.Disconnected, connStatusM)
 
 	test.StartGrpcServersWithConfigForTest(ctx2, t, vcGrpc.Configs, regService)
 
 	wg.Wait()
-	require.InDelta(t, connection.Connected, testutil.ToFloat64(connStatusM), 0)
+	promutil.RequireIntMetricValue(t, connection.Connected, connStatusM)
 }
 
 type fakeBroadcastDeliver struct{}
@@ -173,7 +157,7 @@ func newFilterTestEnv(t *testing.T) *filterTestEnv {
 	env.server = test.RunGrpcServerForTest(serviceCtx, t, env.serverConf, func(server *grpc.Server) {
 		peer.RegisterDeliverServer(server, env.service)
 	})
-	conn, err := connection.LazyConnect(connection.NewDialConfig(&env.serverConf.Endpoint))
+	conn, err := connection.Connect(connection.NewDialConfig(&env.serverConf.Endpoint))
 	require.NoError(t, err)
 	env.client = peer.NewDeliverClient(conn)
 

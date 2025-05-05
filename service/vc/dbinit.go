@@ -3,109 +3,100 @@ package vc
 import (
 	"context"
 	"fmt"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 )
-
-type operation struct {
-	config        *DatabaseConfig
-	operationName string
-	retryMetrics  *prometheus.CounterVec
-	pool          *pgxpool.Pool
-}
-
-const createTxTableStmt = `
-CREATE TABLE IF NOT EXISTS tx_status (
-	tx_id bytea NOT NULL PRIMARY KEY,
-	status integer,
-  height bytea NOT NULL
-);
-`
-
-const queryTxIDsStatus = `
-SELECT tx_id, status, height
-FROM tx_status
-WHERE tx_id = ANY($1)
-`
 
 const (
+	// system tables and function names.
+	txStatusTableName      = "tx_status"
+	metadataTableName      = "metadata"
+	insertTxStatusFuncName = "insert_tx_status"
+
+	// namespace table and function names prefix.
+	nsTableNamePrefix               = "ns_"
+	validateReadsOnNsFuncNamePrefix = "validate_reads_"
+	updateNsStatesFuncNamePrefix    = "update_"
+	insertNsStatesFuncNamePrefix    = "insert_"
+
+	createTxStatusTableSQLStmt = `
+		CREATE TABLE IF NOT EXISTS ` + txStatusTableName + `(
+				tx_id BYTEA NOT NULL PRIMARY KEY,
+				status INTEGER,
+				height BYTEA NOT NULL
+		);
+	`
+
+	createMetadataTableSQLStmt = `
+		CREATE TABLE IF NOT EXISTS ` + metadataTableName + `(
+				key BYTEA NOT NULL PRIMARY KEY,
+				value BYTEA
+		);
+	`
+	createNsTableSQLTempl = `
+		CREATE TABLE IF NOT EXISTS %[1]s (
+				key BYTEA NOT NULL PRIMARY KEY,
+				value BYTEA DEFAULT NULL,
+				version BYTEA DEFAULT '\x00'::BYTEA
+		);
+	`
+
+	initializeMetadataPrepSQLStmt = "INSERT INTO " + metadataTableName + " VALUES ($1, $2) ON CONFLICT DO NOTHING;"
+	setMetadataPrepSQLStmt        = "UPDATE " + metadataTableName + " SET value = $2 WHERE key = $1;"
+	getMetadataPrepSQLStmt        = "SELECT value FROM " + metadataTableName + " WHERE key = $1;"
+	queryTxIDsStatusPrepSQLStmt   = "SELECT tx_id, status, height FROM " + txStatusTableName + " WHERE tx_id = ANY($1);"
+
 	lastCommittedBlockNumberKey = "last committed block number"
+
+	createInsertTxStatusFuncSQLStmt = `
+CREATE OR REPLACE FUNCTION ` + insertTxStatusFuncName + `(
+    IN _tx_ids BYTEA [],
+    IN _statuses INTEGER [],
+    IN _heights BYTEA [],
+    OUT result TEXT,
+    OUT violating BYTEA []
 )
-
-const createMetadataTableStmt = `
-CREATE TABLE IF NOT EXISTS metadata (
-  key bytea NOT NULL PRIMARY KEY,
-  value bytea
-)
-`
-
-const initializeMetadataPrepStmt = `
-INSERT INTO metadata VALUES ($1, $2) ON CONFLICT DO NOTHING;
-`
-
-const setMetadataPrepStmt = `
-  UPDATE metadata SET value = $2 where key = $1;
-`
-
-const getMetadataPrepStmt = `
-  SELECT value from metadata where key = $1;
-`
-
-const commitTxStatus = `
-CREATE OR REPLACE FUNCTION commit_tx_status(
-    IN _tx_ids bytea[], 
-    IN _statuses integer[], 
-    IN _heights bytea[], 
-    OUT result text, 
-    OUT violating bytea[]
-)
-    LANGUAGE plpgsql
 AS $$
-begin
-    result = 'success';
-    violating = NULL;
+BEGIN
+    result := 'success';
+    violating := NULL;
 
-    INSERT INTO tx_status (tx_id, status, height)
-    VALUES (unnest(_tx_ids), unnest(_statuses), unnest(_heights));
+    INSERT INTO ` + txStatusTableName + ` (tx_id, status, height)
+    VALUES (
+        unnest(_tx_ids),
+        unnest(_statuses),
+        unnest(_heights)
+    );
 
-exception
-    when unique_violation then
-        violating = (
-            SELECT array_agg(tx_id) 
-            FROM tx_status
-            WHERE tx_id = ANY(_tx_ids)
-        );
+EXCEPTION
+    WHEN unique_violation THEN
+        SELECT array_agg(t.tx_id)
+        INTO violating
+        FROM ` + txStatusTableName + ` t
+        WHERE t.tx_id = ANY(_tx_ids);
 
-        if cardinality(violating) < cardinality(_tx_ids) then
-            result = cardinality(violating) || '-unique-violation';
-        else
-            violating = NULL;
-            result = 'all-unique-violation';
-        end if;
-end;
-$$;
+        IF cardinality(violating) < cardinality(_tx_ids) THEN
+            result := cardinality(violating)::text || '-unique-violation';
+        ELSE
+            violating := NULL;
+            result := 'all-unique-violation';
+        END IF;
+END;
+$$ LANGUAGE plpgsql;
 `
 
-const createTableStmtTemplate = `
-CREATE TABLE IF NOT EXISTS %[1]s (
-	key bytea NOT NULL PRIMARY KEY,
-	value bytea DEFAULT NULL,
-	version bytea DEFAULT '\x00'::bytea
-);
-`
-
-// We avoid using index for now as it slows down inserts
-// const createIndexStmtTemplate = `CREATE INDEX idx_%[1]s ON %[1]s(version);`
-
-const validateFuncTemplate = `
-CREATE OR REPLACE FUNCTION validate_reads_%[1]s(keys BYTEA[], versions BYTEA[])
-RETURNS TABLE (key_mismatched BYTEA, version_mismatched BYTEA) AS
-$$
+	createValidateReadsOnNsStatesFuncSQLTempl = `
+CREATE OR REPLACE FUNCTION ` + validateReadsOnNsFuncNamePrefix + `%[1]s(
+    keys BYTEA [],
+    versions BYTEA []
+)
+RETURNS TABLE (key_mismatched BYTEA, version_mismatched BYTEA)
+AS $$
 BEGIN
 	RETURN QUERY
 	SELECT
@@ -126,90 +117,82 @@ BEGIN
 		/* if the committed version of a key is different from the read version, we found a mismatch */
 		reads.versions <> %[1]s.version;
 END;
-$$
-LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 `
 
-const commitUpdateFuncTemplate = `
-CREATE OR REPLACE FUNCTION commit_update_%[1]s(_keys BYTEA[], _values BYTEA[], _versions BYTEA[])
-RETURNS VOID AS $$
+	createUpdateNsStatesFuncSQLTempl = `
+CREATE OR REPLACE FUNCTION ` + updateNsStatesFuncNamePrefix + `%[1]s(
+    IN _keys BYTEA [],
+    IN _values BYTEA [],
+    IN _versions BYTEA []
+)
+RETURNS VOID
+AS $$
 BEGIN
     UPDATE %[1]s
-        SET value = t.value,
-            version = t.version
+    SET
+        value = t.value,
+        version = t.version
     FROM (
-        SELECT * FROM UNNEST(_keys, _values, _versions) AS t(key, value, version)
+        SELECT *
+        FROM unnest(_keys, _values, _versions) AS t(key, value, version)
     ) AS t
-    WHERE %[1]s.key = t.key;
+    WHERE
+        %[1]s.key = t.key;
 END;
 $$ LANGUAGE plpgsql;
 `
 
-const commitNewFuncTemplate = `
-CREATE OR REPLACE FUNCTION commit_new_%[1]s(
-	IN _keys bytea[], IN _values bytea[], OUT result text, OUT violating bytea[]
+	createInsertNsStatesFuncSQLTempl = `
+CREATE OR REPLACE FUNCTION ` + insertNsStatesFuncNamePrefix + `%[1]s(
+    IN _keys BYTEA [],
+    IN _values BYTEA [],
+    OUT result TEXT,
+    OUT violating BYTEA []
 )
-    LANGUAGE plpgsql
 AS $$
-begin
-    result = 'success';
-    violating = NULL;
-    INSERT INTO %[1]s (key, value)
-		SELECT k, v
-		FROM UNNEST(_keys, _values) AS t(k, v);
-exception
-when unique_violation then
-    violating = (
-        SELECT array_agg(key) FROM %[1]s
-        WHERE key = ANY(_keys)
-    );
-    if cardinality(violating) < cardinality(_keys) then
-        result = cardinality(violating) || '-unique-violation';
-    else
-        violating = NULL;
-        result = 'all-unique-violation';
-    end if;
-end;$$;
-`
+BEGIN
+    result := 'success';
+    violating := NULL;
 
-const (
-	dropTableStmtTemplate            = "DROP TABLE IF EXISTS %[1]s"
-	dropValidateFuncStmtTemplate     = "DROP FUNCTION IF EXISTS validate_reads_%[1]s"
-	dropCommitUpdateFuncStmtTemplate = "DROP FUNCTION IF EXISTS commit_update_%[1]s"
-	dropCommitNewFuncStmtTemplate    = "DROP FUNCTION IF EXISTS commit_new_%[1]s"
-	dropTxStatusStmt                 = "DROP TABLE IF EXISTS tx_status"
-	dropCommitTxStatusStmt           = "DROP FUNCTION IF EXISTS commit_tx_status"
+    INSERT INTO %[1]s (key, value)
+    SELECT k, v
+    FROM unnest(_keys, _values) AS t(k, v);
+
+EXCEPTION
+    WHEN unique_violation THEN
+        SELECT array_agg(t_existing.key)
+        INTO violating
+        FROM %[1]s t_existing
+        WHERE t_existing.key = ANY (_keys);
+
+        IF cardinality(violating) < cardinality(_keys) THEN
+            result := cardinality(violating)::text || '-unique-violation';
+        ELSE
+            violating := NULL;
+            result := 'all-unique-violation';
+        END IF;
+END;
+$$ LANGUAGE plpgsql;
+`
 )
 
-var initStatements = []string{
-	createTxTableStmt,
-	commitTxStatus,
-	createMetadataTableStmt,
-}
+var (
+	systemNamespaces = []string{types.MetaNamespaceID, types.ConfigNamespaceID}
 
-var initStatementsWithTemplate = []string{
-	createTableStmtTemplate,
-	// createIndexStmtTemplate,
-	validateFuncTemplate,
-	commitUpdateFuncTemplate,
-	commitNewFuncTemplate,
-}
+	createSystemTablesAndFuncsStmts = []string{
+		createTxStatusTableSQLStmt,
+		createInsertTxStatusFuncSQLStmt,
+		createMetadataTableSQLStmt,
+	}
 
-var dropStatements = []string{
-	dropTxStatusStmt,
-	dropCommitTxStatusStmt,
-}
-
-var dropStatementsWithTemplate = []string{
-	dropTableStmtTemplate,
-	dropValidateFuncStmtTemplate,
-	dropCommitUpdateFuncStmtTemplate,
-	dropCommitNewFuncStmtTemplate,
-}
-
-var systemNamespaces = []string{
-	types.MetaNamespaceID, types.ConfigNamespaceID,
-}
+	createNsTablesAndFuncsTemplates = []string{
+		createNsTableSQLTempl,
+		createValidateReadsOnNsStatesFuncSQLTempl,
+		createUpdateNsStatesFuncSQLTempl,
+		createInsertNsStatesFuncSQLTempl,
+	}
+)
 
 // NewDatabasePool creates a new pool from a database config.
 func NewDatabasePool(ctx context.Context,
@@ -228,75 +211,45 @@ func NewDatabasePool(ctx context.Context,
 	var pool *pgxpool.Pool
 	if retryErr := config.Retry.Execute(ctx, "pool_creation", retryMetrics, func() error {
 		pool, err = pgxpool.ConnectConfig(ctx, poolConfig)
-		return errors.Wrap(err, "failed to connect to the database")
+		return errors.Wrap(err, "failed to create a connection pool")
 	}); retryErr != nil {
-		return nil, fmt.Errorf("hint: failed making pool: %w", retryErr) //nolint:wrapcheck
+		return nil, retryErr
 	}
 
 	logger.Info("DB pool created")
 	return pool, nil
 }
 
-func initDatabaseTables(ctx context.Context, op *operation, nsIDs []string) error {
-	for _, stmt := range initStatements {
-		op.operationName = "database_init_statement"
-		if execErr := poolExecOperation(ctx, op, stmt); execErr != nil {
-			return fmt.Errorf("failed initializing tables: %w", execErr) //nolint:wrapcheck
+// TODO: merge this file with database.go.
+func (db *database) setupSystemTablesAndNamespaces(ctx context.Context) error {
+	executeSQL := func(operationName, sqlStmt string, args ...any) error {
+		return db.retry.ExecuteSQL(ctx, &connection.SqlExecutionBundle{
+			OperationName: operationName,
+			SqlStmt:       sqlStmt,
+			Pool:          db.pool,
+			RetryMetrics:  db.metrics.failedRetriesCounter,
+		}, args...)
+	}
+
+	for _, stmt := range createSystemTablesAndFuncsStmts {
+		if err := executeSQL("database_init_statement", stmt); err != nil {
+			return fmt.Errorf("failed to create system tables and functions: %w", err)
 		}
 	}
 	logger.Info("Created tx status table, metadata table, and its methods.")
 
-	op.operationName = "metadata_table_initialization"
-	if execErr := poolExecOperation(ctx,
-		op,
-		initializeMetadataPrepStmt,
-		[]byte(lastCommittedBlockNumberKey), nil); execErr != nil {
-		return fmt.Errorf("failed initialization metadata table: %w", execErr) //nolint:wrapcheck
+	if err := executeSQL("metadata_table_initialization", initializeMetadataPrepSQLStmt, []byte(lastCommittedBlockNumberKey), nil); err != nil {
+		return fmt.Errorf("failed to initialize metadata table: %w", err)
 	}
 
-	nsIDs = append(nsIDs, systemNamespaces...)
-	for _, nsID := range nsIDs {
+	for _, nsID := range systemNamespaces {
 		tableName := TableName(nsID)
-		for _, stmt := range initStatementsWithTemplate {
-			op.operationName = fmt.Sprintf("creating_table_and_its_methods_for%s", nsID)
-			if execErr := poolExecOperation(ctx, op, fmt.Sprintf(stmt, tableName)); execErr != nil {
-				return fmt.Errorf("failed creating meta-namespace for namespace %s: %w", //nolint:wrapcheck
-					nsID, execErr)
+		for _, stmt := range createNsTablesAndFuncsTemplates {
+			if err := executeSQL(fmt.Sprintf("creating_table_and_its_methods_for%s", nsID), fmt.Sprintf(stmt, tableName)); err != nil {
+				return fmt.Errorf("failed to create tables and functions for system namespaces: %w", err)
 			}
 		}
 		logger.Infof("namespace %s: created table '%s' and its methods.", nsID, tableName)
 	}
-	return nil
-}
-
-func poolExecOperation(ctx context.Context, op *operation, stmt string, args ...any) error {
-	return op.config.Retry.Execute(ctx, op.operationName, op.retryMetrics, func() error {
-		_, err := op.pool.Exec(ctx, stmt, args...)
-		return errors.Wrapf(err, "db exec failed: %s", stmt)
-	})
-}
-
-func clearDatabaseTables(ctx context.Context, pool *pgxpool.Pool, nsIDs []string) error {
-	logger.Info("Dropping tx status table and its methods.")
-	for _, stmt := range dropStatements {
-		if execErr := dbtest.PoolExecOperation(ctx, pool, stmt); execErr != nil {
-			return fmt.Errorf("failed clearing database tables: %w", execErr) //nolint:wrapcheck
-		}
-	}
-	logger.Info("tx status table is cleared.")
-
-	nsIDs = append(nsIDs, systemNamespaces...)
-	for _, nsID := range nsIDs {
-		tableName := TableName(nsID)
-		logger.Infof("Namespace %s: Dropping table '%s' and its methods.", nsID, tableName)
-		for _, stmt := range dropStatementsWithTemplate {
-			if execErr := dbtest.PoolExecOperation(ctx, pool, fmt.Sprintf(stmt, tableName)); execErr != nil {
-				return fmt.Errorf("namespace %s: failed clearing database tables: %w", nsID, execErr) //nolint:wrapcheck
-			}
-		}
-
-		logger.Infof("Table '%s' is cleared.", tableName)
-	}
-
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
@@ -19,10 +20,11 @@ type validatorTestEnv struct {
 }
 
 func newValidatorTestEnv(t *testing.T) *validatorTestEnv {
+	t.Helper()
 	preparedTxs := make(chan *preparedTransactions, 10)
 	validatedTxs := make(chan *validatedTransactions, 10)
 
-	dbEnv := NewDatabaseTestEnv(t)
+	dbEnv := newDatabaseTestEnvWithTablesSetup(t)
 	metrics := newVCServiceMetrics()
 	v := newValidator(dbEnv.DB, preparedTxs, validatedTxs, metrics)
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
@@ -37,7 +39,7 @@ func newValidatorTestEnv(t *testing.T) *validatorTestEnv {
 	}
 }
 
-func TestValidate(t *testing.T) {
+func TestValidate(t *testing.T) { //nolint:maintidx // cannot improve.
 	t.Parallel()
 
 	env := newValidatorTestEnv(t)
@@ -58,9 +60,9 @@ func TestValidate(t *testing.T) {
 	k2_4 := []byte("key2.4")
 	k2_5 := []byte("key2.5")
 
-	env.dbEnv.populateDataWithCleanup(
+	env.dbEnv.populateData(
 		t,
-		[]string{"1", "2", types.MetaNamespaceID},
+		[]string{"1", "2"},
 		namespaceToWrites{
 			"1": {
 				keys:     [][]byte{k1_1, k1_2, k1_3, k1_4},
@@ -71,10 +73,6 @@ func TestValidate(t *testing.T) {
 				keys:     [][]byte{k2_1, k2_2, k2_3, k2_4},
 				values:   [][]byte{[]byte("value2.1"), []byte("value2.2"), []byte("value2.3"), []byte("value2.4")},
 				versions: [][]byte{v0, v0, v1, v1},
-			},
-			types.MetaNamespaceID: {
-				keys:     [][]byte{[]byte("1"), []byte("2")},
-				versions: [][]byte{v2, v2},
 			},
 		},
 		nil,
@@ -135,7 +133,7 @@ func TestValidate(t *testing.T) {
 					},
 					types.MetaNamespaceID: &reads{
 						keys:     [][]byte{[]byte("1"), []byte("2")},
-						versions: [][]byte{v2, v2},
+						versions: [][]byte{v0, v0},
 					},
 				},
 				readToTxIDs: readToTransactions{
@@ -157,10 +155,10 @@ func TestValidate(t *testing.T) {
 					comparableRead{"2", string(k2_5), ""}: []TxID{
 						"tx3",
 					},
-					comparableRead{types.MetaNamespaceID, "1", string(v2)}: []TxID{
+					comparableRead{types.MetaNamespaceID, "1", string(v0)}: []TxID{
 						"tx1", "tx2",
 					},
-					comparableRead{types.MetaNamespaceID, "2", string(v2)}: []TxID{
+					comparableRead{types.MetaNamespaceID, "2", string(v0)}: []TxID{
 						"tx1", "tx3",
 					},
 				},
@@ -287,7 +285,7 @@ func TestValidate(t *testing.T) {
 							[]byte("2"),
 							[]byte("2"),
 						},
-						versions: [][]byte{v2, v2, v1},
+						versions: [][]byte{v0, v0, v1},
 					},
 				},
 				readToTxIDs: readToTransactions{
@@ -309,10 +307,10 @@ func TestValidate(t *testing.T) {
 					comparableRead{"2", string(k2_5), ""}: []TxID{
 						"tx3",
 					},
-					comparableRead{types.MetaNamespaceID, "1", string(v2)}: []TxID{
+					comparableRead{types.MetaNamespaceID, "1", string(v0)}: []TxID{
 						"tx1", "tx2",
 					},
-					comparableRead{types.MetaNamespaceID, "2", string(v2)}: []TxID{
+					comparableRead{types.MetaNamespaceID, "2", string(v0)}: []TxID{
 						"tx1", "tx3",
 					},
 					comparableRead{types.MetaNamespaceID, "2", string(v1)}: []TxID{
@@ -364,10 +362,11 @@ func TestValidate(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // each test case depends on the previous test.
 		t.Run(tt.name, func(t *testing.T) {
-			env.preparedTxs <- tt.preparedTx
-			validatedTxs := <-env.validatedTxs
+			channel.NewWriter(t.Context(), env.preparedTxs).Write(tt.preparedTx)
+			validatedTxs, ok := channel.NewReader(t.Context(), env.validatedTxs).Read()
+			require.True(t, ok)
 			require.Equal(t, tt.expectedValidatedTx.validTxNonBlindWrites, validatedTxs.validTxNonBlindWrites)
 			require.Equal(t, tt.expectedValidatedTx.validTxBlindWrites, validatedTxs.validTxBlindWrites)
 			require.Equal(t, tt.expectedValidatedTx.invalidTxStatus, validatedTxs.invalidTxStatus)

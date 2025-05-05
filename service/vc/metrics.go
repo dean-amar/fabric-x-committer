@@ -37,7 +37,7 @@ type perfMetrics struct {
 	databaseTxBatchCommitInsertNewKeyWithoutValueLatencySeconds prometheus.Histogram
 	databaseTxBatchCommitInsertNewKeyWithValueLatencySeconds    prometheus.Histogram
 
-	retryOperationStatusCounter *prometheus.CounterVec
+	failedRetriesCounter *prometheus.CounterVec
 }
 
 func newVCServiceMetrics() *perfMetrics {
@@ -169,7 +169,7 @@ func newVCServiceMetrics() *perfMetrics {
 				"inserting new keys without values",
 			Buckets: buckets,
 		}),
-		retryOperationStatusCounter: p.NewCounterVec(prometheus.CounterOpts{
+		failedRetriesCounter: p.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "vcservice",
 			Subsystem: "database_retry",
 			Name:      "per_operation_total",

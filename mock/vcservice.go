@@ -91,6 +91,14 @@ func (v *VcService) GetTransactionsStatus(
 	return s, nil
 }
 
+// SetupSystemTablesAndNamespaces creates the required system tables and namespaces.
+func (*VcService) SetupSystemTablesAndNamespaces(
+	context.Context,
+	*protovcservice.Empty,
+) (*protovcservice.Empty, error) {
+	return nil, nil
+}
+
 // StartValidateAndCommitStream is the mock implementation of the
 // [protovcservice.ValidationAndCommitServiceServer] interface.
 func (v *VcService) StartValidateAndCommitStream(

@@ -19,6 +19,7 @@ func StartSidecarClient(
 	config *Config,
 	startBlkNum int64,
 ) chan *common.Block {
+	t.Helper()
 	receivedBlocksFromLedgerService := make(chan *common.Block, 10)
 	deliverClient, err := New(config)
 	require.NoError(t, err)

@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -13,6 +14,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
@@ -38,15 +40,16 @@ type Service struct {
 
 // New creates a sidecar service.
 func New(c *Config) (*Service, error) {
+	logger.Info("Initializing new sidecar")
 	err := LoadBootstrapConfig(c)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load shared config")
+		return nil, fmt.Errorf("failed to load shared config: %w", err)
 	}
 
 	// 1. Fetch blocks from the ordering service.
 	ordererClient, err := broadcastdeliver.New(&c.Orderer)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create orderer client")
+		return nil, fmt.Errorf("failed to create orderer client: %w", err)
 	}
 
 	// 2. Relay the blocks to committer and receive the transaction status.
@@ -57,7 +60,7 @@ func New(c *Config) (*Service, error) {
 	logger.Infof("Create ledger service for channel %s", c.Orderer.ChannelID)
 	ledgerService, err := newLedgerService(c.Orderer.ChannelID, c.Ledger.Path)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create ledger")
+		return nil, fmt.Errorf("failed to create ledger: %w", err)
 	}
 	return &Service{
 		ordererClient:      ordererClient,
@@ -77,7 +80,7 @@ func (*Service) WaitForReady(context.Context) bool {
 }
 
 // Run starts the sidecar service. The call to Run blocks until an error occurs or the context is canceled.
-func (s *Service) Run(ctx context.Context) error { //nolint:gocognit
+func (s *Service) Run(ctx context.Context) error {
 	pCtx, pCancel := context.WithCancel(ctx)
 	defer pCancel()
 	// similar to other services, when the prometheus server returns an error, we do not terminate the service.
@@ -86,9 +89,9 @@ func (s *Service) Run(ctx context.Context) error { //nolint:gocognit
 	}()
 
 	logger.Infof("Create coordinator client and connect to %s\n", &s.config.Committer.Endpoint)
-	conn, connErr := connection.LazyConnect(connection.NewDialConfig(&s.config.Committer.Endpoint))
+	conn, connErr := connection.Connect(connection.NewDialConfig(&s.config.Committer.Endpoint))
 	if connErr != nil {
-		return errors.Wrap(connErr, "failed to connect to coordinator")
+		return fmt.Errorf("failed to connect to coordinator: %w", connErr)
 	}
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)
@@ -116,7 +119,7 @@ func (s *Service) Run(ctx context.Context) error { //nolint:gocognit
 		})
 	})
 
-	return errors.Wrap(g.Wait(), "sidecar has been stopped")
+	return utils.ProcessErr(g.Wait(), "sidecar has been stopped")
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(
@@ -237,7 +240,7 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 	}
 	envelope, err := protoutil.UnmarshalEnvelope(configMsg.Envelope)
 	if err != nil {
-		return errors.Wrapf(err, "failed to unmarshal meta policy envelope")
+		return fmt.Errorf("failed to unmarshal meta policy envelope: %w", err)
 	}
 	err = OverwriteConfigFromEnvelope(s.config, envelope)
 	if err != nil {

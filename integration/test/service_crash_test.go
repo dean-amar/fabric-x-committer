@@ -27,7 +27,7 @@ var failureScenarios = [][]string{
 	{"sidecar", "vcservices", "verifiers", "coordinator"},
 }
 
-//nolint:paralleltest
+//nolint:paralleltest // Reduce tests load.
 func TestCrashWhenIdle(t *testing.T) {
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
@@ -114,7 +114,7 @@ func addSignAndSendTransactions(t *testing.T, c *runner.CommitterRuntime, txs []
 	c.SendTransactionsToOrderer(t, txs)
 }
 
-//nolint:paralleltest
+//nolint:paralleltest // Reduce tests load.
 func TestCrashWhenNonIdle(t *testing.T) {
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{

@@ -40,7 +40,7 @@ func (c *SvAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
 		return errors.Wrap(err, "failed creating verification policy")
 	}
 
-	connections, err := connection.OpenLazyConnections(c.config.Endpoints, insecure.NewCredentials())
+	connections, err := connection.OpenConnections(c.config.Endpoints, insecure.NewCredentials())
 	if err != nil {
 		return errors.Wrap(err, "failed opening connections")
 	}

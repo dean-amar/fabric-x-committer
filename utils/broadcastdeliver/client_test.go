@@ -217,7 +217,7 @@ func makeConfig(t *testing.T) (*mock.Orderer, []test.GrpcServers, Config) {
 
 func waitUntilGrpcServerIsReady(ctx context.Context, t *testing.T, endpoint *connection.Endpoint) {
 	t.Helper()
-	newConn, err := connection.LazyConnect(connection.NewDialConfig(endpoint))
+	newConn, err := connection.Connect(connection.NewDialConfig(endpoint))
 	require.NoError(t, err)
 	defer connection.CloseConnectionsLog(newConn)
 	test.WaitUntilGrpcServerIsReady(ctx, t, newConn)

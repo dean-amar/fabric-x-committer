@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -15,6 +14,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protosigverifierservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier/policy"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
@@ -24,57 +24,38 @@ import (
 
 const testTimeout = 3 * time.Second
 
-func defaultConfig() *Config {
-	return &Config{
-		Server: connection.NewLocalHostServer(),
-		ParallelExecutor: ExecutorConfig{
-			BatchSizeCutoff:   3,
-			BatchTimeCutoff:   1 * time.Hour,
-			Parallelism:       3,
-			ChannelBufferSize: 1,
-		},
-		Monitoring: monitoring.Config{
-			Server: connection.NewLocalHostServer(),
-		},
-	}
-}
-
-func defaultConfigQuickCutoff() *Config {
-	config := defaultConfig()
-	config.ParallelExecutor.BatchSizeCutoff = 1
-	return config
-}
-
 func TestNoVerificationKeySet(t *testing.T) {
-	t.Skip("Temporarily skipping. Related to commented-out error in StartStream.")
-	test.FailHandler(t)
+	t.Parallel()
 	c := newTestState(t, defaultConfig())
 
-	stream, err := c.Client.StartStream(context.Background())
-	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	stream, err := c.Client.StartStream(t.Context())
+	require.NoError(t, err)
 
 	err = stream.Send(&protosigverifierservice.RequestBatch{})
-	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	require.NoError(t, err)
 
-	_, err = stream.Recv()
-	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	t.Log("We should not receive any results with empty batch")
+	_, ok := readStream(t, stream, testTimeout)
+	require.False(t, ok)
 }
 
 func TestNoInput(t *testing.T) {
+	t.Parallel()
 	test.FailHandler(t)
 	c := newTestState(t, defaultConfig())
 
-	stream, _ := c.Client.StartStream(context.Background())
+	stream, _ := c.Client.StartStream(t.Context())
 
 	update, _ := defaultUpdate(t)
 	err := stream.Send(&protosigverifierservice.RequestBatch{Update: update})
 	require.NoError(t, err)
 
-	output := outputChannel(stream)
-	gomega.Eventually(output).WithTimeout(testTimeout).ShouldNot(gomega.Receive())
+	_, ok := readStream(t, stream, testTimeout)
+	require.False(t, ok)
 }
 
 func TestMinimalInput(t *testing.T) {
+	t.Parallel()
 	test.FailHandler(t)
 	c := newTestState(t, defaultConfig())
 
@@ -129,9 +110,9 @@ func TestMinimalInput(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	output := outputChannel(stream)
-	require.NoError(t, err)
-	gomega.Eventually(output).WithTimeout(1 * time.Second).Should(gomega.Receive(gomega.HaveLen(3)))
+	ret, ok := readStream(t, stream, testTimeout)
+	require.True(t, ok)
+	require.Len(t, ret, 3)
 }
 
 func TestBadTxFormat(t *testing.T) {
@@ -407,8 +388,7 @@ func newTestState(t *testing.T, config *Config) *State {
 		protosigverifierservice.RegisterVerifierServer(grpcServer, service)
 	})
 
-	clientConnectionConfig := connection.NewDialConfig(&config.Server.Endpoint)
-	clientConnection, err := connection.Connect(clientConnectionConfig)
+	clientConnection, err := connection.Connect(connection.NewDialConfig(&config.Server.Endpoint))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		assert.NoError(t, clientConnection.Close())
@@ -419,22 +399,22 @@ func newTestState(t *testing.T, config *Config) *State {
 	}
 }
 
-func outputChannel(
+func readStream(
+	t *testing.T,
 	stream protosigverifierservice.Verifier_StartStreamClient,
-) <-chan []*protosigverifierservice.Response {
-	output := make(chan []*protosigverifierservice.Response)
+	timeout time.Duration,
+) ([]*protosigverifierservice.Response, bool) {
+	t.Helper()
+	outputChan := make(chan []*protosigverifierservice.Response, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
 	go func() {
-		for {
-			response, _ := stream.Recv()
-			if response == nil || response.Responses == nil {
-				return
-			}
-			if len(response.Responses) > 0 {
-				output <- response.Responses
-			}
+		response, err := stream.Recv()
+		if err == nil && response != nil && len(response.Responses) > 0 {
+			channel.NewWriter(ctx, outputChan).Write(response.Responses)
 		}
 	}()
-	return output
+	return channel.NewReader(ctx, outputChan).Read()
 }
 
 func defaultUpdate(t *testing.T) (*protosigverifierservice.Update, *sigtest.NsSigner) {
@@ -453,4 +433,25 @@ func defaultUpdate(t *testing.T) (*protosigverifierservice.Update, *sigtest.NsSi
 		},
 	}
 	return update, txSigner
+}
+
+func defaultConfig() *Config {
+	return &Config{
+		Server: connection.NewLocalHostServer(),
+		ParallelExecutor: ExecutorConfig{
+			BatchSizeCutoff:   3,
+			BatchTimeCutoff:   1 * time.Hour,
+			Parallelism:       3,
+			ChannelBufferSize: 1,
+		},
+		Monitoring: monitoring.Config{
+			Server: connection.NewLocalHostServer(),
+		},
+	}
+}
+
+func defaultConfigQuickCutoff() *Config {
+	config := defaultConfig()
+	config.ParallelExecutor.BatchSizeCutoff = 1
+	return config
 }

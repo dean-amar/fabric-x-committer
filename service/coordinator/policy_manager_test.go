@@ -21,7 +21,6 @@ func TestPolicyManager(t *testing.T) {
 	requireUpdateEqual(t, &protosigverifierservice.Update{
 		NamespacePolicies: &protoblocktx.NamespacePolicies{},
 	}, update)
-	require.GreaterOrEqual(t, version0, uint64(0))
 
 	t.Log("Update 1")
 	ns1Policy := makeFakePolicy(t, "ns1", "k1")

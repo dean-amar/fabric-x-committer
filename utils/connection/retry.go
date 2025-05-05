@@ -7,6 +7,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/yugabyte/pgx/v4/pgxpool"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
@@ -29,6 +30,13 @@ type (
 		MaxElapsedTime time.Duration `mapstructure:"max-elapsed-time" yaml:"max-elapsed-time"`
 	}
 
+	SqlExecutionBundle struct {
+		OperationName string
+		SqlStmt       string
+		Pool          *pgxpool.Pool
+		RetryMetrics  *prometheus.CounterVec
+	}
+
 	operationStatus = string
 )
 
@@ -39,13 +47,13 @@ const (
 	defaultMaxInterval         = 10 * time.Second
 	defaultMaxElapsedTime      = 15 * time.Minute
 
-	successStatus = operationStatus("success")
 	failureStatus = operationStatus("failure")
 )
 
 // Execute executes the given operation repeatedly until it succeeds or a timeout occurs.
 // It returns nil on success, or the error returned by the final attempt on timeout.
-func (p *RetryProfile) Execute(ctx context.Context,
+func (p *RetryProfile) Execute(
+	ctx context.Context,
 	operationName string,
 	retryMetrics *prometheus.CounterVec,
 	o backoff.Operation,
@@ -53,23 +61,25 @@ func (p *RetryProfile) Execute(ctx context.Context,
 	return errors.Wrapf(
 		backoff.Retry(
 			func() error {
-				var (
-					err    error
-					status operationStatus
-				)
-				if err = o(); err != nil {
-					status = failureStatus
-				} else {
-					status = successStatus
-				}
-				if retryMetrics != nil {
-					promutil.AddToCounterVec(retryMetrics,
-						[]string{operationName, status},
-						1)
+				err := o()
+				if err != nil && retryMetrics != nil {
+					promutil.AddToCounterVec(retryMetrics, []string{operationName, failureStatus}, 1)
 				}
 				return err
-			}, backoff.WithContext(p.NewBackoff(), ctx),
-		), "multiple retries failed")
+			}, backoff.WithContext(p.NewBackoff(), ctx)), "multiple retries failed")
+}
+
+// ExecuteSQL executes the given SQL statement until it succeeds or a timeout occurs.
+func (p *RetryProfile) ExecuteSQL(ctx context.Context, execBundle *SqlExecutionBundle, args ...any) error {
+	err := p.Execute(ctx, execBundle.OperationName, execBundle.RetryMetrics, func() error {
+		_, err := execBundle.Pool.Exec(ctx, execBundle.SqlStmt, args...)
+		err = errors.Wrapf(err, "failed to execute the SQL statement [%s]", execBundle.SqlStmt)
+		if err != nil {
+			logger.Warn(err)
+		}
+		return err
+	})
+	return err
 }
 
 // NewBackoff creates a new [backoff.ExponentialBackOff] instance with this profile.

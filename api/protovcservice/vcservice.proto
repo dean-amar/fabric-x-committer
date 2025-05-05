@@ -13,6 +13,7 @@ service ValidationAndCommitService {
   rpc GetTransactionsStatus (protoblocktx.QueryStatus) returns (protoblocktx.TransactionsStatus) {};
   rpc GetNamespacePolicies(Empty) returns (protoblocktx.NamespacePolicies) {};
   rpc GetConfigTransaction(Empty) returns (protoblocktx.ConfigTransaction) {};
+  rpc SetupSystemTablesAndNamespaces(Empty) returns (Empty) {};
 }
 
 message TransactionBatch {

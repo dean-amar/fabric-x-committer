@@ -123,7 +123,7 @@ func (c *commonAdapter) sendBlocks(
 }
 
 func (r *ClientResources) isSendLimit() bool {
-	if r.Limit == nil || (r.Limit.Blocks == 0 && r.Limit.Transactions == 0) {
+	if !r.Limit.HasLimit() {
 		return false
 	}
 	state := r.Metrics.GetState()
@@ -140,12 +140,17 @@ func (r *ClientResources) isTXSendLimit() bool {
 }
 
 func (r *ClientResources) isReceiveLimit() bool {
-	if r.Limit == nil || (r.Limit.Blocks == 0 && r.Limit.Transactions == 0) {
+	if !r.Limit.HasLimit() {
 		return false
 	}
 	state := r.Metrics.GetState()
 	return isReachedLimit(state.BlocksReceived, r.Limit.Blocks) &&
 		isReachedLimit(state.TransactionsReceived, r.Limit.Transactions)
+}
+
+// HasLimit returns true if any limit is set.
+func (g *GenerateLimit) HasLimit() bool {
+	return g != nil && (g.Blocks > 0 || g.Transactions > 0)
 }
 
 func isReachedLimit(value, limit uint64) bool {

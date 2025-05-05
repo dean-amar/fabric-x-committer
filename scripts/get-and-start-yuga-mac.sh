@@ -24,9 +24,14 @@ ulimit -n unlimited
   --fault_tolerance none \
   --background false \
   --ui false \
-  --tserver_flags "ysql_max_connections=5000" \
+  --base_dir "$DATA_DIR" \
   --insecure \
-  --base_dir "$DATA_DIR"
+  --tserver_flags "ysql_max_connections=500,tablet_replicas_per_gib_limit=4000"
+#  By default, 1 GB of memory reserved for a YB-Tserver can support up to 1497
+#  tablets. When tests are run in parallel, this limit is sometimes reached in
+#  environments with low resource allocation, causing the test to fail. To handle
+#  such cases, we are increasing the limit to 4000. Note that this increase is not
+#  recommended for production and is intended solely for running the test.
 
 echo "Clearing temporary data dir: $DATA_DIR"
 rm -rf "$DATA_DIR"

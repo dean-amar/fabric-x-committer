@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
 type (
@@ -42,7 +42,7 @@ type (
 		// dependentTxs is a set of transactions that depend on this transaction.
 		// After validating this transaction, dependentTxs is used to remove dependencies
 		// from each dependent transaction.
-		dependentTxs *sync.Map
+		dependentTxs utils.SyncMap[*TransactionNode, any]
 		rwKeys       *readWriteKeys
 		Signatures   [][]byte
 	}
@@ -66,14 +66,9 @@ func newTransactionNode(blockNum uint64, txNum uint32, tx *protoblocktx.Tx) *Tra
 			BlockNumber: blockNum,
 			TxNum:       txNum,
 		},
-		dependentTxs: newDependentTxs(),
-		rwKeys:       readAndWriteKeys(tx.Namespaces),
-		Signatures:   tx.Signatures,
+		rwKeys:     readAndWriteKeys(tx.Namespaces),
+		Signatures: tx.Signatures,
 	}
-}
-
-func newDependentTxs() *sync.Map {
-	return &sync.Map{}
 }
 
 // addDependenciesAndUpdateDependents adds input transactions as dependencies
@@ -111,10 +106,7 @@ func (n *TransactionNode) addDependenciesAndUpdateDependents(dependsOnTxs TxNode
 // by a lock.
 func (n *TransactionNode) freeDependents() TxNodeBatch /* fully freed transactions */ {
 	var freedTxs TxNodeBatch
-
-	n.dependentTxs.Range(func(k, _ any) bool {
-		dependentTx, _ := k.(*TransactionNode)
-
+	for dependentTx := range n.dependentTxs.IterKeys() {
 		for i, tx := range dependentTx.dependsOnTxs {
 			if tx == n {
 				dependentTx.dependsOnTxs = slices.Delete(dependentTx.dependsOnTxs, i, i+1)
@@ -125,10 +117,7 @@ func (n *TransactionNode) freeDependents() TxNodeBatch /* fully freed transactio
 		if dependentTx.isDependencyFree() {
 			freedTxs = append(freedTxs, dependentTx)
 		}
-
-		return true
-	})
-
+	}
 	return freedTxs
 }
 
@@ -200,8 +189,8 @@ func constructCompositeKey(ns string, key []byte) string {
 	//       no false positives collisions in the
 	//       composite key space.
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%03d", len(ns))) //nolint:revive
-	sb.WriteString(ns)                           //nolint:revive
-	sb.Write(key)                                //nolint:revive
+	sb.WriteString(fmt.Sprintf("%03d", len(ns)))
+	sb.WriteString(ns)
+	sb.Write(key)
 	return sb.String()
 }

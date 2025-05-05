@@ -2,11 +2,15 @@ package query
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
-	"sync"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +34,6 @@ import (
 
 type queryServiceTestEnv struct {
 	config        *Config
-	ctx           context.Context
 	qs            *Service
 	ns            []string
 	clientConn    *grpc.ClientConn
@@ -41,183 +44,198 @@ type queryServiceTestEnv struct {
 func TestQuery(t *testing.T) {
 	t.Parallel()
 	env := newQueryServiceTestEnv(t)
-
-	requiredItems := make([]*items, len(env.ns))
-	for i, ns := range env.ns {
-		requiredItems[i] = &items{
-			ns:       ns,
-			keys:     strToBytes("item1", "item2", "item3", "item4"),
-			values:   strToBytes("value1", "value2", "value3", "value4"),
-			versions: verToBytes(0, 1, 2, 3),
-		}
-		env.insert(t, requiredItems[i])
-	}
-
-	query := &protoqueryservice.Query{}
-	querySize := 0
-	keyCount := 0
-	for _, item := range requiredItems {
-		keyCount += len(item.keys)
-		qNs := item.asQuery()
-		query.Namespaces = append(query.Namespaces, qNs)
-		querySize += len(qNs.Keys)
-	}
-
-	csParams := &protoqueryservice.ViewParameters{
-		IsoLevel:            protoqueryservice.IsoLevel_RepeatableRead,
-		NonDeferrable:       false,
-		TimeoutMilliseconds: uint64(time.Minute.Milliseconds()), // nolint:gosec
-	}
+	requiredItems := env.makeItems(t)
+	query, _, _ := makeQuery(requiredItems)
 
 	for i, qNs := range query.Namespaces {
+		expectedItem := requiredItems[i]
+		qNs := qNs
 		t.Run(fmt.Sprintf("Query internal NS %s", qNs.NsId), func(t *testing.T) {
-			ret, err := unsafeQueryRows(env.ctx, env.qs.batcher.pool, qNs.NsId, qNs.Keys)
+			t.Parallel()
+			ret, err := unsafeQueryRows(t.Context(), env.pool, qNs.NsId, qNs.Keys)
 			require.NoError(t, err)
-			requireRow(t, requiredItems[i], &protoqueryservice.RowsNamespace{
+			requireRow(t, expectedItem, &protoqueryservice.RowsNamespace{
 				NsId: qNs.NsId,
 				Rows: ret,
 			})
 		})
 	}
 
-	expectedMetricsSize := 0
-
 	t.Run("Query GetRows interface", func(t *testing.T) {
-		ret, err := env.qs.GetRows(env.ctx, query)
+		t.Parallel()
+		ret, err := env.qs.GetRows(t.Context(), query)
 		require.NoError(t, err)
-		expectedMetricsSize++
 		requireResults(t, requiredItems, ret.Namespaces)
 	})
 
 	t.Run("Query GetRows client", func(t *testing.T) {
+		t.Parallel()
 		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-		ret, err := client.GetRows(env.ctx, query)
+		ret, err := client.GetRows(t.Context(), query)
 		require.NoError(t, err)
-		expectedMetricsSize++
 		requireResults(t, requiredItems, ret.Namespaces)
 	})
 
-	t.Run("Query GetRows client with consistentView", func(t *testing.T) {
+	t.Run("Query GetRows client with view", func(t *testing.T) {
+		t.Parallel()
 		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-		ret, err := client.GetRows(env.ctx, &protoqueryservice.Query{
-			View:       env.beginView(t, client, csParams),
+		ret, err := client.GetRows(t.Context(), &protoqueryservice.Query{
+			View:       env.beginView(t, client, defaultViewParams(time.Minute)),
 			Namespaces: query.Namespaces,
 		})
 		require.NoError(t, err)
-		expectedMetricsSize++
 		requireResults(t, requiredItems, ret.Namespaces)
-
-		requireMapSize(t, 1, &env.qs.batcher.viewIDToViewHolder)
-		requireIntVecMetricValue(t, 1, env.qs.metrics.requests.MetricVec, grpcBeginView)
-		requireIntMetricValue(t, 1, env.qs.metrics.processingSessions.WithLabelValues(sessionViews))
-		requireIntMetricValue(t, 1, env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions))
-	})
-
-	requireMapSize(t, 0, &env.qs.batcher.viewIDToViewHolder)
-	requireIntVecMetricValue(t, expectedMetricsSize, env.qs.metrics.requests.MetricVec, grpcGetRows)
-	requireIntMetricValue(t, expectedMetricsSize*querySize, env.qs.metrics.keysRequested)
-	requireIntMetricValue(t, expectedMetricsSize*keyCount, env.qs.metrics.keysResponded)
-
-	t.Run("Consistency with repeated GetRows", func(t *testing.T) {
-		// This test will query key1, then update key2.
-		// We expect that the updated key2 will not be visible to GetRows() with the initial view.
-		// But it will be visible to a new view.
-		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-
-		t1 := requiredItems[0]
-		testItem1 := items{"0", t1.keys[:1], t1.values[:1], t1.versions[:1]}
-
-		view := env.beginView(t, client, csParams)
-		ret, err := client.GetRows(env.ctx, &protoqueryservice.Query{
-			View: view,
-			Namespaces: []*protoqueryservice.QueryNamespace{{
-				NsId: testItem1.ns,
-				Keys: testItem1.keys,
-			}},
-		})
-		require.NoError(t, err)
-
-		requireResults(t, []*items{&testItem1}, ret.Namespaces)
-
-		testItem2 := items{testItem1.ns, t1.keys[1:2], t1.values[1:2], t1.versions[1:2]}
-		testItem2Mod := testItem2
-		testItem2Mod.values = strToBytes("value2.1")
-		testItem2Mod.versions = verToBytes(2)
-		env.update(t, &testItem2Mod)
-
-		key2Query := &protoqueryservice.Query{
-			View: view,
-			Namespaces: []*protoqueryservice.QueryNamespace{{
-				NsId: testItem2.ns,
-				Keys: testItem2.keys,
-			}},
-		}
-		ret2, err := client.GetRows(env.ctx, key2Query)
-		require.NoError(t, err)
-		// This is the same view, so we expect the old version of item 2.
-		requireResults(t, []*items{&testItem2}, ret2.Namespaces)
-
-		view2 := env.beginView(t, client, csParams)
-		key2Query.View = view2
-		ret3, err := client.GetRows(env.ctx, key2Query)
-		require.NoError(t, err)
-		// This is a new view, but it should be aggregated with the previous one.
-		// So we expect the old version of item 2.
-		requireResults(t, []*items{&testItem2}, ret3.Namespaces)
-
-		env.endView(t, client, view)
-		env.endView(t, client, view2)
-
-		view3 := env.beginView(t, client, csParams)
-		key2Query.View = view3
-		ret4, err := client.GetRows(env.ctx, key2Query)
-		require.NoError(t, err)
-		// After we cancelled the other views, a new view should create
-		// a new transactions. So we expect the new version of item 2.
-		requireResults(t, []*items{&testItem2Mod}, ret4.Namespaces)
 	})
 
 	t.Run("Nil view parameters", func(t *testing.T) {
+		t.Parallel()
 		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
 		env.beginView(t, client, nil)
 	})
 
 	t.Run("Bad view ID", func(t *testing.T) {
+		t.Parallel()
 		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-		_, err := client.EndView(env.ctx, &protoqueryservice.View{Id: "bad"})
+		_, err := client.EndView(t.Context(), &protoqueryservice.View{Id: "bad"})
 		require.Equal(t, ErrInvalidOrStaleView.Error(), status.Convert(err).Message())
 	})
 
 	t.Run("Cancelled view ID", func(t *testing.T) {
+		t.Parallel()
 		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-		view, err := client.BeginView(env.ctx, csParams)
+		view, err := client.BeginView(t.Context(), defaultViewParams(time.Minute))
 		require.NoError(t, err)
-		_, err = client.EndView(env.ctx, view)
+		_, err = client.EndView(t.Context(), view)
 		require.NoError(t, err)
-		_, err = client.EndView(env.ctx, view)
+		_, err = client.EndView(t.Context(), view)
 		require.Equal(t, ErrInvalidOrStaleView.Error(), status.Convert(err).Message())
 	})
 
 	t.Run("Expired view ID", func(t *testing.T) {
+		t.Parallel()
 		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-		params := &protoqueryservice.ViewParameters{
-			IsoLevel:            csParams.IsoLevel,
-			NonDeferrable:       csParams.NonDeferrable,
-			TimeoutMilliseconds: 100,
-		}
-		view, err := client.BeginView(env.ctx, params)
+		view, err := client.BeginView(t.Context(), defaultViewParams(100*time.Millisecond))
 		require.NoError(t, err)
 		time.Sleep(150 * time.Millisecond)
-		_, err = client.EndView(env.ctx, view)
+		_, err = client.EndView(t.Context(), view)
 		require.ErrorContains(t, err, status.Convert(err).Message())
 	})
+}
 
-	// Check view and transaction's life cycle.
-	// We sleep to allow all the context's after functions to fire.
-	time.Sleep(time.Millisecond)
-	requireMapSize(t, 0, &env.qs.batcher.viewIDToViewHolder)
-	requireIntMetricValue(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionViews))
-	requireIntMetricValue(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions))
+func TestQueryMetrics(t *testing.T) {
+	t.Parallel()
+	env := newQueryServiceTestEnv(t)
+	requiredItems := env.makeItems(t)
+	query, keyCount, querySize := makeQuery(requiredItems)
+
+	client := protoqueryservice.NewQueryServiceClient(env.clientConn)
+
+	t.Log("Query GetRows client with view")
+	view0 := env.beginView(t, client, defaultViewParams(time.Minute))
+	ret, err := client.GetRows(t.Context(), &protoqueryservice.Query{
+		View:       view0,
+		Namespaces: query.Namespaces,
+	})
+	require.NoError(t, err)
+	requireResults(t, requiredItems, ret.Namespaces)
+
+	t.Log("Validate metrics")
+	require.Equal(t, 1, env.qs.batcher.viewIDToViewHolder.Count())
+	requireIntVecMetricValue(t, 1, env.qs.metrics.requests.MetricVec, grpcBeginView)
+	promutil.RequireIntMetricValue(t, 1, env.qs.metrics.processingSessions.WithLabelValues(sessionViews))
+	promutil.RequireIntMetricValue(t, 1, env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions))
+	env.endView(t, client, view0)
+	require.Equal(t, 0, env.qs.batcher.viewIDToViewHolder.Count())
+
+	for range 3 {
+		ret, err = env.qs.GetRows(t.Context(), query)
+		require.NoError(t, err)
+		requireResults(t, requiredItems, ret.Namespaces)
+	}
+
+	expectedMetricsSize := 4
+	require.Equal(t, 0, env.qs.batcher.viewIDToViewHolder.Count())
+	promutil.RequireIntMetricValue(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionViews))
+	promutil.RequireIntMetricValue(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions))
+	requireIntVecMetricValue(t, expectedMetricsSize, env.qs.metrics.requests.MetricVec, grpcGetRows)
+	promutil.RequireIntMetricValue(t, expectedMetricsSize*querySize, env.qs.metrics.keysRequested)
+	promutil.RequireIntMetricValue(t, expectedMetricsSize*keyCount, env.qs.metrics.keysResponded)
+}
+
+func TestQueryWithConsistentView(t *testing.T) {
+	t.Parallel()
+	env := newQueryServiceTestEnv(t)
+	requiredItems := env.makeItems(t)
+	query, _, _ := makeQuery(requiredItems)
+
+	client := protoqueryservice.NewQueryServiceClient(env.clientConn)
+
+	t.Log("Query GetRows client with view")
+	view0 := env.beginView(t, client, defaultViewParams(time.Minute))
+	ret, err := client.GetRows(t.Context(), &protoqueryservice.Query{
+		View:       view0,
+		Namespaces: query.Namespaces,
+	})
+	require.NoError(t, err)
+	requireResults(t, requiredItems, ret.Namespaces)
+
+	// This part will query key1, then update key2.
+	// We expect that the updated key2 will not be visible to GetRows() with the initial view.
+	// But it will be visible to a new view.
+	t.Log("Consistency with repeated GetRows")
+	t1 := requiredItems[0]
+	testItem1 := items{"0", t1.keys[:1], t1.values[:1], t1.versions[:1]}
+
+	view1 := env.beginView(t, client, defaultViewParams(time.Minute))
+	ret, err = client.GetRows(t.Context(), &protoqueryservice.Query{
+		View: view1,
+		Namespaces: []*protoqueryservice.QueryNamespace{{
+			NsId: testItem1.ns,
+			Keys: testItem1.keys,
+		}},
+	})
+	require.NoError(t, err)
+
+	requireResults(t, []*items{&testItem1}, ret.Namespaces)
+
+	testItem2 := items{testItem1.ns, t1.keys[1:2], t1.values[1:2], t1.versions[1:2]}
+	testItem2Mod := testItem2
+	testItem2Mod.values = strToBytes("value2/1")
+	testItem2Mod.versions = verToBytes(2)
+	env.update(t, &testItem2Mod)
+
+	key2Query := &protoqueryservice.Query{
+		View: view1,
+		Namespaces: []*protoqueryservice.QueryNamespace{{
+			NsId: testItem2.ns,
+			Keys: testItem2.keys,
+		}},
+	}
+	ret2, err := client.GetRows(t.Context(), key2Query)
+	require.NoError(t, err)
+	// This is the same view, so we expect the old version of item 2.
+	requireResults(t, []*items{&testItem2}, ret2.Namespaces)
+
+	view2 := env.beginView(t, client, defaultViewParams(time.Minute))
+	key2Query.View = view2
+	ret3, err := client.GetRows(t.Context(), key2Query)
+	require.NoError(t, err)
+	// This is a new view, but it should be aggregated with the previous one.
+	// So we expect the old version of item 2.
+	requireResults(t, []*items{&testItem2}, ret3.Namespaces)
+
+	env.endView(t, client, view0)
+	env.endView(t, client, view1)
+	env.endView(t, client, view2)
+
+	view3 := env.beginView(t, client, defaultViewParams(time.Minute))
+	key2Query.View = view3
+	ret4, err := client.GetRows(t.Context(), key2Query)
+	require.NoError(t, err)
+	// After we cancelled the other views, a new view should create
+	// a new transactions. So we expect the new version of item 2.
+	requireResults(t, []*items{&testItem2Mod}, ret4.Namespaces)
+	env.endView(t, client, view3)
 }
 
 func TestQueryPolicies(t *testing.T) {
@@ -225,7 +243,7 @@ func TestQueryPolicies(t *testing.T) {
 	env := newQueryServiceTestEnv(t)
 
 	client := protoqueryservice.NewQueryServiceClient(env.clientConn)
-	policies, err := client.GetNamespacePolicies(env.ctx, nil)
+	policies, err := client.GetNamespacePolicies(t.Context(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, policies)
 	require.Len(t, policies.Policies, len(env.ns))
@@ -244,28 +262,31 @@ func TestQueryPolicies(t *testing.T) {
 		require.Equal(t, signature.Ecdsa, item.Scheme)
 	}
 
-	configTX, err := client.GetConfigTransaction(env.ctx, nil)
+	configTX, err := client.GetConfigTransaction(t.Context(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, configTX)
 	require.NotEmpty(t, configTX.Envelope)
 }
 
-func requireMapSize(t *testing.T, expectedSize int, m *sync.Map) {
-	t.Helper()
-	n := 0
-	m.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
-	require.Equal(t, expectedSize, n)
-}
-
 func strToBytes(str ...string) [][]byte {
 	ret := make([][]byte, len(str))
 	for i, s := range str {
-		ret[i] = []byte(s)
+		ret[i] = encodeBytesForProto(s)
 	}
 	return ret
+}
+
+// encodeBytesForProto returns a byte array representation of a string such that when
+// it will be serialized using [protojson.Format()], it will appear as the original string.
+func encodeBytesForProto(str string) []byte {
+	if len(str)%4 != 0 {
+		str += strings.Repeat("+", 4-len(str)%4)
+	}
+	decodeString, err := base64.StdEncoding.DecodeString(str)
+	if err != nil {
+		panic(errors.Wrap(err, str))
+	}
+	return decodeString
 }
 
 func verToBytes(ver ...int) [][]byte {
@@ -314,17 +335,14 @@ func newQueryServiceTestEnv(t *testing.T) *queryServiceTestEnv {
 		assert.NoError(t, clientConn.Close())
 	})
 
-	// We set a default context with timeout to make sure the test never halts progress.
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute*10)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
-
-	pool, err := vc.NewDatabasePool(ctx, config.Database, qs.metrics.retryOperationStatusCounter)
+	pool, err := vc.NewDatabasePool(ctx, config.Database, qs.metrics.failedRetriesCounter)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
 	return &queryServiceTestEnv{
 		config:     config,
-		ctx:        ctx,
 		qs:         qs,
 		ns:         namespacesToTest,
 		clientConn: clientConn,
@@ -335,6 +353,7 @@ func newQueryServiceTestEnv(t *testing.T) *queryServiceTestEnv {
 func generateNamespacesUnderTest(t *testing.T, namespaces []string) *vc.DatabaseConfig {
 	t.Helper()
 	env := vc.NewValidatorAndCommitServiceTestEnv(t, 1)
+	env.SetupSystemTablesAndNamespaces(t.Context(), t)
 
 	clientConf := loadgen.DefaultClientConf()
 	clientConf.Adapter.VCClient = &adapters.VCClientConfig{
@@ -379,7 +398,7 @@ func (it *items) asQuery() *protoqueryservice.QueryNamespace {
 	q := &protoqueryservice.QueryNamespace{
 		NsId: it.ns,
 		// Add additional item that does not exist.
-		Keys: append(it.keys, strToBytes("non-tx")...),
+		Keys: append(it.keys, strToBytes("non+tx")...),
 	}
 	return q
 }
@@ -392,7 +411,7 @@ func (q *queryServiceTestEnv) insert(t *testing.T, i *items) {
 		);`,
 		vc.TableName(i.ns),
 	)
-	_, err := q.pool.Exec(q.ctx, query, i.keys, i.values, i.versions)
+	_, err := q.pool.Exec(t.Context(), query, i.keys, i.values, i.versions)
 	require.NoError(t, err)
 }
 
@@ -409,7 +428,7 @@ func (q *queryServiceTestEnv) update(t *testing.T, i *items) {
 		`,
 		vc.TableName(i.ns),
 	)
-	_, err := q.pool.Exec(q.ctx, query, i.keys, i.values, i.versions)
+	_, err := q.pool.Exec(t.Context(), query, i.keys, i.values, i.versions)
 	require.NoError(t, err)
 }
 
@@ -432,18 +451,14 @@ func requireRow(
 ) {
 	t.Helper()
 	require.Equal(t, expected.ns, ret.NsId)
-	require.ElementsMatch(t, expected.asRows(), ret.Rows)
-}
-
-func requireIntMetricValue(t *testing.T, expected int, m prometheus.Metric) {
-	require.Equal(t, expected, int(test.GetMetricValue(t, m)))
+	test.RequireProtoElementsMatch(t, expected.asRows(), ret.Rows)
 }
 
 func requireIntVecMetricValue(t *testing.T, expected int, mv *prometheus.MetricVec, lvs ...string) {
 	t.Helper()
 	m, err := mv.GetMetricWithLabelValues(lvs...)
 	require.NoError(t, err)
-	requireIntMetricValue(t, expected, m)
+	promutil.RequireIntMetricValue(t, expected, m)
 }
 
 func (q *queryServiceTestEnv) beginView(
@@ -452,16 +467,20 @@ func (q *queryServiceTestEnv) beginView(
 	params *protoqueryservice.ViewParameters,
 ) *protoqueryservice.View {
 	t.Helper()
-	view, err := client.BeginView(q.ctx, params)
+	view, err := client.BeginView(t.Context(), params)
 	require.NoError(t, err)
 	require.NotNil(t, view)
 	require.NotEmpty(t, view.Id)
+	_, file, line, _ := runtime.Caller(1)
 	t.Cleanup(func() {
 		if slices.Contains(q.disabledViews, view.Id) {
 			return
 		}
-		_, err = client.EndView(q.ctx, view)
-		require.NoError(t, err)
+		//nolint:usetesting // t.Context() is dead at cleanup.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		t.Cleanup(cancel)
+		_, err = client.EndView(ctx, view)
+		require.NoErrorf(t, connection.FilterStreamRPCError(err), "view created in %s:%d", file, line)
 	})
 	return view
 }
@@ -472,7 +491,43 @@ func (q *queryServiceTestEnv) endView(
 	view *protoqueryservice.View,
 ) {
 	t.Helper()
-	_, err := client.EndView(q.ctx, view)
+	_, err := client.EndView(t.Context(), view)
 	require.NoError(t, err)
 	q.disabledViews = append(q.disabledViews, view.Id)
+}
+
+func (q *queryServiceTestEnv) makeItems(t *testing.T) []*items {
+	t.Helper()
+	requiredItems := make([]*items, len(q.ns))
+	for i, ns := range q.ns {
+		requiredItems[i] = &items{
+			ns:       ns,
+			keys:     strToBytes("item1", "item2", "item3", "item4"),
+			values:   strToBytes("value1", "value2", "value3", "value4"),
+			versions: verToBytes(0, 1, 2, 3),
+		}
+		q.insert(t, requiredItems[i])
+	}
+	return requiredItems
+}
+
+func makeQuery(it []*items) (query *protoqueryservice.Query, keyCount, querySize int) {
+	query = &protoqueryservice.Query{
+		Namespaces: make([]*protoqueryservice.QueryNamespace, len(it)),
+	}
+	for i, item := range it {
+		keyCount += len(item.keys)
+		qNs := item.asQuery()
+		query.Namespaces[i] = qNs
+		querySize += len(qNs.Keys)
+	}
+	return query, keyCount, querySize
+}
+
+func defaultViewParams(timeout time.Duration) *protoqueryservice.ViewParameters {
+	return &protoqueryservice.ViewParameters{
+		IsoLevel:            protoqueryservice.IsoLevel_RepeatableRead,
+		NonDeferrable:       false,
+		TimeoutMilliseconds: uint64(timeout.Milliseconds()), //nolint:gosec
+	}
 }

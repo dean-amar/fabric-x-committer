@@ -2,7 +2,8 @@ package query
 
 import (
 	"context"
-	"sync"
+
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
 // The following implementation is lock-free. It guarantees that for multiple parallel calls,
@@ -32,17 +33,15 @@ type (
 )
 
 // mapUpdateOrCreate attempts to update or assign a key's value.
-func mapUpdateOrCreate[V any]( //nolint:gocognit
-	ctx context.Context, m *sync.Map, key any, methods updateOrCreate[V],
+func mapUpdateOrCreate[K, V any](
+	ctx context.Context, m *utils.SyncMap[K, *V], key K, methods updateOrCreate[V],
 ) (*V, error) {
 	val, loaded := m.Load(key)
 	for ctx.Err() == nil {
 		// If there is a value, and we can update it, then return it.
 		if loaded && val != nil {
-			if typeVal, ok := val.(*V); ok {
-				if methods.update(typeVal) {
-					return typeVal, nil
-				}
+			if methods.update(val) {
+				return val, nil
 			}
 		}
 

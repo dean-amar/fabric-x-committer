@@ -2,6 +2,7 @@ package dependencygraph
 
 import (
 	"context"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"testing"
 	"time"
 
@@ -95,12 +96,10 @@ func TestLocalDependencyConstructorWithDependencies(t *testing.T) { //nolint:goc
 		for _, txNode := range txsNode {
 			// as there are no dependencies, both the dependsOnTxs and dependents list should be empty
 			require.Empty(t, txNode.dependsOnTxs)
-			require.Equal(t, 0, getLengthOfDependentTx(t, txNode.dependentTxs))
+			require.Equal(t, 0, txNode.dependentTxs.Count())
 		}
 
-		require.Eventually(t, func() bool {
-			return test.GetMetricValue(t, env.metrics.ldgTxProcessedTotal) == 5
-		}, 2*time.Second, 200*time.Millisecond)
+		promutil.EventuallyIntMetric(t, 5, env.metrics.ldgTxProcessedTotal, 2*time.Second, 200*time.Millisecond)
 	})
 
 	t.Run("linear dependency i and i+1 transaction", func(t *testing.T) {
@@ -134,10 +133,10 @@ func TestLocalDependencyConstructorWithDependencies(t *testing.T) { //nolint:goc
 
 			if i == len(txsNode)-1 {
 				// last transaction should not have any dependents
-				require.Equal(t, 0, getLengthOfDependentTx(t, txNode.dependentTxs))
+				require.Equal(t, 0, txNode.dependentTxs.Count())
 			} else {
 				// other transactions should have the next transaction as dependent
-				require.Equal(t, 1, getLengthOfDependentTx(t, txNode.dependentTxs))
+				require.Equal(t, 1, txNode.dependentTxs.Count())
 				_, exist := txNode.dependentTxs.Load(txsNode[i+1])
 				require.True(t, exist)
 			}
@@ -283,7 +282,7 @@ func TestLocalDependencyConstructorWithOrder(t *testing.T) {
 		require.Len(t, txsNode, tc.len)
 		for _, txNode := range txsNode {
 			require.Empty(t, txNode.dependsOnTxs)
-			require.Equal(t, 0, getLengthOfDependentTx(t, txNode.dependentTxs))
+			require.Equal(t, 0, txNode.dependentTxs.Count())
 		}
 	}
 }

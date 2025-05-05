@@ -3,6 +3,8 @@ package dbtest
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base32"
 	"fmt"
 	"os"
 	"strings"
@@ -10,8 +12,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultStartTimeout = 5 * time.Minute
-	defaultDBPrefix     = "sc_unit_tests_db_%s_%s"
+	defaultDBPrefix     = "sc_test_"
 
 	deploymentLocal     = "local"
 	deploymentContainer = "container"
@@ -37,12 +37,19 @@ const (
 )
 
 // randDbName generates random DB name.
+// It digests the current time, the test name, and a random string to a base32 string.
 func randDbName(t *testing.T) string {
 	t.Helper()
-	uuidObj, err := uuid.NewRandomFromReader(rand.Reader)
+	b := make([]byte, 1024)
+	_, err := rand.Read(b)
 	require.NoError(t, err)
-	uuidStr := strings.ReplaceAll(uuidObj.String(), "-", "_")
-	return fmt.Sprintf(defaultDBPrefix, getDBTypeFromEnv(), uuidStr)
+	b, err = time.Now().AppendBinary(b)
+	require.NoError(t, err)
+	s := sha256.New()
+	s.Write([]byte(t.Name()))
+	s.Write(b)
+	uuidStr := strings.ToLower(strings.Trim(base32.StdEncoding.EncodeToString(s.Sum(nil)), "="))
+	return defaultDBPrefix + uuidStr
 }
 
 // getDBDeploymentFromEnv get the desired DB deployment type from the environment variable.
@@ -77,19 +84,18 @@ func PrepareTestEnvWithConnection(t *testing.T, conn *Connection) *Connection {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), defaultStartTimeout)
 	t.Cleanup(cancel)
-	require.True(t, conn.WaitForReady(ctx), errors.Wrapf(ctx.Err(), "database is not ready"))
-	t.Logf("connection nodes details: %s", conn.EndpointsString())
+	require.True(t, conn.waitForReady(ctx), errors.Wrapf(ctx.Err(), "database is not ready"))
+	t.Logf("connection nodes details: %s", conn.endpointsString())
 
 	dbName := randDbName(t)
-	require.NoError(t, conn.CreateDB(ctx, dbName))
+	t.Logf("[%s] db name: %s", t.Name(), dbName)
+	require.NoError(t, conn.execute(ctx, fmt.Sprintf(createDBSQLTempl, dbName)))
 
 	t.Cleanup(func() {
 		//nolint:usetesting // t.Context is finishing right after the test resulting in context.Deadline error.
 		cleanUpCtx, cleanUpCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cleanUpCancel()
-		assert.NoError(t, DefaultRetry.Execute(cleanUpCtx, "drop_database", nil, func() error {
-			return conn.DropDB(cleanUpCtx, dbName)
-		}))
+		logger.WarnStackTrace(conn.execute(cleanUpCtx, fmt.Sprintf(dropDBSQLTempl, dbName)))
 	})
 	// We copy the connection and add the database name
 	connSettings := *conn

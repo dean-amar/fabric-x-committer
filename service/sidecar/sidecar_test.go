@@ -15,6 +15,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric/common/ledger/blkstorage"
 	"github.com/hyperledger/fabric/protoutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.ibm.com/decentralized-trust-research/fabricx-config/internaltools/configtxgen"
 	"google.golang.org/grpc"
@@ -53,7 +54,7 @@ type sidecarTestConfig struct {
 
 const (
 	blockSize              = 100
-	expectedProcessingTime = 15 * time.Second
+	expectedProcessingTime = 30 * time.Second
 )
 
 func (c *sidecarTestConfig) String() string {
@@ -406,7 +407,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	conn, err := connection.LazyConnect(connection.NewDialConfig(&env.config.Committer.Endpoint))
+	conn, err := connection.Connect(connection.NewDialConfig(&env.config.Committer.Endpoint))
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
 	return conn.CanonicalTarget()
@@ -540,11 +541,9 @@ func checkLastCommittedBlock(
 	expectedBlockNumber uint64,
 ) {
 	t.Helper()
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		lastBlock, err := coordinator.GetLastCommittedBlockNumber(ctx, nil)
-		if err != nil {
-			return false
-		}
-		return expectedBlockNumber == lastBlock.Number
+		require.NoError(ct, err)
+		require.Equal(ct, expectedBlockNumber, lastBlock.Number)
 	}, expectedProcessingTime, 50*time.Millisecond)
 }

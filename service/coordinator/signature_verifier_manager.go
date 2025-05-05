@@ -89,7 +89,7 @@ func (svm *signatureVerifierManager) run(ctx context.Context) error {
 	})
 
 	for i, serverConfig := range c.serversConfig {
-		conn, err := connection.LazyConnect(connection.NewDialConfig(&serverConfig.Endpoint))
+		conn, err := connection.Connect(connection.NewDialConfig(&serverConfig.Endpoint))
 		if err != nil {
 			return errors.Wrapf(err, "failed to create connection to signature verifier [%d] at %s",
 				i, &serverConfig.Endpoint)
@@ -243,23 +243,7 @@ func (sv *signatureVerifier) receiveStatusAndForwardToOutput(
 
 		logger.Debugf("New batch came from sv to sv manager, contains %d items", len(response.Responses))
 
-		validatedTxs := dependencygraph.TxNodeBatch{}
-		// TODO: introduce metrics to measure the lock wait/holding duration.
-		sv.txMu.Lock()
-		for _, resp := range response.Responses {
-			k := types.Height{BlockNum: resp.BlockNum, TxNum: uint32(resp.TxNum)} //nolint:gosec
-			txNode, ok := sv.txBeingValidated[k]
-			if !ok {
-				continue
-			}
-			delete(sv.txBeingValidated, k)
-			if resp.Status != protoblocktx.Status_COMMITTED {
-				txNode.Tx.PrelimInvalidTxStatus = &protovcservice.InvalidTxStatus{Code: resp.Status}
-			}
-			validatedTxs = append(validatedTxs, txNode)
-		}
-		sv.txMu.Unlock()
-
+		validatedTxs := sv.fetchAndDeleteTxBeingValidated(response)
 		if !outputValidatedTxs.Write(validatedTxs) {
 			// Since transactions are loaded and deleted from txBeingValidated before their
 			// validation results are queued, we must re-queue the transaction to txBeingValidated
@@ -270,6 +254,28 @@ func (sv *signatureVerifier) receiveStatusAndForwardToOutput(
 
 		promutil.AddToCounter(sv.metrics.sigverifierTransactionProcessedTotal, len(response.Responses))
 	}
+}
+
+func (sv *signatureVerifier) fetchAndDeleteTxBeingValidated(
+	response *protosigverifierservice.ResponseBatch,
+) dependencygraph.TxNodeBatch {
+	validatedTxs := dependencygraph.TxNodeBatch(make([]*dependencygraph.TransactionNode, 0, len(response.Responses)))
+	// TODO: introduce metrics to measure the lock wait/holding duration.
+	sv.txMu.Lock()
+	defer sv.txMu.Unlock()
+	for _, resp := range response.Responses {
+		k := types.Height{BlockNum: resp.BlockNum, TxNum: uint32(resp.TxNum)} //nolint:gosec
+		txNode, ok := sv.txBeingValidated[k]
+		if !ok {
+			continue
+		}
+		delete(sv.txBeingValidated, k)
+		if resp.Status != protoblocktx.Status_COMMITTED {
+			txNode.Tx.PrelimInvalidTxStatus = &protovcservice.InvalidTxStatus{Code: resp.Status}
+		}
+		validatedTxs = append(validatedTxs, txNode)
+	}
+	return validatedTxs
 }
 
 func (sv *signatureVerifier) recoverPendingTransactions(inputTxBatch channel.Writer[dependencygraph.TxNodeBatch]) {

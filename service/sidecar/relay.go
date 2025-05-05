@@ -3,7 +3,6 @@ package sidecar
 import (
 	"context"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
@@ -23,8 +23,8 @@ type (
 		outgoingCommittedBlock        chan<- *common.Block
 		nextBlockNumberToBeCommitted  atomic.Uint64
 		activeBlocksCount             atomic.Int32
-		blkNumToBlkWithStatus         sync.Map
-		txIDToBlkNum                  sync.Map
+		blkNumToBlkWithStatus         utils.SyncMap[uint64, *blockWithStatus]
+		txIDToBlkNum                  utils.SyncMap[string, uint64]
 		lastCommittedBlockSetInterval time.Duration
 		metrics                       *perfMetrics
 	}
@@ -51,6 +51,7 @@ func newRelay(
 	lastCommittedBlockSetInterval time.Duration,
 	metrics *perfMetrics,
 ) *relay {
+	logger.Info("Initializing new relay")
 	if lastCommittedBlockSetInterval == 0 {
 		lastCommittedBlockSetInterval = defaultLastCommittedBlockSetInterval
 	}
@@ -96,7 +97,7 @@ func (r *relay) run(ctx context.Context, config *relayRunConfig) error { //nolin
 		return r.setLastCommittedBlockNumber(gCtx, config.coordClient, expectedNextBlockToBeCommitted)
 	})
 
-	return errors.Wrap(g.Wait(), "stream with the coordinator has ended")
+	return utils.ProcessErr(g.Wait(), "stream with the coordinator has ended")
 }
 
 func (r *relay) preProcessBlockAndSendToCoordinator( //nolint:gocognit
@@ -190,52 +191,48 @@ func (r *relay) processStatusBatch(
 	txsStatus := channel.NewReader(ctx, statusBatch)
 	outgoingCommittedBlock := channel.NewWriter(ctx, r.outgoingCommittedBlock)
 	for {
-		tStatus, ok := txsStatus.Read()
-		if !ok {
+		tStatus, readOK := txsStatus.Read()
+		if !readOK {
 			return errors.Wrap(ctx.Err(), "context ended")
 		}
 
 		startTime := time.Now()
 		for txID, txStatus := range tStatus.GetStatus() {
-			blockNum, ok := r.txIDToBlkNum.Load(txID)
-			if !ok {
-				// NOTE: Consider a scenario where the connection between the sidecar and the coordinator fails due
-				//       to a network issue—not because the coordinator restarts. Assume the relay has already submitted
-				//       a block to the coordinator before the connection issue occurs.
-				//       When the connection is re-established and execution resumes, we will receive the statuses of
-				//       transactions submitted before the connectivity issue. However, the relay will no longer track
-				//       these transactions. This is because when the connection fails, the relay returns control to
-				//       the sidecar, which then fetches statuses directly using the gRPC API to recover the block store
-				//       once the connection is re-established. Consequently, the relay will send transactions to the
-				//       coordinator starting from the next block only.
-				//       This side effect can be fixed if we couple the signature verifier manager and
-				//       validator-committer-manager goroutines in the coordinator with the stream between the sidecar
-				//       and the coordinator. Thus, we can create input-output channels within the coordinator at the
-				//       stream level to avoid this behavior. However, implementing this solution is significantly
-				//       more complex; hence, we have opted for this simpler approach.
+			if blockNum, ok := r.txIDToBlkNum.Load(txID); !ok || txStatus.BlockNumber != blockNum {
+				// - Case 1: Block not found.
+				//   Consider a scenario where the connection between the sidecar and the coordinator fails due
+				//   to a network issue—not because the coordinator restarts. Assume the relay has already submitted
+				//   a block to the coordinator before the connection issue occurs.
+				//   When the connection is re-established and execution resumes, we will receive the statuses of
+				//   transactions submitted before the connectivity issue. However, the relay will no longer track
+				//   these transactions. This is because when the connection fails, the relay returns control to
+				//   the sidecar, which then fetches statuses directly using the gRPC API to recover the block store
+				//   once the connection is re-established. Consequently, the relay will send transactions to the
+				//   coordinator starting from the next block only.
+				//   This side effect can be fixed if we couple the signature verifier manager and
+				//   validator-committer-manager goroutines in the coordinator with the stream between the sidecar
+				//   and the coordinator. Thus, we can create input-output channels within the coordinator at the
+				//   stream level to avoid this behavior. However, implementing this solution is significantly
+				//   more complex; hence, we have opted for this simpler approach.
+				// - Case 2: Block not match.
+				//   Assume the same scenario described above. The only difference is that we find the newly
+				//   enqueued txID is a duplicate of a previously submitted txID. In such a case, the block
+				//   number in the txStatus does not match the block number being tracked by the relay for
+				//   the same txID.
 				continue
 			}
 
-			if txStatus.BlockNumber != blockNum {
-				// NOTE: Assume the same scenario described above. The only difference is that we find the newly
-				//       enqueued txID is a duplicate of a previously submitted txID. In such a case, the block
-				//       number in the txStatus does not match the block number being tracked by the relay for
-				//       the same txID.
-				continue
-			}
-
-			v, ok := r.blkNumToBlkWithStatus.Load(blockNum)
-			if !ok {
+			blkWithStatus, blkOK := r.blkNumToBlkWithStatus.Load(txStatus.BlockNumber)
+			if !blkOK {
 				// This can never occur unless there is a bug in the relay.
-				return errors.Newf("block %d has never been submitted", blockNum)
+				return errors.Newf("block %d has never been submitted", txStatus.BlockNumber)
 			}
-			blkWithStatus, _ := v.(*blockWithStatus) //nolint:revive
 
 			txIndex := blkWithStatus.txIDToTxIndex[txID]
 
 			if blkWithStatus.txStatus[txIndex] != notYetValidated {
 				return errors.Newf("two results for the same TX (txID=%v). blockNum: %d, txNum: %d",
-					txID, blockNum, txIndex)
+					txID, txStatus.BlockNumber, txIndex)
 			}
 
 			blkWithStatus.txStatus[txIndex] = byte(txStatus.GetCode())
@@ -257,12 +254,11 @@ func (r *relay) processCommittedBlocksInOrder(
 ) {
 	for ctx.Err() == nil {
 		nextBlockNumberToBeCommitted := r.nextBlockNumberToBeCommitted.Load()
-		v, exists := r.blkNumToBlkWithStatus.Load(nextBlockNumberToBeCommitted)
+		blkWithStatus, exists := r.blkNumToBlkWithStatus.Load(nextBlockNumberToBeCommitted)
 		if !exists {
 			logger.Debugf("Next block [%d] to be committed is not in progress", nextBlockNumberToBeCommitted)
 			return
 		}
-		blkWithStatus, _ := v.(*blockWithStatus) //nolint:revive
 		if blkWithStatus.pendingCount > 0 {
 			return
 		}

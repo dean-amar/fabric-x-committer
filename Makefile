@@ -228,6 +228,9 @@ lint: FORCE
 full-lint-%: FORCE
 	golangci-lint run --color=always --timeout=4m ./$*/...
 
+full-lint: FORCE
+	golangci-lint run --color=always --timeout=4m ./...
+
 # https://www.gnu.org/software/make/manual/html_node/Force-Targets.html
 # If a rule has no prerequisites or recipe, and the target of the rule is a nonexistent file,
 # then make imagines this target to have been updated whenever its rule is run.

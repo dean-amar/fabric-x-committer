@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"maps"
 	"strconv"
 	"testing"
@@ -34,9 +35,8 @@ type vcMgrTestEnv struct {
 	sigVerTestEnv             *svMgrTestEnv
 }
 
-func newVcMgrTestEnv(t *testing.T, numVCService int, expectedEndErrorMsg ...byte) *vcMgrTestEnv {
+func newVcMgrTestEnv(t *testing.T, numVCService int) *vcMgrTestEnv {
 	t.Helper()
-	expectedEndError := string(expectedEndErrorMsg)
 	vcs, servers := mock.StartMockVCService(t, numVCService)
 	svEnv := newSvMgrTestEnv(t, 2)
 
@@ -57,12 +57,7 @@ func newVcMgrTestEnv(t *testing.T, numVCService int, expectedEndErrorMsg ...byte
 
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
 		err := connection.FilterStreamRPCError(vcm.run(ctx))
-		logger.ErrorStackTrace(err)
-		if expectedEndError != "" {
-			require.ErrorContains(t, err, expectedEndError)
-		} else {
-			assert.NoError(t, err)
-		}
+		assert.NoError(t, err)
 		return nil
 	}, vcm.ready.WaitForReady)
 
@@ -91,12 +86,12 @@ func (e *vcMgrTestEnv) requireConnectionMetrics(
 	)
 }
 
-func (e *vcMgrTestEnv) requireRetriedTxsTotal(t *testing.T, expectedRetridTxsTotal int) {
+func (e *vcMgrTestEnv) requireRetriedTxsTotal(t *testing.T, expectedRetriedTxsTotal int) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		return test.GetMetricValue(t, e.validatorCommitterManager.config.metrics.vcservicesRetriedTransactionTotal) ==
-			float64(expectedRetridTxsTotal)
-	}, 5*time.Second, 250*time.Millisecond)
+	promutil.EventuallyIntMetric(
+		t, expectedRetriedTxsTotal, e.validatorCommitterManager.config.metrics.vcservicesRetriedTransactionTotal,
+		5*time.Second, 250*time.Millisecond,
+	)
 }
 
 func TestValidatorCommitterManager(t *testing.T) {
@@ -104,19 +99,14 @@ func TestValidatorCommitterManager(t *testing.T) {
 
 	ensureZeroWaitingTxs := func(env *vcMgrTestEnv) {
 		for _, vc := range env.validatorCommitterManager.validatorCommitter {
-			count := 0
-			vc.txBeingValidated.Range(func(_, _ any) bool {
-				count++
-				return true
-			})
-			require.Zero(t, count)
+			require.Zero(t, vc.txBeingValidated.Count())
 		}
 	}
 
 	t.Run("Send tx batch to use any vcservice", func(t *testing.T) {
 		t.Parallel()
 		env := newVcMgrTestEnv(t, 2)
-		txBatch, expectedTxsStatus := createInputTxsNodeForTest(t, 5, 1, 1)
+		txBatch, expectedTxsStatus := createInputTxsNodeForTest(5, 1, 1)
 		env.inputTxs <- txBatch
 
 		outTxs := <-env.outputTxs
@@ -126,20 +116,18 @@ func TestValidatorCommitterManager(t *testing.T) {
 
 		require.Equal(t, expectedTxsStatus.Status, outTxsStatus.Status)
 
-		require.Eventually(t, func() bool {
-			return test.GetMetricValue(
-				t,
-				env.validatorCommitterManager.config.metrics.vcserviceTransactionProcessedTotal,
-			) == 5
-		}, 2*time.Second, 100*time.Millisecond)
+		promutil.EventuallyIntMetric(
+			t, 5, env.validatorCommitterManager.config.metrics.vcserviceTransactionProcessedTotal,
+			2*time.Second, 100*time.Millisecond,
+		)
 		ensureZeroWaitingTxs(env)
 	})
 
 	t.Run("send batches to ensure all vcservices are used", func(t *testing.T) {
 		t.Parallel()
 		env := newVcMgrTestEnv(t, 2)
-		txBatch1, expectedTxsStatus1 := createInputTxsNodeForTest(t, 5, 1, 2)
-		txBatch2, expectedTxsStatus2 := createInputTxsNodeForTest(t, 5, 6, 3)
+		txBatch1, expectedTxsStatus1 := createInputTxsNodeForTest(5, 1, 2)
+		txBatch2, expectedTxsStatus2 := createInputTxsNodeForTest(5, 6, 3)
 
 		require.Eventually(t, func() bool {
 			env.inputTxs <- txBatch1
@@ -288,15 +276,11 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 	env.requireRetriedTxsTotal(t, 0)
 
 	numTxs := 10
-	txBatch, expectedTxsStatus := createInputTxsNodeForTest(t, numTxs, 0, 0)
+	txBatch, expectedTxsStatus := createInputTxsNodeForTest(numTxs, 0, 0)
 	env.inputTxs <- txBatch
 
 	require.Eventually(t, func() bool {
-		count := 0
-		env.validatorCommitterManager.validatorCommitter[0].txBeingValidated.Range(func(_, _ any) bool {
-			count++
-			return true
-		})
+		count := env.validatorCommitterManager.validatorCommitter[0].txBeingValidated.Count()
 		return count == numTxs-6
 	}, 4*time.Second, 100*time.Millisecond)
 
@@ -319,7 +303,7 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 	require.Equal(t, expectedTxsStatus.Status, actualTxsStatus)
 
 	txProcessedTotalMetric := env.validatorCommitterManager.config.metrics.vcserviceTransactionProcessedTotal
-	txTotal := test.GetMetricValue(t, txProcessedTotalMetric)
+	txTotal := promutil.GetIntMetricValue(t, txProcessedTotalMetric)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
@@ -330,11 +314,11 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 		},
 	})
 	require.Never(t, func() bool {
-		return test.GetMetricValue(t, txProcessedTotalMetric) > txTotal
+		return promutil.GetIntMetricValue(t, txProcessedTotalMetric) > txTotal
 	}, 2*time.Second, 1*time.Second)
 }
 
-func createInputTxsNodeForTest(_ *testing.T, numTxs, startIndex int, blkNum uint64) (
+func createInputTxsNodeForTest(numTxs, startIndex int, blkNum uint64) (
 	[]*dependencygraph.TransactionNode, *protoblocktx.TransactionsStatus,
 ) {
 	txsNode := make([]*dependencygraph.TransactionNode, numTxs)

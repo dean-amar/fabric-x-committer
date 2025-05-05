@@ -12,7 +12,6 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
 type metricsProviderTestEnv struct {
@@ -67,10 +66,10 @@ func TestCounter(t *testing.T) {
 	c.Inc()
 	c.Inc()
 
-	test.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_committed_transaction_total 2"})
+	promutil.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_committed_transaction_total 2"})
 
 	promutil.AddToCounter(c, 10)
-	test.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_committed_transaction_total 12"})
+	promutil.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_committed_transaction_total 12"})
 }
 
 func TestCounterVec(t *testing.T) {
@@ -91,7 +90,7 @@ func TestCounterVec(t *testing.T) {
 	promutil.AddToCounterVec(cv, []string{"ns_2"}, 1)
 	promutil.AddToCounterVec(cv, []string{"ns_1"}, 1)
 
-	test.CheckMetrics(t, env.client, env.provider.url, []string{
+	promutil.CheckMetrics(t, env.client, env.provider.url, []string{
 		`vcservice_preparer_transaction_total{namespace="ns_1"} 2`,
 		`vcservice_preparer_transaction_total{namespace="ns_2"} 1`,
 	})
@@ -111,13 +110,13 @@ func TestNewGuage(t *testing.T) {
 	g := env.provider.NewGauge(opts)
 
 	g.Add(10)
-	test.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_preparer_transactions_queued 10"})
+	promutil.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_preparer_transactions_queued 10"})
 
 	g.Sub(3)
-	test.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_preparer_transactions_queued 7"})
+	promutil.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_preparer_transactions_queued 7"})
 
 	promutil.SetGauge(g, 5)
-	test.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_preparer_transactions_queued 5"})
+	promutil.CheckMetrics(t, env.client, env.provider.url, []string{"vcservice_preparer_transactions_queued 5"})
 }
 
 func TestNewGuageVec(t *testing.T) {
@@ -135,7 +134,7 @@ func TestNewGuageVec(t *testing.T) {
 
 	gv.With(prometheus.Labels{"namespace": "ns_1"}).Add(7)
 	gv.With(prometheus.Labels{"namespace": "ns_2"}).Add(2)
-	test.CheckMetrics(
+	promutil.CheckMetrics(
 		t,
 		env.client,
 		env.provider.url,
@@ -146,7 +145,7 @@ func TestNewGuageVec(t *testing.T) {
 	)
 
 	promutil.SetGaugeVec(gv, []string{"ns_1"}, 4)
-	test.CheckMetrics(
+	promutil.CheckMetrics(
 		t,
 		env.client,
 		env.provider.url,
@@ -173,7 +172,7 @@ func TestNewHistogram(t *testing.T) {
 	h.Observe(500 * time.Millisecond.Seconds())
 	h.Observe(time.Second.Seconds())
 	promutil.Observe(h, 10*time.Second)
-	test.CheckMetrics(
+	promutil.CheckMetrics(
 		t,
 		env.client,
 		env.provider.url,
@@ -203,7 +202,7 @@ func TestNewHistogramVec(t *testing.T) {
 	h.With(prometheus.Labels{"namespace": "ns_2"}).Observe(time.Second.Seconds())
 	h.WithLabelValues("ns_1").Observe(10 * time.Second.Seconds())
 
-	test.CheckMetrics(
+	promutil.CheckMetrics(
 		t,
 		env.client,
 		env.provider.url,

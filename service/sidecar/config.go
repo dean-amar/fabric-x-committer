@@ -15,36 +15,38 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
 )
 
-// Config holds the configuration of the sidecar service. This includes
-// sidecar endpoint, committer endpoint to which the sidecar pushes the block and pulls statuses,
-// and the config of ledger service, and the orderer setup.
-// It may contain the orderer endpoint from which the sidecar pulls blocks.
-type Config struct {
-	Server                        *connection.ServerConfig `mapstructure:"server"`
-	Committer                     CoordinatorConfig        `mapstructure:"committer"`
-	Ledger                        LedgerConfig             `mapstructure:"ledger"`
-	Orderer                       broadcastdeliver.Config  `mapstructure:"orderer"`
-	LastCommittedBlockSetInterval time.Duration            `mapstructure:"last-committed-block-set-interval"`
-	Monitoring                    monitoring.Config        `mapstructure:"monitoring"`
-	Bootstrap                     Bootstrap                `mapstructure:"bootstrap"`
-}
+type (
+	// Config holds the configuration of the sidecar service. This includes
+	// sidecar endpoint, committer endpoint to which the sidecar pushes the block and pulls statuses,
+	// and the config of ledger service, and the orderer setup.
+	// It may contain the orderer endpoint from which the sidecar pulls blocks.
+	Config struct {
+		Server                        *connection.ServerConfig `mapstructure:"server"`
+		Committer                     CoordinatorConfig        `mapstructure:"committer"`
+		Ledger                        LedgerConfig             `mapstructure:"ledger"`
+		Orderer                       broadcastdeliver.Config  `mapstructure:"orderer"`
+		LastCommittedBlockSetInterval time.Duration            `mapstructure:"last-committed-block-set-interval"`
+		Monitoring                    monitoring.Config        `mapstructure:"monitoring"`
+		Bootstrap                     Bootstrap                `mapstructure:"bootstrap"`
+	}
+	// Bootstrap configures how to obtain the bootstrap configuration.
+	Bootstrap struct {
+		// GenesisBlockFilePath is the path for the genesis block.
+		// If omitted, the local configuration will be used.
+		GenesisBlockFilePath string `mapstructure:"genesis-block-file-path" yaml:"genesis-block-file-path,omitempty"`
+	}
 
-// Bootstrap configures how to obtain the bootstrap configuration.
-type Bootstrap struct {
-	// GenesisBlockFilePath is the path for the genesis block.
-	// If omitted, the local configuration will be used.
-	GenesisBlockFilePath string `mapstructure:"genesis-block-file-path" yaml:"genesis-block-file-path,omitempty"`
-}
+	// CoordinatorConfig holds the endpoint of the coordinator component in the
+	// committer service.
+	CoordinatorConfig struct {
+		Endpoint connection.Endpoint `mapstructure:"endpoint"`
+	}
 
-// CoordinatorConfig holds the endpoint of the coordinator component in the
-// committer service.
-type CoordinatorConfig struct {
-	Endpoint connection.Endpoint `mapstructure:"endpoint"`
-}
-
-type LedgerConfig struct {
-	Path string `mapstructure:"path"`
-}
+	// LedgerConfig holds the ledger path.
+	LedgerConfig struct {
+		Path string `mapstructure:"path"`
+	}
+)
 
 // LoadBootstrapConfig loads the bootstrap config according to the bootstrap method.
 func LoadBootstrapConfig(conf *Config) error {

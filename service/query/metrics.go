@@ -10,7 +10,7 @@ const (
 	grpcBeginView             = "begin_view"
 	grpcEndView               = "end_view"
 	grpcGetRows               = "get_rows"
-	sessionViews              = "viewIDToViewHolder"
+	sessionViews              = "active_views"
 	sessionProcessingQueries  = "processing_queries"
 	sessionWaitingQueries     = "waiting_queries"
 	sessionInExecutionQueries = "in_execution_queries"
@@ -36,7 +36,7 @@ type perfMetrics struct {
 	requestAssignmentLatencySeconds prometheus.Histogram
 	queryLatencySeconds             prometheus.Histogram
 
-	retryOperationStatusCounter *prometheus.CounterVec
+	failedRetriesCounter *prometheus.CounterVec
 }
 
 func newQueryServiceMetrics() *perfMetrics {
@@ -110,7 +110,7 @@ func newQueryServiceMetrics() *perfMetrics {
 			Help:      "The latency of the queries' batches",
 			Buckets:   timeBuckets,
 		}),
-		retryOperationStatusCounter: p.NewCounterVec(prometheus.CounterOpts{
+		failedRetriesCounter: p.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "queryservice",
 			Subsystem: "database_retry",
 			Name:      "per_operation_total",

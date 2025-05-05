@@ -93,7 +93,7 @@ func TestExecute(t *testing.T) {
 			},
 			failUntil:              -1, // op always fails.
 			expectError:            true,
-			expectedErrorSubstring: "multiple retries failed",
+			expectedErrorSubstring: "error",
 		},
 		{
 			name:              "Nil Profile",

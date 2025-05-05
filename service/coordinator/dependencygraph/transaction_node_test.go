@@ -1,7 +1,7 @@
 package dependencygraph
 
 import (
-	"sync"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -9,6 +9,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
 var nsID1ForTest = "1"
@@ -43,7 +44,7 @@ func TestTransactionNode(t *testing.T) {
 		TxNodeBatch{ // expectedDependentTxs
 			tx2Node,
 		},
-		tx1Node.dependentTxs, // actualDependentTxs
+		&tx1Node.dependentTxs, // actualDependentTxs
 	)
 
 	tx3Node := createTxNode(
@@ -66,14 +67,14 @@ func TestTransactionNode(t *testing.T) {
 			tx2Node,
 			tx3Node,
 		},
-		tx1Node.dependentTxs, // actualDependentTxs
+		&tx1Node.dependentTxs, // actualDependentTxs
 	)
 	checkDependentTxs(
 		t,
 		TxNodeBatch{ // expectedDependentTxs
 			tx3Node,
 		},
-		tx2Node.dependentTxs, // actualDependentTxs
+		&tx2Node.dependentTxs, // actualDependentTxs
 	)
 
 	freedTxs := tx1Node.freeDependents()
@@ -165,29 +166,14 @@ func checkNewTxNode(
 	require.True(t, txNode.isDependencyFree())
 	require.ElementsMatch(t, readsWrites.readsOnly, txNode.rwKeys.readsOnly)
 	require.ElementsMatch(t, readsWrites.writesOnly, txNode.rwKeys.writesOnly)
-	require.Equal(t, 0, getLengthOfDependentTx(t, txNode.dependentTxs))
+	require.Equal(t, 0, txNode.dependentTxs.Count())
 }
 
-func checkDependentTxs(t *testing.T, expectedTransactionList TxNodeBatch, dependentTxs *sync.Map) {
+func checkDependentTxs(
+	t *testing.T, expectedTransactionList TxNodeBatch, dependentTxs *utils.SyncMap[*TransactionNode, any],
+) {
 	t.Helper()
-	actualLen := getLengthOfDependentTx(t, dependentTxs)
-	require.Len(t, expectedTransactionList, actualLen)
-
-	actualTransactionList := make(TxNodeBatch, 0, actualLen)
-	dependentTxs.Range(func(k, _ any) bool {
-		txNode, _ := k.(*TransactionNode)
-		actualTransactionList = append(actualTransactionList, txNode)
-		return true
-	})
+	actualTransactionList := slices.Collect(dependentTxs.IterKeys())
+	require.Len(t, expectedTransactionList, len(actualTransactionList))
 	require.ElementsMatch(t, expectedTransactionList, actualTransactionList)
-}
-
-func getLengthOfDependentTx(_ *testing.T, dependentTxs *sync.Map) int {
-	var length int
-	dependentTxs.Range(func(_, _ any) bool {
-		length++
-		return true
-	})
-
-	return length
 }

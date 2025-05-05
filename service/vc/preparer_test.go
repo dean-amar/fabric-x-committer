@@ -19,6 +19,7 @@ type prepareTestEnv struct {
 }
 
 func newPrepareTestEnv(t *testing.T) *prepareTestEnv {
+	t.Helper()
 	txBatch := make(chan *protovcservice.TransactionBatch, 10)
 	preparedTxs := make(chan *preparedTransactions, 10)
 	metrics := newVCServiceMetrics()
@@ -415,7 +416,7 @@ func TestPrepareTxWithReadWritesOnly(t *testing.T) {
 	ensurePreparedTx(t, expectedPreparedTxs, preparedTxs)
 }
 
-func TestPrepareTx(t *testing.T) {
+func TestPrepareTx(t *testing.T) { //nolint:maintidx // cannot improve.
 	t.Parallel()
 
 	env := newPrepareTestEnv(t)

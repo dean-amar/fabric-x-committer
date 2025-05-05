@@ -10,6 +10,7 @@ import (
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
 
@@ -36,6 +37,7 @@ const (
 // This allows them to fetch the results once the query is done.
 type (
 	viewsBatcher struct {
+		//nolint:containedctx // used to restrict jobs to the runtime context.
 		ctx     context.Context
 		config  *Config
 		metrics *perfMetrics
@@ -44,12 +46,13 @@ type (
 		// viewIDToViewHolder maps view-id to *viewHolder.
 		// viewParametersToLatestBatcher maps view-parameters-key to *batcher.
 		// nonConsistentBatcher holds the batcher for any non-consistent queries.
-		viewIDToViewHolder            sync.Map
-		viewParametersToLatestBatcher sync.Map
+		viewIDToViewHolder            utils.SyncMap[string, *viewHolder]
+		viewParametersToLatestBatcher utils.SyncMap[int, *batcher]
 		nonConsistentBatcher          batcher
 	}
 	viewHolder struct {
-		m      sync.Mutex
+		m sync.Mutex
+		//nolint:containedctx // used to restrict jobs to the view timeout.
 		ctx    context.Context
 		cancel context.CancelFunc
 		params *protoqueryservice.ViewParameters
@@ -58,7 +61,8 @@ type (
 		batcher *batcher
 	}
 	batcher struct {
-		m          sync.Mutex
+		m sync.Mutex
+		//nolint:containedctx // used to restrict jobs to the view and runtime timeout.
 		ctx        context.Context
 		cancel     context.CancelFunc
 		config     *Config
@@ -67,10 +71,11 @@ type (
 		refCounter uint64
 
 		// nsToLatestQueryBatch maps a namespace ID to its latest *namespaceQueryBatch.
-		nsToLatestQueryBatch sync.Map
+		nsToLatestQueryBatch utils.SyncMap[string, *namespaceQueryBatch]
 	}
 	namespaceQueryBatch struct {
-		m        sync.Mutex
+		m sync.Mutex
+		//nolint:containedctx // used to restrict waiting queries to query life span.
 		ctx      context.Context
 		cancel   context.CancelCauseFunc
 		metrics  *perfMetrics
@@ -130,11 +135,7 @@ func (q *viewsBatcher) getBatcher(ctx context.Context, view *protoqueryservice.V
 	if view == nil {
 		return &q.nonConsistentBatcher, nil
 	}
-	val, ok := q.viewIDToViewHolder.Load(view.Id)
-	if !ok {
-		return nil, ErrInvalidOrStaleView
-	}
-	v, ok := val.(*viewHolder)
+	v, ok := q.viewIDToViewHolder.Load(view.Id)
 	if !ok {
 		return nil, ErrInvalidOrStaleView
 	}
@@ -241,11 +242,7 @@ func makeTxOptions(p *protoqueryservice.ViewParameters) *pgx.TxOptions {
 
 // removeViewID releases a view.
 func (q *viewsBatcher) removeViewID(viewID string) error {
-	val, ok := q.viewIDToViewHolder.LoadAndDelete(viewID)
-	if !ok {
-		return ErrInvalidOrStaleView
-	}
-	v, ok := val.(*viewHolder)
+	v, ok := q.viewIDToViewHolder.LoadAndDelete(viewID)
 	if !ok {
 		return ErrInvalidOrStaleView
 	}
@@ -428,7 +425,7 @@ func (q *namespaceQueryBatch) waitForRows(
 		return nil, ErrInvalidOrStaleView
 	}
 	// context.Cause() returns context.Canceled when err=nil is reported.
-	if err := context.Cause(q.ctx); !errors.Is(err, context.Canceled) {
+	if err := context.Cause(q.ctx); !errors.Is(err, context.Canceled) { //nolint:contextcheck // false positive.
 		return nil, err
 	}
 

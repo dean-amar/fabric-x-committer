@@ -80,7 +80,7 @@ func (c *transactionCommitter) commit(ctx context.Context) error {
 		// TODO: Add test to ensure commit is retried.
 		txsStatus, err = c.commitTransactions(ctx, vTx)
 		if err != nil {
-			return fmt.Errorf("failed to commit transactions: %w", err) //nolint:wrapcheck
+			return fmt.Errorf("failed to commit transactions: %w", err)
 		}
 
 		promutil.Observe(c.metrics.committerTxBatchLatencySeconds, time.Since(start))
@@ -106,7 +106,7 @@ func (c *transactionCommitter) commitTransactions(
 	// a vcservice instance. One instance might successfully write the BlindWrite,
 	// while others encounter a conflict at commit time because the new keys
 	// already exist. In these cases, we need to mark the TxID as invalid.
-	// Since mismatches are processed against `readToTxIDs`,
+	// Since conflicts are processed against `readToTxIDs`,
 	// we must include BlindWrites with a null version in this map.
 	//
 	// Eventually, the transaction will receive the correct committed status based on
@@ -131,20 +131,20 @@ func (c *transactionCommitter) commitTransactions(
 		}
 
 		var (
-			mismatch   namespaceToReads
-			duplicated []TxID
+			conflicts  namespaceToReads
+			duplicates []TxID
 			err        error
 		)
 		if retryErr := c.db.retry.Execute(ctx,
-			"transactions_commit",
-			c.metrics.retryOperationStatusCounter, func() error {
-				mismatch, duplicated, err = c.db.commit(ctx, info)
+			"commit_transactions",
+			c.metrics.failedRetriesCounter, func() error {
+				conflicts, duplicates, err = c.db.commit(ctx, info)
 				return err
 			}); retryErr != nil {
-			return nil, fmt.Errorf("failed to commit transactions: %w", err) //nolint:wrapcheck
+			return nil, err
 		}
 
-		if mismatch.empty() && len(duplicated) == 0 {
+		if conflicts.empty() && len(duplicates) == 0 {
 			// NOTE: If a submitted transaction is invalid for multiple reasons, including a duplicate
 			//       transaction ID, the committer prioritizes Status_ABORTED_DUPLICATE_TXID over any other
 			//       invalid status code. Even if a previously committed transaction is resubmitted (regardless
@@ -153,15 +153,15 @@ func (c *transactionCommitter) commitTransactions(
 			//       duplicate or a resubmission. If it is a resubmission, it retrieves the correct status from
 			//       the tx_status table.
 			if err := c.setCorrectStatusForDuplicateTxID(ctx, info.batchStatus, info.txIDToHeight); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to set correct status for duplicate txs: %w", err)
 			}
 			return info.batchStatus, nil
 		}
 
-		if err := vTx.updateMismatch(mismatch); err != nil {
-			return nil, err
+		if err := vTx.invalidateTxsOnReadConflicts(conflicts); err != nil {
+			return nil, fmt.Errorf("failed to invalidate transactions on read conflicts: %w", err)
 		}
-		vTx.updateInvalidTxs(duplicated, protoblocktx.Status_ABORTED_DUPLICATE_TXID)
+		vTx.updateInvalidTxs(duplicates, protoblocktx.Status_ABORTED_DUPLICATE_TXID)
 	}
 
 	return nil, errors.Newf("[BUG] commit failed after %d retries", maxRetriesToRemoveAllInvalidTxs)

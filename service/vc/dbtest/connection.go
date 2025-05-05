@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -18,16 +19,16 @@ const (
 	defaultUsername = "yugabyte"
 	defaultPassword = "yugabyte"
 
-	stmtTemplateCreateDb       = "CREATE DATABASE %s;"
-	stmtTemplateDropDbIfExists = "DROP DATABASE IF EXISTS %s WITH (FORCE);"
+	createDBSQLTempl = "CREATE DATABASE %s;"
+	dropDBSQLTempl   = "DROP DATABASE IF EXISTS %s WITH (FORCE);"
 )
 
-// DefaultRetry is used for tests.
-var DefaultRetry = &connection.RetryProfile{
+// defaultRetry is used for tests.
+var defaultRetry = &connection.RetryProfile{
 	// MaxElapsedTime is the duration allocated for the retry mechanism during the database initialization process.
-	MaxElapsedTime: 3 * time.Minute,
+	MaxElapsedTime: 5 * time.Minute,
 	// InitialInterval is the starting wait time interval that increases every retry attempt.
-	InitialInterval: 100 * time.Millisecond,
+	InitialInterval: time.Duration(rand.Intn(900)+100) * time.Millisecond,
 }
 
 // Connection facilities connecting to a YugabyteDB instance.
@@ -48,43 +49,43 @@ func NewConnection(endpoints ...*connection.Endpoint) *Connection {
 	}
 }
 
-// DataSourceName returns the dataSourceName to be used by the database/sql package.
-func (y *Connection) DataSourceName() string {
+// dataSourceName returns the dataSourceName to be used by the database/sql package.
+func (c *Connection) dataSourceName() string {
 	return fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
-		y.User, y.Password, y.EndpointsString(), y.Database)
+		c.User, c.Password, c.endpointsString(), c.Database)
 }
 
-// EndpointsString returns the address:port as a string with comma as a separator between endpoints.
-func (y *Connection) EndpointsString() string {
-	return connection.AddressString(y.Endpoints...)
+// endpointsString returns the address:port as a string with comma as a separator between endpoints.
+func (c *Connection) endpointsString() string {
+	return connection.AddressString(c.Endpoints...)
 }
 
-// Open opens a connection pool to the database.
-func (y *Connection) Open(ctx context.Context) (*pgxpool.Pool, error) {
-	poolConfig, err := pgxpool.ParseConfig(y.DataSourceName())
+// open opens a connection pool to the database.
+func (c *Connection) open(ctx context.Context) (*pgxpool.Pool, error) {
+	poolConfig, err := pgxpool.ParseConfig(c.dataSourceName())
 	if err != nil {
-		return nil, errors.Wrapf(err, "error parsing datasource: %s", y.EndpointsString())
+		return nil, errors.Wrapf(err, "error parsing datasource: %s", c.endpointsString())
 	}
 
 	poolConfig.MaxConns = 1
 	poolConfig.MinConns = 1
 
 	var pool *pgxpool.Pool
-	if retryErr := DefaultRetry.Execute(ctx, "pool_creation_test", nil, func() error {
+	if retryErr := defaultRetry.Execute(ctx, "pool_creation_test", nil, func() error {
 		pool, err = pgxpool.ConnectConfig(ctx, poolConfig)
 		return err
 	}); retryErr != nil {
-		return nil, errors.Wrapf(err, "error making pool: %s", y.EndpointsString())
+		return nil, errors.Wrapf(err, "error making pool: %s", c.endpointsString())
 	}
 	return pool, nil
 }
 
-// WaitForReady repeatably checks readiness until positive response arrives.
-func (y *Connection) WaitForReady(ctx context.Context) bool {
+// waitForReady repeatably checks readiness until positive response arrives.
+func (c *Connection) waitForReady(ctx context.Context) bool {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for !y.IsEndpointReady(ctx) {
+	for !c.isEndpointReady(ctx) {
 		select {
 		case <-ctx.Done():
 			// Stop trying if the context cancelled
@@ -96,71 +97,33 @@ func (y *Connection) WaitForReady(ctx context.Context) bool {
 	return true
 }
 
-// IsEndpointReady attempts to ping the database and returns true if successful.
-func (y *Connection) IsEndpointReady(ctx context.Context) bool {
-	conn, err := y.Open(ctx)
+// isEndpointReady attempts to ping the database and returns true if successful.
+func (c *Connection) isEndpointReady(ctx context.Context) bool {
+	conn, err := c.open(ctx)
 	if err != nil {
-		logger.Debugf("[%s] error opening connection: %s", y.EndpointsString(), err)
+		logger.Debugf("[%s] error opening connection: %s", c.endpointsString(), err)
 		return false
 	}
 	defer conn.Close()
 
 	if err = conn.Ping(ctx); err != nil {
-		logger.Debugf("[%s] error pinging connection: %s", y.EndpointsString(), err)
+		logger.Debugf("[%s] error pinging connection: %s", c.endpointsString(), err)
 		return false
 	}
-	logger.Infof("[%s] Connected to database", y.EndpointsString())
+	logger.Infof("[%s] Connected to database", c.endpointsString())
 	return true
 }
 
-// CreateDB creates the database.
-func (y *Connection) CreateDB(ctx context.Context, dbName string) error {
-	pool, err := y.Open(ctx)
+func (c *Connection) execute(ctx context.Context, stmt string) error {
+	pool, err := c.open(ctx)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 
-	if err = execDropIfExitsDB(ctx, pool, dbName); err != nil {
-		return err
-	}
-
-	return execCreateDB(ctx, pool, dbName)
-}
-
-// DropDB clears the database.
-func (y *Connection) DropDB(ctx context.Context, dbName string) error {
-	pool, err := y.Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-	return execDropIfExitsDB(ctx, pool, dbName)
-}
-
-// execCreateDB creates a DB if exists given an existing pool.
-func execCreateDB(ctx context.Context, pool *pgxpool.Pool, dbName string) error {
-	logger.Infof("Creating database: %s", dbName)
-	if execErr := PoolExecOperation(ctx, pool, fmt.Sprintf(stmtTemplateCreateDb, dbName)); execErr != nil {
-		return execErr
-	}
-	logger.Infof("Database created: %s", dbName)
-	return nil
-}
-
-// execDropIfExitsDB drops a DB if exists given an existing pool.
-func execDropIfExitsDB(ctx context.Context, pool *pgxpool.Pool, dbName string) error {
-	logger.Infof("Dropping database if exists: %s", dbName)
-	if execErr := PoolExecOperation(ctx, pool, fmt.Sprintf(stmtTemplateDropDbIfExists, dbName)); execErr != nil {
-		return execErr
-	}
-	logger.Infof("Database dropped: %s", dbName)
-	return nil
-}
-
-func PoolExecOperation(ctx context.Context, pool *pgxpool.Pool, stmt string, args ...any) error {
-	return DefaultRetry.Execute(ctx, "pool_exec", nil, func() error {
-		_, err := pool.Exec(ctx, stmt, args...)
-		return errors.Wrapf(err, "db exec failed: %s", stmt)
+	return defaultRetry.ExecuteSQL(ctx, &connection.SqlExecutionBundle{
+		OperationName: "create or drop db",
+		SqlStmt:       stmt,
+		Pool:          pool,
 	})
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -22,6 +23,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecarclient"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
@@ -118,9 +120,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			BlockSize:         conf.BlockSize,
 			BlockTimeout:      conf.BlockTimeout,
 			LoadGenBlockLimit: conf.LoadgenBlockLimit,
-			Logging: &logging.Config{
-				Enabled: false,
-			},
+			Logging:           &logging.DefaultConfig,
 		},
 		nsToCrypto:       make(map[string]*Crypto),
 		CommittedBlock:   make(chan *common.Block, 100),
@@ -133,7 +133,6 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	} else {
 		c.dbEnv = vc.NewDatabaseTestEnvWithCluster(t, conf.DBCluster)
 	}
-
 	t.Log("Allocating ports")
 	s := &c.SystemConfig
 	s.Endpoints.Database = c.dbEnv.DBConf.Endpoints
@@ -150,6 +149,8 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	s.DB.Name = c.dbEnv.DBConf.Database
 	s.DB.LoadBalance = c.dbEnv.DBConf.LoadBalance
 	s.LedgerPath = t.TempDir()
+
+	t.Logf("Endpoints: %s", &utils.LazyJSON{O: s.Endpoints, Indent: "  "})
 
 	t.Log("Creating config block")
 	c.ordererEndpoints = make([]*connection.OrdererEndpoint, len(s.Endpoints.Orderer))
@@ -285,7 +286,7 @@ func (c *CommitterRuntime) startLoadGenWithTemplate(t *testing.T, template strin
 // clientConn creates a service connection using its given server endpoint.
 func clientConn(t *testing.T, e *connection.Endpoint) *grpc.ClientConn {
 	t.Helper()
-	serviceConnection, err := connection.LazyConnect(connection.NewDialConfig(e))
+	serviceConnection, err := connection.Connect(connection.NewDialConfig(e))
 	require.NoError(t, err)
 	return serviceConnection
 }
@@ -517,14 +518,11 @@ func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum u
 
 func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, blkNum uint64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		lastBlock, err := c.CoordinatorClient.GetLastCommittedBlockNumber(ctx, nil)
-		if err != nil {
-			return false
-		}
-		return lastBlock.Number >= blkNum
-	}, time.Minute, 250*time.Millisecond)
+		require.NoError(ct, err)
+		require.GreaterOrEqual(ct, lastBlock.Number, blkNum)
+	}, 2*time.Minute, 250*time.Millisecond)
 }

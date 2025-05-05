@@ -2,7 +2,7 @@ package coordinator
 
 import (
 	"context"
-	"sync"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
@@ -43,7 +43,7 @@ type (
 
 		// vc service returns only the txID and the status of the transaction. To find the
 		// transaction node associated with the txID, we use txBeingValidated map.
-		txBeingValidated *sync.Map
+		txBeingValidated utils.SyncMap[string, *dependencygraph.TransactionNode]
 	}
 
 	validatorCommitterManagerConfig struct {
@@ -84,7 +84,7 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 
 	for i, serverConfig := range c.serversConfig {
 		logger.Debugf("vc manager creates client to vc [%d] listening on %s", i, &serverConfig.Endpoint)
-		vc, err := newValidatorCommitter(serverConfig, c.metrics, c.policyMgr) //nolint:contextcheck // issue #693
+		vc, err := newValidatorCommitter(serverConfig, c.metrics, c.policyMgr)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create validator client with %s", serverConfig.Endpoint.Address())
 		}
@@ -95,18 +95,29 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		g.Go(func() error {
 			defer connection.CloseConnectionsLog(vc.conn)
 			return connection.Sustain(eCtx, func() (err error) {
-				defer func() {
-					err = errors.Join(vc.recoverPendingTransactions(txBatchQueue), err)
-				}()
-				err = vc.sendTransactionsAndForwardStatus(
+				defer vc.recoverPendingTransactions(txBatchQueue)
+				return vc.sendTransactionsAndForwardStatus(
 					eCtx,
 					txBatchQueue,
 					channel.NewWriter(eCtx, c.outgoingValidatedTxsNode),
 					channel.NewWriter(eCtx, c.outgoingTxsStatus),
 				)
-				return err
 			})
 		})
+	}
+
+	// TODO: add retry policy to config.
+	r := connection.RetryProfile{}
+	if err := r.Execute(ctx, "setup_system_tables_and_ns", nil, func() error {
+		_, err := utils.FirstSuccessful(
+			vcm.validatorCommitter,
+			func(vc *validatorCommitter) (*protovcservice.Empty, error) {
+				return vc.client.SetupSystemTablesAndNamespaces(ctx, nil)
+			},
+		)
+		return errors.Wrap(err, "failed to setup system tables and namespaces")
+	}); err != nil {
+		return err
 	}
 
 	vcm.ready.SignalReady()
@@ -208,11 +219,10 @@ func newValidatorCommitter(serverConfig *connection.ServerConfig, metrics *perfM
 	client := protovcservice.NewValidationAndCommitServiceClient(conn)
 
 	return &validatorCommitter{
-		conn:             conn,
-		client:           client,
-		metrics:          metrics,
-		policyMgr:        policyMgr,
-		txBeingValidated: &sync.Map{},
+		conn:      conn,
+		client:    client,
+		metrics:   metrics,
+		policyMgr: policyMgr,
 	}, nil
 }
 
@@ -294,11 +304,7 @@ func (vc *validatorCommitter) receiveStatusAndForwardToOutput(
 
 		logger.Debugf("Batch contains %d TX statuses", len(txsStatus.Status))
 
-		txsNode, untrackedTxIDs, err := vc.getTxsAndUpdatePolicies(txsStatus)
-		if err != nil {
-			return err
-		}
-
+		txsNode, untrackedTxIDs := vc.getTxsAndUpdatePolicies(txsStatus)
 		for _, txID := range untrackedTxIDs {
 			// untrackedTxIDs can be non-empty only when the coordinator restarts.
 			delete(txsStatus.Status, txID)
@@ -336,41 +342,25 @@ func (vc *validatorCommitter) receiveStatusAndForwardToOutput(
 }
 
 func (vc *validatorCommitter) recoverPendingTransactions(inputTxsNode channel.Writer[dependencygraph.TxNodeBatch],
-) error {
-	pendingTxs := dependencygraph.TxNodeBatch{}
-	var err error
-
-	vc.txBeingValidated.Range(func(_, v any) bool {
-		txNode, ok := v.(*dependencygraph.TransactionNode)
-		if !ok {
-			err = errors.Wrap(connection.ErrNonRetryable, "failed to cast txNode stored in the txBeingValidated map")
-			return false
-		}
-		pendingTxs = append(pendingTxs, txNode)
-		return true
-	})
-	if err != nil {
-		return err
-	}
-
-	vc.txBeingValidated = &sync.Map{}
+) {
+	pendingTxs := slices.Collect(vc.txBeingValidated.IterValues())
+	vc.txBeingValidated.Clear()
 
 	if len(pendingTxs) == 0 {
-		return nil
+		return
 	}
 
 	promutil.AddToCounter(vc.metrics.vcservicesRetriedTransactionTotal, len(pendingTxs))
 	inputTxsNode.Write(pendingTxs)
-	return nil
 }
 
 func (vc *validatorCommitter) getTxsAndUpdatePolicies(txsStatus *protoblocktx.TransactionsStatus) (
-	[]*dependencygraph.TransactionNode, []string, error,
+	[]*dependencygraph.TransactionNode, []string,
 ) {
 	txsNode := make([]*dependencygraph.TransactionNode, 0, len(txsStatus.Status))
 	var untrackedTxIDs []string
 	for txID, txStatus := range txsStatus.Status {
-		v, ok := vc.txBeingValidated.LoadAndDelete(txID)
+		txNode, ok := vc.txBeingValidated.LoadAndDelete(txID)
 		if !ok {
 			// Because the VC manager might submit the same transaction multiple times (for example,
 			// if a VC service fails or the coordinator reconnects to a failed VC service), it could
@@ -379,13 +369,6 @@ func (vc *validatorCommitter) getTxsAndUpdatePolicies(txsStatus *protoblocktx.Tr
 			// the next status.
 			untrackedTxIDs = append(untrackedTxIDs, txID)
 			continue
-		}
-
-		txNode, ok := v.(*dependencygraph.TransactionNode)
-		if !ok {
-			// NOTE: This error should never occur.
-			return nil, nil, errors.Wrap(connection.ErrNonRetryable,
-				"failed to cast txNode from the txBeingValidated map")
 		}
 		txsNode = append(txsNode, txNode)
 
@@ -399,5 +382,5 @@ func (vc *validatorCommitter) getTxsAndUpdatePolicies(txsStatus *protoblocktx.Tr
 		vc.policyMgr.updateFromTx(txNode.Tx.Namespaces)
 	}
 
-	return txsNode, untrackedTxIDs, nil
+	return txsNode, untrackedTxIDs
 }

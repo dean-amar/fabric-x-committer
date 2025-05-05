@@ -26,6 +26,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
@@ -285,13 +286,16 @@ func testLoadGenerator(t *testing.T, c *ClientConfig) {
 			m.TransactionsAborted == 0
 	})
 
-	test.CheckMetrics(t, &http.Client{}, client.resources.Metrics.URL(), []string{
-		"loadgen_block_sent_total",
-		"loadgen_transaction_sent_total",
-		"loadgen_transaction_received_total",
-		"loadgen_valid_transaction_latency_seconds",
-		"loadgen_invalid_transaction_latency_seconds",
-	})
+	if !c.Limit.HasLimit() {
+		// If we have a limit, the Prometheus server might stop before we can fetch the metrics.
+		promutil.CheckMetrics(t, &http.Client{}, client.resources.Metrics.URL(), []string{
+			"loadgen_block_sent_total",
+			"loadgen_transaction_sent_total",
+			"loadgen_transaction_received_total",
+			"loadgen_valid_transaction_latency_seconds",
+			"loadgen_invalid_transaction_latency_seconds",
+		})
+	}
 
 	eventuallyMetrics(t, client.resources.Metrics, func(m metrics.MetricState) bool {
 		return m.TransactionsSent > defaultExpectedTXs &&
@@ -300,7 +304,7 @@ func testLoadGenerator(t *testing.T, c *ClientConfig) {
 			m.TransactionsAborted == 0
 	})
 
-	if c.Limit == nil || (c.Limit.Blocks == 0 && c.Limit.Transactions == 0) {
+	if !c.Limit.HasLimit() {
 		return
 	}
 
