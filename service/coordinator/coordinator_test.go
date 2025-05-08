@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tls"
 	"maps"
 	"math/rand"
 	"strconv"
@@ -90,6 +92,67 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 		sigVerifiers:           svs,
 		sigVerifierGrpcServers: svServers,
 	}
+}
+
+func (e *coordinatorTestEnv) startWithCreds(ctx context.Context, t *testing.T) {
+	CA, err := tlsgen.NewCA()
+	require.NoError(t, err)
+
+	certPaths := connection.CreateAndSaveServerCertificateForTestEnv(t, CA, "localhost")
+
+	cs := e.coordinator
+	sc := &connection.ServerConfig{
+		Endpoint: connection.Endpoint{
+			Host: "localhost",
+			Port: 0,
+		},
+		ServerCreds: &connection.ConfigTLS{
+			UseTLS:    true,
+			MutualTLS: true,
+			KeyPath:   certPaths["PrivateKey"],
+			CertPath:  certPaths["PublicKey"],
+			CACert:    certPaths["CACertificate"],
+		},
+	}
+
+	test.RunServiceAndGrpcForTest(t.Context(), t, cs, sc, func(server *grpc.Server) {
+		protocoordinatorservice.RegisterCoordinatorServer(server, cs)
+	})
+	// change creds to mutual.
+	e.client = createCoordinatorClientWithMutualTLS(t, CA, &sc.Endpoint)
+	_, err = e.client.NumberOfWaitingTransactionsForStatus(ctx, nil)
+	require.NoError(t, err)
+	sCtx, sCancel := context.WithTimeout(ctx, 2*time.Minute)
+	t.Cleanup(sCancel)
+	csStream, err := e.client.BlockProcessing(sCtx)
+	require.NoError(t, err)
+
+	e.csStream = csStream
+}
+
+func createCoordinatorClientWithMutualTLS(t *testing.T, CA tlsgen.CA, clientEndpoint *connection.Endpoint) protocoordinatorservice.CoordinatorClient {
+	tlsCfg := connection.CreateClientCreds(t, CA)
+	// connect with credentials.
+	conn, err := connection.Connect(connection.NewDialConfigWithCreds(clientEndpoint, tls.ConfigToCredentials(tlsCfg)))
+	//conn, err := connection.Connect(connection.NewDialConfigWithCreds(clientEndpoint, insecure.NewCredentials()))
+	require.NoError(t, err)
+
+	return protocoordinatorservice.NewCoordinatorClient(conn)
+}
+
+func TestStartWithCreds(t *testing.T) {
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	t.Cleanup(cancel)
+	env.startWithCreds(ctx, t)
+	env.ensureStreamActive(t)
+
+	stream, err := env.client.BlockProcessing(ctx)
+	require.NoError(t, err)
+	_, err = stream.Recv()
+	require.ErrorContains(t, err, ErrExistingStreamOrConflictingOp.Error())
+
+	time.Sleep(10 * time.Second)
 }
 
 func (e *coordinatorTestEnv) start(ctx context.Context, t *testing.T) {

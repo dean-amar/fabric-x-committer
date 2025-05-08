@@ -13,12 +13,9 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
+	"google.golang.org/grpc"
 )
 
 var logger = logging.New("broadcast-deliver")
@@ -135,17 +132,20 @@ func (c *OrdererConnectionManager) Update(config *ConnectionConfig) error {
 
 func openConnections(config *ConnectionConfig) (*tls.Config, []*OrdererConnection, error) {
 	tlsConfig, err := LoadTLSConfig(config)
+	//if err != nil {
+	//	return nil, nil, errors.Wrap(err, "failed to load TLS config")
+	//}
+	//var tlsCredentials credentials.TransportCredentials
+	//if tlsConfig != nil {
+	//	tlsCredentials = credentials.NewTLS(tlsConfig)
+	//} else {
+	//	tlsCredentials = insecure.NewCredentials()
+	//}
+	tlsConfig, creds, err := config.ConnectionTLS.ClientOptionWithConfig()
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to load TLS config")
+		return nil, nil, errors.Wrap(err, "failed to get client tls options")
 	}
-	var tlsCredentials credentials.TransportCredentials
-	if tlsConfig != nil {
-		tlsCredentials = credentials.NewTLS(tlsConfig)
-	} else {
-		tlsCredentials = insecure.NewCredentials()
-	}
-
-	grpcConnections, err := connection.OpenConnections(config.Endpoints, tlsCredentials)
+	grpcConnections, err := connection.OpenConnections(config.Endpoints, creds)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to open connections")
 	}

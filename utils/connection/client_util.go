@@ -2,11 +2,16 @@ package connection
 
 import (
 	"context"
+	cryptoTLS "crypto/tls"
 	_ "embed"
+	"github.com/stretchr/testify/require"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tls"
 	"io"
 	"net"
 	"regexp"
 	"strings"
+	"testing"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
@@ -99,6 +104,28 @@ var acceptableCloseErr = []error{
 	net.ErrClosed,
 	context.Canceled,
 	context.DeadlineExceeded,
+}
+
+func CreateClientCreds(t *testing.T, CA tlsgen.CA) *cryptoTLS.Config {
+	// create client private key and certificate.
+	clientKeypair, err := CA.NewClientCertKeyPair()
+	require.NoError(t, err)
+
+	// create TLS configuration.
+	tlsCfg, err := tls.LoadTLSCredentialsRaw([][]byte{CA.CertBytes()})
+	require.NoError(t, err)
+	clientCert, err := cryptoTLS.X509KeyPair(clientKeypair.Cert, clientKeypair.Key)
+	require.NoError(t, err)
+	tlsCfg.Certificates = []cryptoTLS.Certificate{clientCert}
+
+	return tlsCfg
+}
+
+func GetClientCredentials(config *ConfigTLS) (credentials.TransportCredentials, error) {
+	if config == nil {
+		return nil, errors.New("client to server connection configuration is nil")
+	}
+	return config.ClientOption()
 }
 
 func filterAcceptableCloseErr(err error) error {

@@ -23,6 +23,7 @@ type (
 		Endpoint  *connection.Endpoint
 		ChannelID string
 		Retry     *connection.RetryProfile
+		TLSConfig connection.ConfigTLS
 	}
 
 	// DeliverConfig holds the configuration needed for deliver to run.
@@ -43,8 +44,9 @@ type (
 func New(config *Config) (*Client, error) {
 	cm := &broadcastdeliver.OrdererConnectionManager{}
 	connConfig := &broadcastdeliver.ConnectionConfig{
-		Endpoints: []*connection.OrdererEndpoint{{Endpoint: *config.Endpoint}},
-		Retry:     config.Retry,
+		Endpoints:     []*connection.OrdererEndpoint{{Endpoint: *config.Endpoint}},
+		Retry:         config.Retry,
+		ConnectionTLS: config.TLSConfig,
 	}
 	if err := cm.Update(connConfig); err != nil {
 		return nil, err

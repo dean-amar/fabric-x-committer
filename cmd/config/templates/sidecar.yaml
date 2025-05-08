@@ -1,5 +1,17 @@
 server:
   endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  server-creds:
+    use-tls: "{{ .ServiceTLS.UseTLS }}"
+    mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
+    cert-path: "{{ .ServiceTLS.PublicKeyPath }}"
+    key-path: "{{ .ServiceTLS.PrivateKeyPath }}"
+    ca-cert-path: "{{ .ServiceTLS.CACertificatePath }}"
+  client-creds:
+    {{- range .ClientsTls }}
+    - key-path: "{{ .PrivateKeyPath }}"
+      cert-path: "{{ .PublicKeyPath }}"
+      ca-cert-path: "{{ .CACertificatePath }}"
+    {{- end }}
   keep-alive:
     params:
       time: 300s

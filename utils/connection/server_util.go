@@ -2,7 +2,6 @@ package connection
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"time"
@@ -10,10 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
-
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
 const grpcProtocol = "tcp"
@@ -21,9 +17,10 @@ const grpcProtocol = "tcp"
 type (
 	// ServerConfig describes the connection parameter for a server.
 	ServerConfig struct {
-		Endpoint  Endpoint               `mapstructure:"endpoint"`
-		Creds     *ServerCredsConfig     `mapstructure:"creds"`
-		KeepAlive *ServerKeepAliveConfig `mapstructure:"keep-alive"`
+		Endpoint     Endpoint               `mapstructure:"endpoint"`
+		ServerCreds  *ConfigTLS             `mapstructure:"server-creds"`
+		ClientsCreds []*ConfigTLS           `mapstructure:"client-creds"`
+		KeepAlive    *ServerKeepAliveConfig `mapstructure:"keep-alive"`
 
 		preAllocatedListener net.Listener
 	}
@@ -73,14 +70,11 @@ func NewLocalHostServer() *ServerConfig {
 // GrpcServer instantiate a [grpc.Server].
 func (c *ServerConfig) GrpcServer() *grpc.Server {
 	var opts []grpc.ServerOption
-	if c.Creds != nil {
-		cert, err := tls.LoadX509KeyPair(c.Creds.CertPath, c.Creds.KeyPath)
-		utils.Must(err)
-		opts = append(opts, grpc.Creds(credentials.NewTLS(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-			ClientAuth:   tls.NoClientCert,
-			MinVersion:   tls.VersionTLS12,
-		})))
+
+	//fmt.Printf("On GrpcServer() %v", *c.ServerCreds)
+
+	if c.ServerCreds != nil {
+		opts = append(opts, c.ServerCreds.ServerOption())
 	}
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
 		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{

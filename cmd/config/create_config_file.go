@@ -25,6 +25,10 @@ import (
 type (
 	// SystemConfig represents the configuration of the one of the committer's components.
 	SystemConfig struct {
+		// Tls Options.
+		ServiceTLS CommonTLS
+		ClientsTls []CommonTLS
+
 		// Instance endpoints.
 		ServerEndpoint  *connection.Endpoint
 		MetricsEndpoint *connection.Endpoint
@@ -43,6 +47,15 @@ type (
 		LoadGenBlockLimit uint64                  // loadgen
 		LoadGenTXLimit    uint64                  // loadgen
 		Logging           *logging.Config         // for all
+	}
+
+	CommonTLS struct {
+		UseTLS    bool
+		MutualTLS bool
+
+		PrivateKeyPath    string
+		PublicKeyPath     string
+		CACertificatePath string
 	}
 
 	// SystemEndpoints represents the endpoints of the system.
@@ -130,4 +143,14 @@ func (c *SystemConfig) WithEndpoint(e *connection.Endpoint) *SystemConfig {
 	s := *c
 	s.ServerEndpoint = e
 	return &s
+}
+
+func CreateTlsConfiguration(useTls, mutualTls bool, paths map[string]string) CommonTLS {
+	return CommonTLS{
+		UseTLS:            useTls,
+		MutualTLS:         mutualTls,
+		PrivateKeyPath:    paths["PrivateKey"],
+		PublicKeyPath:     paths["PublicKey"],
+		CACertificatePath: paths["CACertificate"],
+	}
 }

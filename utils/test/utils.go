@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
 	"testing"
@@ -51,6 +52,9 @@ func RunGrpcServerForTest(
 	ctx context.Context, t *testing.T, serverConfig *connection.ServerConfig, register ...func(server *grpc.Server),
 ) *grpc.Server {
 	t.Helper()
+	if serverConfig != nil && serverConfig.ServerCreds != nil {
+		fmt.Printf("On RunGrpcServerForTest( %v", *serverConfig.ServerCreds)
+	}
 	listener, err := serverConfig.Listener()
 	require.NoError(t, err)
 	server := serverConfig.GrpcServer()

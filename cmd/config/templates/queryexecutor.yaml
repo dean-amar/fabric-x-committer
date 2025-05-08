@@ -2,6 +2,12 @@
 server:
   # The server's endpoint configuration
   endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  server-creds:
+    use-tls: "{{ .ServiceTLS.UseTLS }}"
+    mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
+    cert-path: "{{ .ServiceTLS.PublicKeyPath }}"
+    key-path: "{{ .ServiceTLS.PrivateKeyPath }}"
+    ca-cert-path: "{{ .ServiceTLS.CACertificatePath }}"
 monitoring:
   server:
     endpoint: {{ .MetricsEndpoint | default "localhost:0" }}

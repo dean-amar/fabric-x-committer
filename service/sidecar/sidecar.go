@@ -89,13 +89,24 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	logger.Infof("Create coordinator client and connect to %s\n", &s.config.Committer.Endpoint)
-	conn, connErr := connection.Connect(connection.NewDialConfig(&s.config.Committer.Endpoint))
+	fmt.Printf("number-of-clients: %v and its values are %v\n", len(s.config.Server.ClientsCreds), s.config.Server.ClientsCreds[0])
+	// set the client's credentials according to the service's preferences.
+	s.config.Server.ClientsCreds[0].UseTLS = s.config.Server.ServerCreds.UseTLS
+	s.config.Server.ClientsCreds[0].MutualTLS = s.config.Server.ServerCreds.MutualTLS
+	// load the client credentials from the configuration file.
+	coordinatorCredentials, err := connection.GetClientCredentials(s.config.Server.ClientsCreds[0])
+	if err != nil {
+		return errors.Wrapf(err, "could not load creds")
+	}
+	// connecting to the coordinator.
+	conn, connErr := connection.Connect(connection.NewDialConfigWithCreds(&s.config.Committer.Endpoint, coordinatorCredentials))
 	if connErr != nil {
 		return fmt.Errorf("failed to connect to coordinator: %w", connErr)
 	}
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)
 	logger.Infof("sidecar connected to coordinator at %s", &s.config.Committer.Endpoint)
+	// creating coordinator client.
 	coordClient := protocoordinatorservice.NewCoordinatorClient(conn)
 
 	g, gCtx := errgroup.WithContext(pCtx)

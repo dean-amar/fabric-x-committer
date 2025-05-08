@@ -71,6 +71,8 @@ func newValidatorAndCommitServiceTestEnvWithClient(
 func TestCreateConfigAndTables(t *testing.T) {
 	t.Parallel()
 	env := newValidatorAndCommitServiceTestEnvWithClient(t, 1)
+
+	t.Log("connected to vc")
 	p := &protoblocktx.NamespacePolicy{
 		Scheme:    "ECDSA",
 		PublicKey: []byte("public-key"),

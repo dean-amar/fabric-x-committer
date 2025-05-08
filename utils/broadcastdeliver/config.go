@@ -23,6 +23,8 @@ type (
 		RootCA    [][]byte                      `mapstructure:"root-ca"`
 		// RootCAPaths The path to the root CAs (alternative to the raw data).
 		RootCAPaths []string `mapstructure:"root-ca-paths"`
+
+		ConnectionTLS connection.ConfigTLS
 	}
 
 	// IdentityConfig defines the orderer's MSP.
