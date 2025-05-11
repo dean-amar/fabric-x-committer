@@ -43,7 +43,9 @@ func TestReadConfigSidecar(t *testing.T) {
 				ChannelID: "mychannel",
 			},
 			Committer: sidecar.CoordinatorConfig{
-				Endpoint: *makeEndpoint("localhost", 9001),
+				ServerConfig: &connection.ServerConfig{
+					Endpoint: *makeEndpoint("localhost", 9001),
+				},
 			},
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
@@ -76,7 +78,9 @@ func TestReadConfigSidecar(t *testing.T) {
 				ChannelID: "mychannel",
 			},
 			Committer: sidecar.CoordinatorConfig{
-				Endpoint: *makeEndpoint("coordinator", 9001),
+				ServerConfig: &connection.ServerConfig{
+					Endpoint: *makeEndpoint("localhost", 9001),
+				},
 			},
 			Ledger: sidecar.LedgerConfig{
 				Path: "/root/sc/ledger",

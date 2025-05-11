@@ -131,16 +131,6 @@ func (c *OrdererConnectionManager) Update(config *ConnectionConfig) error {
 }
 
 func openConnections(config *ConnectionConfig) (*tls.Config, []*OrdererConnection, error) {
-	tlsConfig, err := LoadTLSConfig(config)
-	//if err != nil {
-	//	return nil, nil, errors.Wrap(err, "failed to load TLS config")
-	//}
-	//var tlsCredentials credentials.TransportCredentials
-	//if tlsConfig != nil {
-	//	tlsCredentials = credentials.NewTLS(tlsConfig)
-	//} else {
-	//	tlsCredentials = insecure.NewCredentials()
-	//}
 	tlsConfig, creds, err := config.ConnectionTLS.ClientOptionWithConfig()
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to get client tls options")

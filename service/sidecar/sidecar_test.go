@@ -115,7 +115,9 @@ func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
 			},
 		},
 		Committer: CoordinatorConfig{
-			Endpoint: coordinatorServer.Configs[0].Endpoint,
+			ServerConfig: &connection.ServerConfig{
+				Endpoint: coordinatorServer.Configs[0].Endpoint,
+			},
 		},
 		Ledger: LedgerConfig{
 			Path: t.TempDir(),
@@ -407,7 +409,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	conn, err := connection.Connect(connection.NewDialConfig(&env.config.Committer.Endpoint))
+	conn, err := connection.Connect(connection.NewDialConfig(&env.config.Committer.ServerConfig.Endpoint))
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
 	return conn.CanonicalTarget()

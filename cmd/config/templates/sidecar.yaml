@@ -3,15 +3,9 @@ server:
   server-creds:
     use-tls: "{{ .ServiceTLS.UseTLS }}"
     mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
-    cert-path: "{{ .ServiceTLS.PublicKeyPath }}"
-    key-path: "{{ .ServiceTLS.PrivateKeyPath }}"
-    ca-cert-path: "{{ .ServiceTLS.CACertificatePath }}"
-  client-creds:
-    {{- range .ClientsTls }}
-    - key-path: "{{ .PrivateKeyPath }}"
-      cert-path: "{{ .PublicKeyPath }}"
-      ca-cert-path: "{{ .CACertificatePath }}"
-    {{- end }}
+    cert-path: "{{ .ServiceTLS.Credentials.CertPath }}"
+    key-path: "{{ .ServiceTLS.Credentials.KeyPath }}"
+    ca-cert-path: "{{ .ServiceTLS.Credentials.CACertPath }}"
   keep-alive:
     params:
       time: 300s
@@ -32,7 +26,14 @@ orderer:
   channel-id: {{ .ChannelID }}
   consensus-type: BFT
 committer:
-  endpoint: {{ .Endpoints.Coordinator }}
+  server:
+    endpoint: {{ .Endpoints.Coordinator }}
+    server-creds:
+      use-tls: "{{ .CoordinatorClientTLSConfig.UseTLS }}"
+      mutual-tls: "{{ .CoordinatorClientTLSConfig.MutualTLS }}"
+      cert-path: "{{ .CoordinatorClientTLSConfig.Credentials.CertPath }}"
+      key-path: "{{ .CoordinatorClientTLSConfig.Credentials.KeyPath }}"
+      ca-cert-path: "{{ .CoordinatorClientTLSConfig.Credentials.CACertPath }}"
 
 ledger:
   path: {{ .LedgerPath }}

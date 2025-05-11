@@ -1,5 +1,11 @@
 orderer-client:
   sidecar-endpoint: {{ .Endpoints.Sidecar }}
+  sidecar-tls-config:
+    use-tls: "{{ .SidecarClientTLSConfig.UseTLS }}"
+    mutual-tls: "{{ .SidecarClientTLSConfig.MutualTLS }}"
+    cert-path: "{{ .SidecarClientTLSConfig.Credentials.CertPath }}"
+    key-path: "{{ .SidecarClientTLSConfig.Credentials.KeyPath }}"
+    ca-cert-path: "{{ .SidecarClientTLSConfig.Credentials.CACertPath }}"
   coordinator:
     endpoint: {{ .Endpoints.Coordinator }}
   orderer:

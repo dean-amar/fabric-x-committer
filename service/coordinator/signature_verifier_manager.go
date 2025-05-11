@@ -89,7 +89,12 @@ func (svm *signatureVerifierManager) run(ctx context.Context) error {
 	})
 
 	for i, serverConfig := range c.serversConfig {
-		conn, err := connection.Connect(connection.NewDialConfig(&serverConfig.Endpoint))
+		verifierClientOptions, err := serverConfig.ServerCreds.ClientOption()
+		if err != nil {
+			return errors.Wrapf(err, "failed to create tls connection options for signature verifier [%d] at %s",
+				i, &serverConfig.Endpoint)
+		}
+		conn, err := connection.Connect(connection.NewDialConfigWithCreds(&serverConfig.Endpoint, verifierClientOptions))
 		if err != nil {
 			return errors.Wrapf(err, "failed to create connection to signature verifier [%d] at %s",
 				i, &serverConfig.Endpoint)

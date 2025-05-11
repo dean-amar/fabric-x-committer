@@ -17,10 +17,9 @@ const grpcProtocol = "tcp"
 type (
 	// ServerConfig describes the connection parameter for a server.
 	ServerConfig struct {
-		Endpoint     Endpoint               `mapstructure:"endpoint"`
-		ServerCreds  *ConfigTLS             `mapstructure:"server-creds"`
-		ClientsCreds []*ConfigTLS           `mapstructure:"client-creds"`
-		KeepAlive    *ServerKeepAliveConfig `mapstructure:"keep-alive"`
+		Endpoint    Endpoint               `mapstructure:"endpoint"`
+		ServerCreds *ConfigTLS             `mapstructure:"server-creds"`
+		KeepAlive   *ServerKeepAliveConfig `mapstructure:"keep-alive"`
 
 		preAllocatedListener net.Listener
 	}
@@ -70,9 +69,6 @@ func NewLocalHostServer() *ServerConfig {
 // GrpcServer instantiate a [grpc.Server].
 func (c *ServerConfig) GrpcServer() *grpc.Server {
 	var opts []grpc.ServerOption
-
-	//fmt.Printf("On GrpcServer() %v", *c.ServerCreds)
-
 	if c.ServerCreds != nil {
 		opts = append(opts, c.ServerCreds.ServerOption())
 	}

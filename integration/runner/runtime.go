@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
 	"math/rand"
 	"sync"
 	"testing"
@@ -27,6 +26,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
@@ -66,6 +66,8 @@ type (
 		seedForCryptoGen *rand.Rand
 
 		LastReceivedBlockNumber uint64
+
+		TLSManager *tlsgen.SecureCommunicationManager
 	}
 
 	// Crypto holds crypto material for a namespace.
@@ -88,11 +90,11 @@ type (
 
 		// DBCluster configures the cluster to operate in DB cluster mode.
 		DBCluster *dbtest.Connection
-		TLS       *RuntimeTlsConfig
+		TLS       TLSSettings
 	}
 
-	// RuntimeTlsConfig sets the runtime tls options.
-	RuntimeTlsConfig struct {
+	// TLSSettings sets the runtime tls options.
+	TLSSettings struct {
 		UseTLS    bool
 		MutualTLS bool
 	}
@@ -173,116 +175,76 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		MetaNamespaceVerificationKey: metaCrypto.PubKey,
 	})
 
-	t.Log("creating TLS configurations")
-	var err error
-	CA, err := tlsgen.NewCA()
-	require.NoError(t, err)
+	t.Log("creating TLS manager")
+	c.TLSManager = tlsgen.NewSecureCommunicationManager(t)
 
-	//var (
-	//	servicesTLS config.CommonTLS
-	//	clientTLS   connection.ConfigTLS
-	//)
-	//if conf.TLS.UseTLS {
-	//	t.Logf("creating CA and TLS materials.\n")
-	//
-	//
-	//	serviceTlsData := connection.CreateAndSaveServerCertificateForTestEnv(t, CA, "localhost")
-	//	clientTlsData := connection.CreateAndSaveClientCertificateForTestEnv(t, CA)
-	//
-	//	servicesTLS = config.CommonTLS{
-	//		UseTLS:            conf.TLS.UseTLS,
-	//		MutualTLS:         conf.TLS.MutualTLS,
-	//		PrivateKeyPath:    serviceTlsData["PrivateKey"],
-	//		PublicKeyPath:     serviceTlsData["PublicKey"],
-	//		CACertificatePath: serviceTlsData["CACertificate"],
-	//	}
-	//
-	//	clientTLS = connection.ConfigTLS{
-	//		UseTLS:    conf.TLS.UseTLS,
-	//		MutualTLS: conf.TLS.MutualTLS,
-	//		KeyPath:   clientTlsData["PrivateKey"],
-	//		CertPath:  clientTlsData["PublicKey"],
-	//		CACert:    clientTlsData["CACertificate"],
-	//	}
-	//	//t.Log("setting TLS")
-	//	//s.SystemTLS = servicesTLS
-	//	//t.Logf("the system TLS: %v", s.SystemTLS)
-	//}
 	t.Log("Create processes")
 	c.MockOrderer = newProcess(t, mockordererCMD, config.TemplateMockOrderer, s)
+
 	for _, e := range s.Endpoints.Verifier {
-		c.Verifier = append(c.Verifier, newProcess(t, verifierCMD, config.TemplateVerifier, s.WithEndpoint(e)))
-	}
-	for _, e := range s.Endpoints.VCService {
-		c.VcService = append(c.VcService, newProcess(t, vcCMD, config.TemplateVC, s.WithEndpoint(e)))
+		c.Verifier = append(c.Verifier, newProcess(
+			t, verifierCMD, config.TemplateVerifier, c.createServerCerts(t, e)))
 	}
 
-	for _, p := range c.VcService {
-		p.Restart(t)
+	for _, e := range s.Endpoints.VCService {
+		c.VcService = append(c.VcService, newProcess(
+			t, vcCMD, config.TemplateVC, c.createServerCerts(t, e)))
 	}
-	for _, p := range c.Verifier {
-		p.Restart(t)
-	}
+
 	// create tls cert for coordinator.
-	coorindatorCfg := *s
-	coordinatorServiceTlsCerts := connection.CreateAndSaveServerCertificateForTestEnv(t, CA, coorindatorCfg.Endpoints.Coordinator.Host)
-	// attach the tls data to the coordinator's configurator.
-	coorindatorCfg.ServiceTLS = config.CreateTlsConfiguration(conf.TLS.UseTLS, conf.TLS.MutualTLS, coordinatorServiceTlsCerts)
-	// start the coordinator process.
-	t.Logf("coordinator-config: %v", s.ServiceTLS)
-	c.Coordinator = newProcess(t, coordinatorCMD, config.TemplateCoordinator, s.WithEndpoint(coorindatorCfg.Endpoints.Coordinator))
-	c.Coordinator.Restart(t)
+	coordinatorCfg := c.createServerCerts(t, s.Endpoints.Coordinator)
+	for range s.Endpoints.VCService {
+		coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig = append(
+			coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig, c.createClientCerts(t))
+	}
+	for range s.Endpoints.Verifier {
+		coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig = append(
+			coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig, c.createClientCerts(t))
+	}
+	t.Logf("coordinator-config: %v", *coordinatorCfg)
+	c.Coordinator = newProcess(t, coordinatorCMD, config.TemplateCoordinator, coordinatorCfg)
 
 	// create tls cert for the query-service.
-	c.QueryService = newProcess(t, queryexecutorCMD, config.TemplateQueryService, s.WithEndpoint(s.Endpoints.Query))
+	c.QueryService = newProcess(t,
+		queryexecutorCMD,
+		config.TemplateQueryService,
+		c.createServerCerts(t, s.Endpoints.Query),
+	)
 
 	// create tls cert for the sidecar.
-	sidecarCfg := *s
-	sidecarServiceTlsCerts := connection.CreateAndSaveServerCertificateForTestEnv(t, CA, sidecarCfg.Endpoints.Sidecar.Host)
-	// attach the tls data to the sidecar's configurator.
-	sidecarCfg.ServiceTLS = config.CreateTlsConfiguration(conf.TLS.UseTLS, conf.TLS.MutualTLS, sidecarServiceTlsCerts)
-	coordinatorClientCertPaths := connection.CreateAndSaveClientCertificateForTestEnv(t, CA)
-	sidecarCfg.ClientsTls = append(sidecarCfg.ClientsTls, config.CreateTlsConfiguration(conf.TLS.UseTLS, conf.TLS.MutualTLS, coordinatorClientCertPaths))
+	sidecarCfg := c.createServerCerts(t, s.Endpoints.Sidecar)
+	sidecarCfg.CoordinatorClientTLSConfig = c.createClientCerts(t)
 	// start the sidecar process.
-	c.Sidecar = newProcess(t, sidecarCMD, config.TemplateSidecar, sidecarCfg.WithEndpoint(sidecarCfg.Endpoints.Sidecar))
-	c.Sidecar.Restart(t)
+	c.Sidecar = newProcess(t, sidecarCMD, config.TemplateSidecar, sidecarCfg)
 
-	//t.Log("Create clients")
-	//coordinatorClientConf := config.CreateTlsConfiguration(conf.TLS.UseTLS, conf.TLS.MutualTLS, coordinatorClientCertPaths)
-	//c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(clientConnWithCreds(t, s.Endpoints.Coordinator, connection.ConfigTLS{
-	//	UseTLS:    coordinatorClientConf.UseTLS,
-	//	MutualTLS: coordinatorClientConf.MutualTLS,
-	//	CertPath:  coordinatorClientConf.PublicKeyPath,
-	//	KeyPath:   coordinatorClientConf.PrivateKeyPath,
-	//	CACert:    coordinatorClientConf.CACertificatePath,
-	//}))
+	t.Log("Create clients")
+	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
+		clientConnWithCreds(t, s.Endpoints.Coordinator, c.createClientCerts(t)),
+	)
 
-	//t.Log("Create clients")
-	//coordinatorClientConf := config.CreateTlsConfiguration(conf.TLS.UseTLS, conf.TLS.MutualTLS, coordinatorClientCertPaths)
-	//c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(clientConnWithCreds(t, s.Endpoints.Coordinator, connection.ConfigTLS{}))
-	//c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(clientConnWithCreds(t, s.Endpoints.Query, connection.ConfigTLS{
-	//	UseTLS:    false,
-	//	MutualTLS: false,
-	//}))
-	//
-	//c.ordererClient, err = broadcastdeliver.New(&broadcastdeliver.Config{
-	//	Connection: broadcastdeliver.ConnectionConfig{
-	//		Endpoints: c.ordererEndpoints,
-	//	},
-	//	ChannelID:     s.ChannelID,
-	//	ConsensusType: broadcastdeliver.Bft,
-	//})
-	//require.NoError(t, err)
-	//
-	//c.ordererStream, err = c.ordererClient.Broadcast(t.Context())
-	//require.NoError(t, err)
+	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
+		clientConnWithCreds(t, s.Endpoints.Query, c.createClientCerts(t)),
+	)
 
-	//c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
-	//	ChannelID: s.ChannelID,
-	//	Endpoint:  s.Endpoints.Sidecar,
-	//	TLSConfig: clientTLS,
-	//})
-	//require.NoError(t, err)
+	var err error
+	c.ordererClient, err = broadcastdeliver.New(&broadcastdeliver.Config{
+		Connection: broadcastdeliver.ConnectionConfig{
+			Endpoints: c.ordererEndpoints,
+		},
+		ChannelID:     s.ChannelID,
+		ConsensusType: broadcastdeliver.Bft,
+	})
+	require.NoError(t, err)
+
+	c.ordererStream, err = c.ordererClient.Broadcast(t.Context())
+	require.NoError(t, err)
+
+	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
+		ChannelID: s.ChannelID,
+		Endpoint:  s.Endpoints.Sidecar,
+		TLSConfig: c.createClientCerts(t),
+	})
+	require.NoError(t, err)
 	return c
 
 }
@@ -366,23 +328,16 @@ func (c *CommitterRuntime) startLoadGenWithTemplate(t *testing.T, template strin
 	for _, cr := range c.GetAllCrypto() {
 		s.Policy.NamespacePolicies[cr.Namespace] = cr.Profile
 	}
+	s.SidecarClientTLSConfig = c.createClientCerts(t)
 	newProcess(t, loadgenCMD, template, s.WithEndpoint(s.Endpoints.LoadGen)).Restart(t)
 }
 
-// clientConn creates a service connection using its given server endpoint.
-func clientConn(t *testing.T, e *connection.Endpoint) *grpc.ClientConn {
-	t.Helper()
-	serviceConnection, err := connection.Connect(connection.NewDialConfig(e))
-	require.NoError(t, err)
-	return serviceConnection
-}
-
-// clientConn creates a service connection using its given server endpoint.
+// clientConnWithCreds creates a service connection using its given server endpoint and TLS configuration.
 func clientConnWithCreds(t *testing.T, e *connection.Endpoint, tlsConfig connection.ConfigTLS) *grpc.ClientConn {
 	t.Helper()
-	clientTls, err := tlsConfig.ClientOption()
+	clientCredentials, err := tlsConfig.ClientOption()
 	require.NoError(t, err)
-	serviceConnection, err := connection.Connect(connection.NewDialConfigWithCreds(e, clientTls))
+	serviceConnection, err := connection.Connect(connection.NewDialConfigWithCreds(e, clientCredentials))
 	require.NoError(t, err)
 	return serviceConnection
 }
@@ -621,4 +576,33 @@ func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, b
 		require.NoError(ct, err)
 		require.GreaterOrEqual(ct, lastBlock.Number, blkNum)
 	}, 2*time.Minute, 250*time.Millisecond)
+}
+
+func (c *CommitterRuntime) createServerCerts(
+	t *testing.T,
+	endpoint *connection.Endpoint,
+) *config.SystemConfig {
+	t.Helper()
+	serviceCfg := c.SystemConfig
+	serviceTLSCertsPath := c.TLSManager.CreateServerCertificate(t, endpoint.Host)
+	serviceCfg.ServiceTLS = c.createTLSConfig(serviceTLSCertsPath)
+	serviceCfg.ServerEndpoint = endpoint
+	return &serviceCfg
+}
+
+func (c *CommitterRuntime) createClientCerts(t *testing.T) connection.ConfigTLS {
+	t.Helper()
+	return c.createTLSConfig(c.TLSManager.CreateClientCertificate(t))
+}
+
+func (c *CommitterRuntime) createTLSConfig(paths map[string]string) connection.ConfigTLS {
+	return connection.ConfigTLS{
+		UseTLS:    c.config.TLS.UseTLS,
+		MutualTLS: c.config.TLS.MutualTLS,
+		Credentials: connection.TLSCertPaths{
+			CertPath:   paths["PublicKey"],
+			KeyPath:    paths["PrivateKey"],
+			CACertPath: paths["CACertificate"],
+		},
+	}
 }

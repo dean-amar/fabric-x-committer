@@ -5,9 +5,9 @@ server:
   server-creds:
     use-tls: "{{ .ServiceTLS.UseTLS }}"
     mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
-    cert-path: "{{ .ServiceTLS.PublicKeyPath }}"
-    key-path: "{{ .ServiceTLS.PrivateKeyPath }}"
-    ca-cert-path: "{{ .ServiceTLS.CACertificatePath }}"
+    cert-path: "{{ .ServiceTLS.Credentials.CertPath }}"
+    key-path: "{{ .ServiceTLS.Credentials.KeyPath }}"
+    ca-cert-path: "{{ .ServiceTLS.Credentials.CACertPath }}"
 monitoring:
   server:
     endpoint: {{ .MetricsEndpoint | default "localhost:0" }}

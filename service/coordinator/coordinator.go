@@ -139,11 +139,6 @@ func NewCoordinatorService(c *Config) *Service {
 
 	policyMgr := newPolicyManager()
 
-	//for i := range c.SignVerifierConfig.ServerConfig {
-	//	logger.Infof("c.Server.ServerCreds: %v", *c.Server)
-	//	c.SignVerifierConfig.ServerConfig[i].ServerCreds = c.Server.ServerCreds
-	//	logger.Infof("SigService %v Config: %v", i, *c.SignVerifierConfig.ServerConfig[i])
-	//}
 	svMgr := newSignatureVerifierManager(
 		&signVerifierManagerConfig{
 			serversConfig:            c.SignVerifierConfig.ServerConfig,
@@ -154,10 +149,6 @@ func NewCoordinatorService(c *Config) *Service {
 		},
 	)
 
-	//for i := range c.ValidatorCommitterConfig.ServerConfig {
-	//	c.ValidatorCommitterConfig.ServerConfig[i].ServerCreds = c.Server.ServerCreds
-	//	logger.Infof("VCService %v Config: %v", i, *c.ValidatorCommitterConfig.ServerConfig[i])
-	//}
 	vcMgr := newValidatorCommitterManager(
 		&validatorCommitterManagerConfig{
 			serversConfig:                  c.ValidatorCommitterConfig.ServerConfig,

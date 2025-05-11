@@ -22,6 +22,7 @@ type receiverConfig struct {
 	Endpoint  *connection.Endpoint
 	ChannelID string
 	Res       *ClientResources
+	TLSConfig connection.ConfigTLS
 }
 
 const committedBlocksQueueSize = 1024
@@ -31,6 +32,7 @@ func runReceiver(ctx context.Context, config *receiverConfig) error {
 	ledgerReceiver, err := sidecarclient.New(&sidecarclient.Config{
 		ChannelID: config.ChannelID,
 		Endpoint:  config.Endpoint,
+		TLSConfig: config.TLSConfig,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to create ledger receiver")

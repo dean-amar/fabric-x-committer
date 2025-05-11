@@ -3,23 +3,39 @@ server:
   server-creds:
     use-tls: "{{ .ServiceTLS.UseTLS }}"
     mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
-    cert-path: "{{ .ServiceTLS.PublicKeyPath }}"
-    key-path: "{{ .ServiceTLS.PrivateKeyPath }}"
-    ca-cert-path: "{{ .ServiceTLS.CACertificatePath }}"
+    cert-path: "{{ .ServiceTLS.Credentials.CertPath }}"
+    key-path: "{{ .ServiceTLS.Credentials.KeyPath }}"
+    ca-cert-path: "{{ .ServiceTLS.Credentials.CACertPath }}"
 monitoring:
   server:
     endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
 
 sign-verifier:
   server:
-    {{- range .Endpoints.Verifier }}
-    - endpoint: {{ . }}
-    {{- end }}
+    {{- range $i, $endpoint := .Endpoints.Verifier }}
+      {{- $tls := index $.VcAndSigTLSConfig.SigClientsConfig $i }}
+      - endpoint: {{ $endpoint }}
+        server-creds:
+          use-tls: "{{ $tls.UseTLS }}"
+          mutual-tls: "{{ $tls.MutualTLS }}"
+          key-path: "{{ $tls.Credentials.KeyPath }}"
+          cert-path: "{{ $tls.Credentials.CertPath }}"
+          ca-cert-path: "{{ $tls.Credentials.CACertPath }}"
+      {{- end }}
+
 validator-committer:
   server:
-   {{- range .Endpoints.VCService }}
-    - endpoint: {{ . }}
-    {{- end }}
+    {{- range $i, $endpoint := .Endpoints.VCService }}
+      {{- $tls := index $.VcAndSigTLSConfig.VcClientsConfig $i }}
+      - endpoint: {{ $endpoint }}
+        server-creds:
+          use-tls: "{{ $tls.UseTLS }}"
+          mutual-tls: "{{ $tls.MutualTLS }}"
+          key-path: "{{ $tls.Credentials.KeyPath }}"
+          cert-path: "{{ $tls.Credentials.CertPath }}"
+          ca-cert-path: "{{ $tls.Credentials.CACertPath }}"
+      {{- end }}
+
 dependency-graph:
   num-of-local-dep-constructors: 1
   waiting-txs-limit: 10_000

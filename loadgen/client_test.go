@@ -176,7 +176,9 @@ func TestLoadGenForSidecar(t *testing.T) {
 					ConsensusType: broadcastdeliver.Bft,
 				},
 				Committer: sidecar.CoordinatorConfig{
-					Endpoint: coordinatorServer.Configs[0].Endpoint,
+					ServerConfig: &connection.ServerConfig{
+						Endpoint: coordinatorServer.Configs[0].Endpoint,
+					},
 				},
 				Monitoring: defaultMonitoring(),
 				Ledger: sidecar.LedgerConfig{
@@ -225,7 +227,9 @@ func TestLoadGenForOrderer(t *testing.T) {
 					ConsensusType: broadcastdeliver.Bft,
 				},
 				Committer: sidecar.CoordinatorConfig{
-					Endpoint: coordinatorServer.Configs[0].Endpoint,
+					ServerConfig: &connection.ServerConfig{
+						Endpoint: coordinatorServer.Configs[0].Endpoint,
+					},
 				},
 				Monitoring: defaultMonitoring(),
 				Ledger: sidecar.LedgerConfig{

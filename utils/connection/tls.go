@@ -1,53 +1,53 @@
 package connection
 
 import (
-	cryptoTLS "crypto/tls"
+	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
-	"errors"
 	"fmt"
-	"github.com/stretchr/testify/require"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tls"
+	"os"
+
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"os"
-	"path/filepath"
-	"testing"
+
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
 type ConfigTLS struct {
-	MutualTLS bool `mapstructure:"mutual-tls"`
-	UseTLS    bool `mapstructure:"use-tls"`
+	UseTLS      bool         `mapstructure:"use-tls"`
+	MutualTLS   bool         `mapstructure:"mutual-tls"`
+	Credentials TLSCertPaths `mapstructure:",squash"`
+}
 
-	CertPath string `mapstructure:"cert-path"`
-	KeyPath  string `mapstructure:"key-path"`
-	CACert   string `mapstructure:"ca-cert-path"`
+type TLSCertPaths struct {
+	CertPath   string `mapstructure:"cert-path"`
+	KeyPath    string `mapstructure:"key-path"`
+	CACertPath string `mapstructure:"ca-cert-path"`
 }
 
 func (c *ConfigTLS) ServerOption() grpc.ServerOption {
-	if !c.UseTLS {
+	if c == nil || !c.UseTLS {
 		return grpc.Creds(insecure.NewCredentials())
 	}
 
-	cert, err := cryptoTLS.LoadX509KeyPair(c.CertPath, c.KeyPath)
+	cert, err := tls.LoadX509KeyPair(c.Credentials.CertPath, c.Credentials.KeyPath)
 	utils.Must(err)
 
-	tlsCfg := &cryptoTLS.Config{
-		Certificates: []cryptoTLS.Certificate{cert},
-		ClientAuth:   cryptoTLS.NoClientCert,
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.NoClientCert,
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	if c.MutualTLS {
 		certPool := x509.NewCertPool()
-		certs, err := os.ReadFile(c.CACert)
+		certs, err := os.ReadFile(c.Credentials.CACertPath)
 		utils.Must(err)
 		if !certPool.AppendCertsFromPEM(certs) {
 			panic("failed to add server CA's certificate")
 		}
-		tlsCfg.ClientAuth = cryptoTLS.RequireAndVerifyClientCert
+		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsCfg.ClientCAs = certPool
 	}
 
@@ -55,101 +55,59 @@ func (c *ConfigTLS) ServerOption() grpc.ServerOption {
 }
 
 func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
-	fmt.Printf("TLS config is: %v\n", *c)
-	if !c.UseTLS {
-		fmt.Println("no credentials provided for client connections")
-		return insecure.NewCredentials(), nil
-	}
-
-	certPool := x509.NewCertPool()
-	cert, err := os.ReadFile(c.CACert)
-	if err != nil {
-		return nil, err
-	}
-	if ok := certPool.AppendCertsFromPEM(cert); !ok {
-		return nil, fmt.Errorf("failed to add server CA's certificate")
-	}
-
-	tlsCfg := &cryptoTLS.Config{RootCAs: certPool}
-	if c.MutualTLS {
-		clientCert, err := cryptoTLS.LoadX509KeyPair(c.CertPath, c.KeyPath)
-		if err != nil {
-			return nil, errors.Join(err, errors.New("failed to load credential keys"))
-		}
-		tlsCfg.Certificates = []cryptoTLS.Certificate{clientCert}
-	}
-
-	return tls.ConfigToCredentials(tlsCfg), nil
+	_, creds, err := c.ClientOptionWithConfig()
+	return creds, err
 }
 
-func (c *ConfigTLS) ClientOptionWithConfig() (*cryptoTLS.Config, credentials.TransportCredentials, error) {
-	if !c.UseTLS {
-		fmt.Println("no credentials provided for client connections")
+func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.TransportCredentials, error) {
+	if c == nil || !c.UseTLS {
 		return nil, insecure.NewCredentials(), nil
 	}
 
-	certPool := x509.NewCertPool()
-	cert, err := os.ReadFile(c.CACert)
+	tlsCfg, err := LoadTLSCredentials([]string{c.Credentials.CACertPath})
 	if err != nil {
-		return nil, nil, err
-	}
-	if ok := certPool.AppendCertsFromPEM(cert); !ok {
-		return nil, nil, fmt.Errorf("failed to add server CA's certificate")
+		return nil, nil, errors.Wrapf(err, "failed to add server CA's certificate")
 	}
 
-	tlsCfg := &cryptoTLS.Config{RootCAs: certPool}
 	if c.MutualTLS {
-		clientCert, err := cryptoTLS.LoadX509KeyPair(c.CertPath, c.KeyPath)
+		clientCert, err := tls.LoadX509KeyPair(c.Credentials.CertPath, c.Credentials.KeyPath)
 		if err != nil {
 			return tlsCfg, nil, errors.Join(err, errors.New("failed to load credential keys"))
 		}
-		tlsCfg.Certificates = []cryptoTLS.Certificate{clientCert}
+		tlsCfg.Certificates = []tls.Certificate{clientCert}
 	}
 
-	return tlsCfg, tls.ConfigToCredentials(tlsCfg), nil
+	return tlsCfg, credentials.NewTLS(tlsCfg), nil
 }
 
-func saveBytesToFile(dir, filename string, data []byte) (string, error) {
-	filePath := filepath.Join(dir, filename)
-	return filePath, os.WriteFile(filePath, data, 0644)
-}
-
-func CreateAndGetCerificatesPath(t *testing.T, data map[string][]byte) map[string]string {
-	tmpDir := t.TempDir()
-	t.Cleanup(func() {
-		require.NoError(t, os.RemoveAll(tmpDir))
-	})
-
-	paths := make(map[string]string)
-
-	for key, value := range data {
-		dataPath, err := saveBytesToFile(tmpDir, key, value)
-		require.NoError(t, err)
-		paths[key] = dataPath
+func LoadTLSCredentials(certPaths []string) (*tls.Config, error) {
+	certs := make([][]byte, len(certPaths))
+	var err error
+	for i, p := range certPaths {
+		// Load certificate of the CA who signed server's certificate
+		certs[i], err = os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return paths
+	return LoadTLSCredentialsRaw(certs)
 }
 
-func CreateAndSaveServerCertificateForTestEnv(t *testing.T, CA tlsgen.CA, host string) map[string]string {
-	serverKeypair, err := CA.NewServerCertKeyPair(host)
-	require.NoError(t, err)
-	return CreateAndGetCerificatesPath(t, CreateDataFromKeyPair(serverKeypair, CA.CertBytes()))
-}
+func LoadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
+	if len(certs) < 1 {
+		return nil, fmt.Errorf("no ROOT CAS")
+	}
 
-func CreateAndSaveClientCertificateForTestEnv(t *testing.T, CA tlsgen.CA) map[string]string {
-	clientKeypair, err := CA.NewClientCertKeyPair()
-	require.NoError(t, err)
-	return CreateAndGetCerificatesPath(t, CreateDataFromKeyPair(clientKeypair, CA.CertBytes()))
-}
+	certPool := x509.NewCertPool()
+	for _, cert := range certs {
+		if !certPool.AppendCertsFromPEM(cert) {
+			return nil, fmt.Errorf("failed to add server CA's certificate")
+		}
+	}
 
-func CreateDataFromKeyPair(keyPair *tlsgen.CertKeyPair, CACertificate []byte) map[string][]byte {
-	data := make(map[string][]byte)
-	data["PrivateKey"] = keyPair.Key
-	data["PublicKey"] = keyPair.Cert
-	data["CACertificate"] = CACertificate
-	return data
-}
-
-func EncodeToString(bytes []byte) string {
-	return base64.StdEncoding.EncodeToString(bytes)
+	// Create the credentials and return it
+	return &tls.Config{
+		RootCAs:    certPool,
+		MinVersion: tls.VersionTLS12,
+	}, nil
 }

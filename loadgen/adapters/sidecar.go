@@ -76,6 +76,7 @@ func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream TxStream) err
 		return runReceiver(gCtx, &receiverConfig{
 			ChannelID: c.config.ChannelID,
 			Endpoint:  c.config.SidecarEndpoint,
+			TLSConfig: c.config.SidecarTLSConfig,
 			Res:       c.res,
 		})
 	})

@@ -1,0 +1,71 @@
+package tlsgen
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/hyperledger/fabric/common/crypto/tlsgen"
+)
+
+// SecureCommunicationManager responsible for the creation and management of
+// TLS certificates for testing purposes by utilizing the tls generation library of 'Hyperledger Fabric'.
+type SecureCommunicationManager struct {
+	CertificateAuthority tlsgen.CA
+}
+
+// NewSecureCommunicationManager returns a SecureCommunicationManager with a new CA.
+func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
+	t.Helper()
+	CA, err := tlsgen.NewCA()
+	require.NoError(t, err)
+	return &SecureCommunicationManager{
+		CertificateAuthority: CA,
+	}
+}
+
+func (scm *SecureCommunicationManager) CreateServerCertificate(t *testing.T, host string) map[string]string {
+	t.Helper()
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(host)
+	require.NoError(t, err)
+	return createCertificatesPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
+}
+
+func (scm *SecureCommunicationManager) CreateClientCertificate(t *testing.T) map[string]string {
+	t.Helper()
+	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
+	require.NoError(t, err)
+	return createCertificatesPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()))
+}
+
+func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, os.RemoveAll(tmpDir))
+	})
+
+	paths := make(map[string]string)
+
+	for key, value := range data {
+		dataPath, err := saveBytesToFile(tmpDir, key, value)
+		require.NoError(t, err)
+		paths[key] = dataPath
+	}
+	return paths
+}
+
+func createDataFromKeyPair(keyPair *tlsgen.CertKeyPair, caCertificate []byte) map[string][]byte {
+	data := make(map[string][]byte)
+	data["PrivateKey"] = keyPair.Key
+	data["PublicKey"] = keyPair.Cert
+	data["CACertificate"] = caCertificate
+	return data
+}
+
+func saveBytesToFile(dir, filename string, data []byte) (string, error) {
+	filePath := filepath.Join(dir, filename)
+	return filePath, os.WriteFile(filePath, data, 0o600)
+}

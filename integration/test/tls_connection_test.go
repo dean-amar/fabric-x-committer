@@ -1,10 +1,14 @@
 package test
 
 import (
-	"github.com/onsi/gomega"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
 	"testing"
 	"time"
+
+	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/require"
+
+	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
 )
 
 func TestTLSConnection(t *testing.T) {
@@ -15,13 +19,18 @@ func TestTLSConnection(t *testing.T) {
 		NumVCService: 2,
 		BlockTimeout: 2 * time.Second,
 		BlockSize:    500,
-		TLS: &runner.RuntimeTlsConfig{
+		TLS: runner.TLSSettings{
 			UseTLS:    true,
 			MutualTLS: true,
 		},
 	})
-	t.Log(c)
 
-	time.Sleep(20 * time.Second)
-	//c.Start(t, runner.FullTxPath)
+	c.Start(t, runner.FullTxPathWithLoadGen)
+
+	require.Eventually(t, func() bool {
+		count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
+		t.Logf("count %d", count)
+		return count > 10_000
+	}, 90*time.Second, 500*time.Millisecond)
+	require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 }

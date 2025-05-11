@@ -208,7 +208,15 @@ func (vcm *validatorCommitterManager) recoverPolicyManagerFromStateDB(ctx contex
 func newValidatorCommitter(serverConfig *connection.ServerConfig, metrics *perfMetrics, policyMgr *policyManager) (
 	*validatorCommitter, error,
 ) {
-	conn, err := connection.Connect(connection.NewDialConfig(&serverConfig.Endpoint))
+	vcClientOptions, err := serverConfig.ServerCreds.ClientOption()
+	if err != nil {
+		return nil, errors.Wrapf(
+			err,
+			"failed to create tls connection options for validator committer at %s",
+			&serverConfig.Endpoint,
+		)
+	}
+	conn, err := connection.Connect(connection.NewDialConfigWithCreds(&serverConfig.Endpoint, vcClientOptions))
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create connection to validator persister running at %s",
 			&serverConfig.Endpoint)
