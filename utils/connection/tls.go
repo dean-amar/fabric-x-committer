@@ -3,36 +3,39 @@ package connection
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"os"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
+// ConfigTLS contains the certificate paths and options for TLS connections
+// between servers and clients.
 type ConfigTLS struct {
 	UseTLS      bool         `mapstructure:"use-tls"`
 	MutualTLS   bool         `mapstructure:"mutual-tls"`
 	Credentials TLSCertPaths `mapstructure:",squash"`
 }
 
+// TLSCertPaths contains the TLS certificates.
 type TLSCertPaths struct {
 	CertPath   string `mapstructure:"cert-path"`
 	KeyPath    string `mapstructure:"key-path"`
 	CACertPath string `mapstructure:"ca-cert-path"`
 }
 
-func (c *ConfigTLS) ServerOption() grpc.ServerOption {
+// ServerOption returns the options for a grpc server.
+func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 	if c == nil || !c.UseTLS {
-		return grpc.Creds(insecure.NewCredentials())
+		return grpc.Creds(insecure.NewCredentials()), nil
 	}
 
 	cert, err := tls.LoadX509KeyPair(c.Credentials.CertPath, c.Credentials.KeyPath)
-	utils.Must(err)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed loading the server certificate and private key.")
+	}
 
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -43,28 +46,32 @@ func (c *ConfigTLS) ServerOption() grpc.ServerOption {
 	if c.MutualTLS {
 		certPool := x509.NewCertPool()
 		certs, err := os.ReadFile(c.Credentials.CACertPath)
-		utils.Must(err)
-		if !certPool.AppendCertsFromPEM(certs) {
-			panic("failed to add server CA's certificate")
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed loading the ca-certificate.")
+		}
+		if ok := !certPool.AppendCertsFromPEM(certs); !ok {
+			return nil, errors.New("failed to add server's CA certificate.")
 		}
 		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsCfg.ClientCAs = certPool
 	}
 
-	return grpc.Creds(credentials.NewTLS(tlsCfg))
+	return grpc.Creds(credentials.NewTLS(tlsCfg)), nil
 }
 
+// ClientOption returns the options for a grpc client.
 func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
 	_, creds, err := c.ClientOptionWithConfig()
 	return creds, err
 }
 
+// ClientOptionWithConfig returns the options for a grpc client and the tls configuration.
 func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.TransportCredentials, error) {
 	if c == nil || !c.UseTLS {
 		return nil, insecure.NewCredentials(), nil
 	}
 
-	tlsCfg, err := LoadTLSCredentials([]string{c.Credentials.CACertPath})
+	tlsCfg, err := loadTLSCredentials([]string{c.Credentials.CACertPath})
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "failed to add server CA's certificate")
 	}
@@ -72,7 +79,7 @@ func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.Transport
 	if c.MutualTLS {
 		clientCert, err := tls.LoadX509KeyPair(c.Credentials.CertPath, c.Credentials.KeyPath)
 		if err != nil {
-			return tlsCfg, nil, errors.Join(err, errors.New("failed to load credential keys"))
+			return nil, nil, errors.Wrapf(err, "failed to load credential keys")
 		}
 		tlsCfg.Certificates = []tls.Certificate{clientCert}
 	}
@@ -80,28 +87,28 @@ func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.Transport
 	return tlsCfg, credentials.NewTLS(tlsCfg), nil
 }
 
-func LoadTLSCredentials(certPaths []string) (*tls.Config, error) {
+func loadTLSCredentials(certPaths []string) (*tls.Config, error) {
 	certs := make([][]byte, len(certPaths))
 	var err error
 	for i, p := range certPaths {
 		// Load certificate of the CA who signed server's certificate
 		certs[i], err = os.ReadFile(p)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "failed reading the certificate path")
 		}
 	}
-	return LoadTLSCredentialsRaw(certs)
+	return loadTLSCredentialsRaw(certs)
 }
 
-func LoadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
+func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
 	if len(certs) < 1 {
-		return nil, fmt.Errorf("no ROOT CAS")
+		return nil, errors.New("no ROOT CAS")
 	}
 
 	certPool := x509.NewCertPool()
 	for _, cert := range certs {
-		if !certPool.AppendCertsFromPEM(cert) {
-			return nil, fmt.Errorf("failed to add server CA's certificate")
+		if ok := !certPool.AppendCertsFromPEM(cert); !ok {
+			return nil, errors.New("failed to add server CA's certificate")
 		}
 	}
 

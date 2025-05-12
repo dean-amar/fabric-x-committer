@@ -57,7 +57,8 @@ func RunGrpcServerForTest(
 	}
 	listener, err := serverConfig.Listener()
 	require.NoError(t, err)
-	server := serverConfig.GrpcServer()
+	server, err := serverConfig.GrpcServer()
+	require.NoError(t, err)
 
 	// We register a health check service for all servers in tests to allow waiting for readiness.
 	healthcheck := health.NewServer()

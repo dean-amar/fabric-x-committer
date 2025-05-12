@@ -45,12 +45,6 @@ type (
 		PermitWithoutStream bool          `mapstructure:"permit-without-stream"`
 	}
 
-	// ServerCredsConfig describes the server's credentials configuration.
-	ServerCredsConfig struct {
-		CertPath string `mapstructure:"cert-path"`
-		KeyPath  string `mapstructure:"key-path"`
-	}
-
 	// Service describes the method that are required for a service to run.
 	Service interface {
 		// Run executes the service until the context is done.
@@ -67,11 +61,15 @@ func NewLocalHostServer() *ServerConfig {
 }
 
 // GrpcServer instantiate a [grpc.Server].
-func (c *ServerConfig) GrpcServer() *grpc.Server {
+func (c *ServerConfig) GrpcServer() (*grpc.Server, error) {
 	var opts []grpc.ServerOption
-	if c.ServerCreds != nil {
-		opts = append(opts, c.ServerCreds.ServerOption())
+
+	serverGrpcCreds, err := c.ServerCreds.ServerOption()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed loading the server's grpc credentials.")
 	}
+	opts = append(opts, serverGrpcCreds)
+
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
 		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     c.KeepAlive.Params.MaxConnectionIdle,
@@ -87,7 +85,7 @@ func (c *ServerConfig) GrpcServer() *grpc.Server {
 			PermitWithoutStream: c.KeepAlive.EnforcementPolicy.PermitWithoutStream,
 		}))
 	}
-	return grpc.NewServer(opts...)
+	return grpc.NewServer(opts...), nil
 }
 
 // Listener instantiate a [net.Listener] and updates the config port with the effective port.
@@ -132,7 +130,10 @@ func RunGrpcServerMainWithError(
 	if err != nil {
 		return err
 	}
-	server := serverConfig.GrpcServer()
+	server, err := serverConfig.GrpcServer()
+	if err != nil {
+		return errors.Wrapf(err, "failed creating grpc server.")
+	}
 	register(server)
 
 	g, gCtx := errgroup.WithContext(ctx)
