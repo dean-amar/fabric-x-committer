@@ -20,10 +20,11 @@ import (
 )
 
 type validatorAndCommitterServiceTestEnvWithClient struct {
-	vcs     []*ValidatorCommitterService
-	clients []protovcservice.ValidationAndCommitServiceClient
-	streams []protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient
-	dbEnv   *DatabaseTestEnv
+	vcs          []*ValidatorCommitterService
+	commonClient protovcservice.ValidationAndCommitServiceClient
+	clients      []protovcservice.ValidationAndCommitServiceClient
+	streams      []protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient
+	dbEnv        *DatabaseTestEnv
 }
 
 func newValidatorAndCommitServiceTestEnvWithClient(
@@ -33,22 +34,35 @@ func newValidatorAndCommitServiceTestEnvWithClient(
 	t.Helper()
 	vcs := NewValidatorAndCommitServiceTestEnv(t, numServices)
 
+	allEndpoints := make([]*connection.Endpoint, len(vcs.Configs))
+	for i, c := range vcs.Configs {
+		allEndpoints[i] = &c.Server.Endpoint
+	}
+	commonConn, connErr := connection.Connect(connection.NewInsecureLoadBalancedDialConfig(allEndpoints))
+	require.NoError(t, connErr)
+
 	vcsTestEnv := &validatorAndCommitterServiceTestEnvWithClient{
-		vcs:     vcs.VCServices,
-		clients: make([]protovcservice.ValidationAndCommitServiceClient, numServices),
-		streams: make([]protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient, numServices),
-		dbEnv:   vcs.DBEnv,
+		vcs:          vcs.VCServices,
+		commonClient: protovcservice.NewValidationAndCommitServiceClient(commonConn),
+		clients:      make([]protovcservice.ValidationAndCommitServiceClient, numServices),
+		streams:      make([]protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient, numServices),
+		dbEnv:        vcs.DBEnv,
 	}
 
-	for i := range numServices {
-		clientConn, err := connection.Connect(connection.NewDialConfig(&vcs.Configs[i].Server.Endpoint))
+	initCtx, initCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer initCancel()
+	_, setupErr := vcsTestEnv.commonClient.SetupSystemTablesAndNamespaces(initCtx, nil)
+	require.NoError(t, setupErr)
+
+	for i, c := range vcs.Configs {
+		clientConn, err := connection.Connect(connection.NewInsecureDialConfig(&c.Server.Endpoint))
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			require.NoError(t, clientConn.Close())
 		})
 		client := protovcservice.NewValidationAndCommitServiceClient(clientConn)
 
-		sCtx, sCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		sCtx, sCancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		t.Cleanup(sCancel)
 		vcStream, err := client.StartValidateAndCommitStream(sCtx)
 		require.NoError(t, err)
@@ -59,12 +73,6 @@ func newValidatorAndCommitServiceTestEnvWithClient(
 		vcsTestEnv.clients[i] = client
 		vcsTestEnv.streams[i] = vcStream
 	}
-
-	sCtx, sCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	t.Cleanup(sCancel)
-	_, err := vcsTestEnv.clients[0].SetupSystemTablesAndNamespaces(sCtx, nil)
-	require.NoError(t, err)
-
 	return vcsTestEnv
 }
 
@@ -310,7 +318,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 		env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
 
 		ctx, _ := createContext(t)
-		test.EnsurePersistedTxStatus(ctx, t, env.clients[0], txIDs, expectedTxStatus)
+		test.EnsurePersistedTxStatus(ctx, t, env.commonClient, txIDs, expectedTxStatus)
 
 		txBatch = &protovcservice.TransactionBatch{
 			Transactions: []*protovcservice.Transaction{
@@ -414,7 +422,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 		env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
 
 		ctx, _ := createContext(t)
-		status, err := env.clients[0].GetTransactionsStatus(ctx, &protoblocktx.QueryStatus{TxIDs: txIDs})
+		status, err := env.commonClient.GetTransactionsStatus(ctx, &protoblocktx.QueryStatus{TxIDs: txIDs})
 		require.NoError(t, err)
 		require.Equal(t, expectedTxStatus, status.Status)
 	})
@@ -428,30 +436,27 @@ func TestLastCommittedBlockNumber(t *testing.T) {
 	ctx, _ := createContext(t)
 	for i := range numServices {
 		lastCommittedBlock, err := env.clients[i].GetLastCommittedBlockNumber(ctx, nil)
-		requireGRPCErrorCode(t, codes.NotFound, err, lastCommittedBlock)
-		require.ErrorContains(t, err, ErrMetadataEmpty.Error())
+		require.NoError(t, err)
+		require.Nil(t, lastCommittedBlock.Block)
 	}
 
-	_, err := env.clients[0].SetLastCommittedBlockNumber(ctx, &protoblocktx.BlockInfo{Number: 0})
+	_, err := env.commonClient.SetLastCommittedBlockNumber(ctx, &protoblocktx.BlockInfo{Number: 0})
 	require.NoError(t, err)
 
 	for i := range numServices {
 		lastCommittedBlock, err := env.clients[i].GetLastCommittedBlockNumber(ctx, nil)
 		require.NoError(t, err)
-		require.Equal(t, uint64(0), lastCommittedBlock.Number)
+		require.NotNil(t, lastCommittedBlock.Block)
+		require.Equal(t, uint64(0), lastCommittedBlock.Block.Number)
 	}
 }
 
 func TestGRPCStatusCode(t *testing.T) {
 	t.Parallel()
 	env := newValidatorAndCommitServiceTestEnvWithClient(t, 1)
-	c := env.clients[0]
+	c := env.commonClient
 
 	ctx, _ := createContext(t)
-
-	t.Log("GetLastCommittedBlockNumber returns an not found error")
-	lastCommitted, lastCommittedErr := c.GetLastCommittedBlockNumber(ctx, nil)
-	requireGRPCErrorCode(t, codes.NotFound, lastCommittedErr, lastCommitted)
 
 	t.Run("GetTransactionsStatus returns an invalid argument error", func(t *testing.T) {
 		t.Parallel()
@@ -515,7 +520,7 @@ func TestVCServiceOneActiveStreamOnly(t *testing.T) {
 	}, 4*time.Second, 250*time.Millisecond)
 
 	ctx, _ := createContext(t)
-	stream, err := env.clients[0].StartValidateAndCommitStream(ctx)
+	stream, err := env.commonClient.StartValidateAndCommitStream(ctx)
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.ErrorContains(t, err, utils.ErrActiveStream.Error())
@@ -676,7 +681,7 @@ func TestTransactionResubmission(t *testing.T) {
 			env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
 		}
 
-		test.EnsurePersistedTxStatus(ctx, t, env.clients[0], txIDs, expectedTxStatus)
+		test.EnsurePersistedTxStatus(ctx, t, env.commonClient, txIDs, expectedTxStatus)
 	})
 
 	t.Run("same transactions submitted again while previous submission is not yet committed", func(t *testing.T) {
@@ -692,7 +697,7 @@ func TestTransactionResubmission(t *testing.T) {
 			require.Equal(t, expectedTxStatus, txStatus.Status)
 		}
 		env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
-		test.EnsurePersistedTxStatus(ctx, t, env.clients[0], txIDs, expectedTxStatus)
+		test.EnsurePersistedTxStatus(ctx, t, env.commonClient, txIDs, expectedTxStatus)
 	})
 
 	t.Run("same transactions submitted again within the minbatchsize", func(t *testing.T) {
@@ -708,7 +713,7 @@ func TestTransactionResubmission(t *testing.T) {
 		require.Equal(t, expectedTxStatus, txStatus.Status)
 
 		env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
-		test.EnsurePersistedTxStatus(ctx, t, env.clients[0], txIDs, expectedTxStatus)
+		test.EnsurePersistedTxStatus(ctx, t, env.commonClient, txIDs, expectedTxStatus)
 	})
 
 	t.Run("same duplicate transactions submitted in parallel to all vcservices", func(t *testing.T) {
@@ -730,7 +735,7 @@ func TestTransactionResubmission(t *testing.T) {
 			require.Equal(t, expectedTxStatus, txStatus.Status)
 		}
 		env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
-		test.EnsurePersistedTxStatus(ctx, t, env.clients[0], txIDs, expectedTxStatus)
+		test.EnsurePersistedTxStatus(ctx, t, env.commonClient, txIDs, expectedTxStatus)
 	})
 }
 

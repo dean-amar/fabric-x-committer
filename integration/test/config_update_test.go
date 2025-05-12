@@ -32,7 +32,7 @@ func TestConfigUpdate(t *testing.T) {
 	})
 	ordererServers := make([]*connection.ServerConfig, len(c.SystemConfig.Endpoints.Orderer))
 	for i, e := range c.SystemConfig.Endpoints.Orderer {
-		ordererServers[i] = &connection.ServerConfig{Endpoint: *e}
+		ordererServers[i] = &connection.ServerConfig{Endpoint: *e.Server}
 	}
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
@@ -148,9 +148,10 @@ func TestConfigUpdate(t *testing.T) {
 	}
 
 	t.Log("We expect the block to be held")
-	lastBlock, err := c.CoordinatorClient.GetLastCommittedBlockNumber(t.Context(), nil)
+	lastCommittedBlock, err := c.CoordinatorClient.GetLastCommittedBlockNumber(t.Context(), nil)
 	require.NoError(t, err)
-	require.Equal(t, holdingBlock-1, lastBlock.Number)
+	require.NotNil(t, lastCommittedBlock.Block)
+	require.Equal(t, holdingBlock-1, lastCommittedBlock.Block.Number)
 
 	t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
 	ordererEnv.Holder.HoldFromBlock.Add(1)

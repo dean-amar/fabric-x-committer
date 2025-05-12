@@ -1,0 +1,8 @@
+# This is a partial template. It contains only the VC client configurations.
+# It should be complimented by the common load generator configuration.
+
+vc-client:
+  endpoints:
+    {{- range .Endpoints.VCService }}
+    - {{ .Server }}
+    {{- end }}

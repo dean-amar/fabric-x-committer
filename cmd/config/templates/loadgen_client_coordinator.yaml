@@ -1,0 +1,5 @@
+# This is a partial template. It contains only the coordinator client configurations.
+# It should be complimented by the common load generator configuration.
+
+coordinator-client:
+  endpoint: {{ .Endpoints.Coordinator.Server }}

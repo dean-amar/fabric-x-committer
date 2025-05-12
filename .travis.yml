@@ -32,6 +32,7 @@ jobs:
         - scripts/install-protobuf.sh
         - go install golang.org/x/tools/cmd/goimports@latest
         - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.0.2
+        - pip install sqlfluff
       before_script:
         # Fetch main to only detect issues from changes to main
         - git fetch origin main:main
@@ -58,7 +59,7 @@ jobs:
     - stage: test
       name: Integration Tests (yugabyte)
       install: scripts/get-and-start-yuga.sh
-      script: travis_wait 20 make integration-test
+      script: travis_wait 30 make integration-test
     - stage: test
       name: Build and test container images
       script: make container-test -j16

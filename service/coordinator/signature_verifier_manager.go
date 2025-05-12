@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -50,7 +51,7 @@ type (
 	}
 
 	signVerifierManagerConfig struct {
-		serversConfig            []*connection.ServerConfig
+		clientConfig             *connection.ClientConfig
 		incomingTxsForValidation <-chan dependencygraph.TxNodeBatch
 		outgoingValidatedTxs     chan<- dependencygraph.TxNodeBatch
 		metrics                  *perfMetrics
@@ -71,8 +72,8 @@ func newSignatureVerifierManager(config *signVerifierManagerConfig) *signatureVe
 
 func (svm *signatureVerifierManager) run(ctx context.Context) error {
 	c := svm.config
-	logger.Infof("Connections to %d sv's will be opened from sv manager", len(c.serversConfig))
-	svm.signVerifier = make([]*signatureVerifier, len(c.serversConfig))
+	logger.Infof("Connections to %d sv's will be opened from sv manager", len(c.clientConfig.Endpoints))
+	svm.signVerifier = make([]*signatureVerifier, len(c.clientConfig.Endpoints))
 
 	derivedCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -88,18 +89,17 @@ func (svm *signatureVerifierManager) run(ctx context.Context) error {
 		return nil
 	})
 
-	for i, serverConfig := range c.serversConfig {
-		verifierClientOptions, err := serverConfig.ServerCreds.ClientOption()
+	dialConfigs, dialErr := connection.NewDialConfigPerEndpoint(c.clientConfig)
+	if dialErr != nil {
+		return dialErr
+	}
+	for i, d := range dialConfigs {
+		conn, err := connection.Connect(d)
 		if err != nil {
-			return errors.Wrapf(err, "failed to create tls connection options for signature verifier [%d] at %s",
-				i, &serverConfig.Endpoint)
+			return fmt.Errorf("failed to create connection to signature verifier [%d] at %s: %w",
+				i, d.Address, err)
 		}
-		conn, err := connection.Connect(connection.NewDialConfigWithCreds(&serverConfig.Endpoint, verifierClientOptions))
-		if err != nil {
-			return errors.Wrapf(err, "failed to create connection to signature verifier [%d] at %s",
-				i, &serverConfig.Endpoint)
-		}
-		logger.Infof("connected to signature verifier [%d] at %s", i, &serverConfig.Endpoint)
+		logger.Infof("connected to signature verifier [%d] at %s", i, d.Address)
 		label := conn.CanonicalTarget()
 		c.metrics.verifiersConnection.Disconnected(label)
 

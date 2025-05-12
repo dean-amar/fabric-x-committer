@@ -48,19 +48,6 @@ func Must(err error, msg ...string) {
 	}
 }
 
-// FirstSuccessful returns the first successful call to method given the available operands.
-func FirstSuccessful[A, T any](operands []A, method func(A) (T, error)) (T, error) {
-	var errs []error //nolint:prealloc // error is unlikely.
-	for _, op := range operands {
-		retValue, err := method(op)
-		if err == nil {
-			return retValue, nil
-		}
-		errs = append(errs, err)
-	}
-	return *new(T), errors.Join(errs...)
-}
-
 // Range returns a slice containing integers in the range from start (including) to end (excluding).
 func Range[T constraints.Integer](start, end T) []T {
 	if start >= end {

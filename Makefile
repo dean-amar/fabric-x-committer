@@ -141,8 +141,8 @@ $(cache_dir) $(mod_cache_dir):
 	# Use the host local gocache and gomodcache folder to avoid rebuilding and re-downloading every time
 	mkdir -p "$(cache_dir)" "$(mod_cache_dir)"
 
-BUILD_TARGETS=coordinator signatureverifier validatorpersister sidecar queryexecutor \
-			  loadgen mockvcservice mocksigservice mockorderingservice
+BUILD_TARGETS=coordinator signatureverifier validatorpersister sidecar queryexecutor loadgen \
+			  mockvcservice mocksigservice mockorderingservice
 
 build: $(output_dir) $(BUILD_TARGETS)
 
@@ -221,8 +221,8 @@ pull-db-image: FORCE
 lint: FORCE
 	@echo "Running Go Linters..."
 	golangci-lint run --color=always --new-from-rev=main --timeout=4m
-	@echo "Linting Complete. Parsing Errors..."
-
+	@echo "Running SQL Linters..."
+	sh scripts/sql-lint.sh
 
 # This rule can be used to find and fix lint issues for specific package.
 full-lint-%: FORCE

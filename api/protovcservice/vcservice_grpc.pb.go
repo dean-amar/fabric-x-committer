@@ -35,7 +35,7 @@ const (
 type ValidationAndCommitServiceClient interface {
 	StartValidateAndCommitStream(ctx context.Context, opts ...grpc.CallOption) (ValidationAndCommitService_StartValidateAndCommitStreamClient, error)
 	SetLastCommittedBlockNumber(ctx context.Context, in *protoblocktx.BlockInfo, opts ...grpc.CallOption) (*Empty, error)
-	GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.BlockInfo, error)
+	GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.LastCommittedBlock, error)
 	GetTransactionsStatus(ctx context.Context, in *protoblocktx.QueryStatus, opts ...grpc.CallOption) (*protoblocktx.TransactionsStatus, error)
 	GetNamespacePolicies(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.NamespacePolicies, error)
 	GetConfigTransaction(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.ConfigTransaction, error)
@@ -90,8 +90,8 @@ func (c *validationAndCommitServiceClient) SetLastCommittedBlockNumber(ctx conte
 	return out, nil
 }
 
-func (c *validationAndCommitServiceClient) GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.BlockInfo, error) {
-	out := new(protoblocktx.BlockInfo)
+func (c *validationAndCommitServiceClient) GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.LastCommittedBlock, error) {
+	out := new(protoblocktx.LastCommittedBlock)
 	err := c.cc.Invoke(ctx, ValidationAndCommitService_GetLastCommittedBlockNumber_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func (c *validationAndCommitServiceClient) SetupSystemTablesAndNamespaces(ctx co
 type ValidationAndCommitServiceServer interface {
 	StartValidateAndCommitStream(ValidationAndCommitService_StartValidateAndCommitStreamServer) error
 	SetLastCommittedBlockNumber(context.Context, *protoblocktx.BlockInfo) (*Empty, error)
-	GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.BlockInfo, error)
+	GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.LastCommittedBlock, error)
 	GetTransactionsStatus(context.Context, *protoblocktx.QueryStatus) (*protoblocktx.TransactionsStatus, error)
 	GetNamespacePolicies(context.Context, *Empty) (*protoblocktx.NamespacePolicies, error)
 	GetConfigTransaction(context.Context, *Empty) (*protoblocktx.ConfigTransaction, error)
@@ -159,7 +159,7 @@ func (UnimplementedValidationAndCommitServiceServer) StartValidateAndCommitStrea
 func (UnimplementedValidationAndCommitServiceServer) SetLastCommittedBlockNumber(context.Context, *protoblocktx.BlockInfo) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLastCommittedBlockNumber not implemented")
 }
-func (UnimplementedValidationAndCommitServiceServer) GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.BlockInfo, error) {
+func (UnimplementedValidationAndCommitServiceServer) GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.LastCommittedBlock, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLastCommittedBlockNumber not implemented")
 }
 func (UnimplementedValidationAndCommitServiceServer) GetTransactionsStatus(context.Context, *protoblocktx.QueryStatus) (*protoblocktx.TransactionsStatus, error) {

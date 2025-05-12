@@ -1,6 +1,6 @@
 servers:
   {{- range .Endpoints.Orderer }}
-  - endpoint: {{ . }}
+  - endpoint: {{ .Server }}
   {{- end }}
 block-size: {{ .BlockSize }}
 block-timeout: {{ .BlockTimeout }}

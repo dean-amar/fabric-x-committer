@@ -124,15 +124,11 @@ func TestReadConfigCoordinator(t *testing.T) {
 		expectedConfig: &coordinator.Config{
 			Server:     makeServer("", 9001),
 			Monitoring: makeMonitoring("", 2119),
-			SignVerifierConfig: &coordinator.SignVerifierConfig{
-				ServerConfig: []*connection.ServerConfig{
-					{Endpoint: *makeEndpoint("signature-verifier", 5001)},
-				},
+			VerifierConfig: connection.ClientConfig{
+				Endpoints: []*connection.Endpoint{makeEndpoint("signature-verifier", 5001)},
 			},
-			ValidatorCommitterConfig: &coordinator.ValidatorCommitterConfig{
-				ServerConfig: []*connection.ServerConfig{
-					makeServer("validator-persister", 6001),
-				},
+			ValidatorCommitterConfig: connection.ClientConfig{
+				Endpoints: []*connection.Endpoint{makeEndpoint("validator-persister", 6001)},
 			},
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors:       1,

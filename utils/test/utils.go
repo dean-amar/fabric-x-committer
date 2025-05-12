@@ -2,7 +2,6 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"sync"
 	"testing"
@@ -42,6 +41,17 @@ func FailHandler(t *testing.T) {
 	})
 }
 
+// ServerToClientConfig is used to create client configuration from existing server(s).
+func ServerToClientConfig(servers ...*connection.ServerConfig) *connection.ClientConfig {
+	endpoints := make([]*connection.Endpoint, len(servers))
+	for i, server := range servers {
+		endpoints[i] = &server.Endpoint
+	}
+	return &connection.ClientConfig{
+		Endpoints: endpoints,
+	}
+}
+
 // RunGrpcServerForTest starts a GRPC server using a register method.
 // It handles the cleanup of the GRPC server at the end of a test, and ensure the test is ended
 // only when the GRPC server is down.
@@ -52,9 +62,6 @@ func RunGrpcServerForTest(
 	ctx context.Context, t *testing.T, serverConfig *connection.ServerConfig, register ...func(server *grpc.Server),
 ) *grpc.Server {
 	t.Helper()
-	if serverConfig != nil && serverConfig.ServerCreds != nil {
-		fmt.Printf("On RunGrpcServerForTest( %v", *serverConfig.ServerCreds)
-	}
 	listener, err := serverConfig.Listener()
 	require.NoError(t, err)
 	server, err := serverConfig.GrpcServer()
@@ -159,7 +166,7 @@ func RunServiceForTest(
 
 	initCtx, initCancel := context.WithTimeout(dCtx, 2*time.Minute)
 	tb.Cleanup(initCancel)
-	require.True(tb, waitFunc(initCtx))
+	require.True(tb, waitFunc(initCtx), "service is not ready")
 	return ready
 }
 

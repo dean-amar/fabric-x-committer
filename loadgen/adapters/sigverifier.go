@@ -21,12 +21,12 @@ type (
 	// SvAdapter applies load on the SV.
 	SvAdapter struct {
 		commonAdapter
-		config *SVClientConfig
+		config *VerifierClientConfig
 	}
 )
 
 // NewSVAdapter instantiate SvAdapter.
-func NewSVAdapter(config *SVClientConfig, res *ClientResources) *SvAdapter {
+func NewSVAdapter(config *VerifierClientConfig, res *ClientResources) *SvAdapter {
 	return &SvAdapter{
 		commonAdapter: commonAdapter{res: res},
 		config:        config,

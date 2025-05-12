@@ -188,11 +188,8 @@ func (vc *ValidatorCommitterService) SetLastCommittedBlockNumber(
 func (vc *ValidatorCommitterService) GetLastCommittedBlockNumber(
 	ctx context.Context,
 	_ *protovcservice.Empty,
-) (*protoblocktx.BlockInfo, error) {
+) (*protoblocktx.LastCommittedBlock, error) {
 	blkInfo, err := vc.db.getLastCommittedBlockNumber(ctx)
-	if err != nil && errors.Is(err, ErrMetadataEmpty) {
-		return nil, grpcerror.WrapNotFound(err)
-	}
 	logger.ErrorStackTrace(err)
 	return blkInfo, grpcerror.WrapInternalError(err)
 }

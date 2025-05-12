@@ -2,11 +2,15 @@ package connection
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"github.com/jackc/puddle"
 	"github.com/yugabyte/pgx/v4/pgxpool"
+	"go.uber.org/zap"
 )
 
 // RetryProfile can be used to define the backoff properties for retries.
@@ -41,14 +45,17 @@ func (p *RetryProfile) Execute(ctx context.Context, o backoff.Operation) error {
 }
 
 // ExecuteSQL executes the given SQL statement until it succeeds or a timeout occurs.
-func (p *RetryProfile) ExecuteSQL(ctx context.Context, pool *pgxpool.Pool, sqlStmt string, args ...any) error {
+func (p *RetryProfile) ExecuteSQL(ctx context.Context, executor *pgxpool.Pool, sqlStmt string, args ...any) error {
 	err := p.Execute(ctx, func() error {
-		_, err := pool.Exec(ctx, sqlStmt, args...)
-		err = errors.Wrapf(err, "failed to execute the SQL statement [%s]", sqlStmt)
-		if err != nil {
-			logger.Warn(err)
+		_, err := executor.Exec(ctx, sqlStmt, args...)
+		wrappedErr := errors.Wrapf(err, "failed to execute the SQL statement [%s]", sqlStmt)
+		if errors.Is(err, puddle.ErrClosedPool) {
+			return &backoff.PermanentError{Err: wrappedErr}
 		}
-		return err
+		if wrappedErr != nil {
+			logger.WithOptions(zap.AddCallerSkip(8)).Warn(wrappedErr)
+		}
+		return wrappedErr
 	})
 	return err
 }
@@ -64,23 +71,68 @@ func (p *RetryProfile) NewBackoff() *backoff.ExponentialBackOff {
 		Clock:               backoff.SystemClock,
 	}
 	if p != nil {
-		if p.InitialInterval != 0 {
+		if p.InitialInterval > 0 {
 			b.InitialInterval = p.InitialInterval
 		}
-		if p.RandomizationFactor != 0 {
+		if p.RandomizationFactor > 0 {
 			b.RandomizationFactor = p.RandomizationFactor
 		}
-		if p.Multiplier != 0 {
+		if p.Multiplier > 1 {
 			b.Multiplier = p.Multiplier
 		}
-		if p.MaxInterval != 0 {
+		if p.MaxInterval > 0 {
 			b.MaxInterval = p.MaxInterval
 		}
-		if p.MaxElapsedTime != 0 {
+		if p.MaxElapsedTime > 0 {
 			b.MaxElapsedTime = p.MaxElapsedTime
 		}
 	}
 	b.Stop = backoff.Stop // -1 to stop retries
 	b.Reset()
 	return b
+}
+
+// MakeGrpcRetryPolicyJSON defines the retry policy for a gRPC client connection.
+// The retry policy applies to all subsequent gRPC calls made through the client connection.
+// Our GRPC retry policy is applicable only for the following status codes:
+//
+//	(1) UNAVAILABLE	The service is currently unavailable (e.g., transient network issue, server down).
+//	(2) DEADLINE_EXCEEDED	Operation took too long (deadline passed).
+//	(3) RESOURCE_EXHAUSTED	Some resource (e.g., quota) has been exhausted; the operation cannot proceed.
+func (p *RetryProfile) MakeGrpcRetryPolicyJSON() string {
+	// We initialize a backoff object to fetch the default values.
+	b := p.NewBackoff()
+
+	// We put limits on the values to ensure correct values.
+	initialInterval := max(b.InitialInterval.Seconds(), time.Nanosecond.Seconds())
+	maxInterval := max(b.MaxInterval.Seconds(), initialInterval)
+	maxElapsedTime := max(b.MaxElapsedTime.Seconds(), maxInterval)
+	multiplier := max(b.Multiplier, 1.0)
+	ret := map[string]any{
+		"loadBalancingConfig": []map[string]any{{
+			"round_robin": make(map[string]any),
+		}},
+		"methodConfig": []map[string]any{{
+			// Setting an empty name sets the default for all methods.
+			"name": []any{make(map[string]any)},
+			"retryPolicy": map[string]any{
+				"maxAttempts":       defaultGrpcMaxAttempts,
+				"initialBackoff":    fmt.Sprintf("%.1fs", initialInterval),
+				"maxBackoff":        fmt.Sprintf("%.1fs", maxInterval),
+				"backoffMultiplier": multiplier,
+				"retryableStatusCodes": []string{
+					"UNAVAILABLE",
+					"DEADLINE_EXCEEDED",
+					"RESOURCE_EXHAUSTED",
+				},
+			},
+			"timeout": fmt.Sprintf("%.1fs", maxElapsedTime),
+		}},
+	}
+	jsonString, err := json.MarshalIndent(ret, "", "  ")
+	if err != nil {
+		logger.Warnf("failed to marshal retry profile to JSON: %s", err)
+		return "{}"
+	}
+	return string(jsonString)
 }

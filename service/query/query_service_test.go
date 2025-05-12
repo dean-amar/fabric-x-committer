@@ -328,7 +328,7 @@ func newQueryServiceTestEnv(t *testing.T) *queryServiceTestEnv {
 		protoqueryservice.RegisterQueryServiceServer(server, qs)
 	})
 
-	clientConn, err := connection.Connect(connection.NewDialConfig(&sConfig.Endpoint))
+	clientConn, err := connection.Connect(connection.NewInsecureDialConfig(&sConfig.Endpoint))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		assert.NoError(t, clientConn.Close())

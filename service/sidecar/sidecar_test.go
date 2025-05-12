@@ -221,9 +221,10 @@ func TestSidecarConfigUpdate(t *testing.T) {
 	}
 
 	t.Log("We expect the block to be held")
-	lastBlock, err := env.coordinator.GetLastCommittedBlockNumber(ctx, nil)
+	lastCommittedBlock, err := env.coordinator.GetLastCommittedBlockNumber(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, expectedBlock-1, lastBlock.Number)
+	require.NotNil(t, lastCommittedBlock.Block)
+	require.Equal(t, expectedBlock-1, lastCommittedBlock.Block.Number)
 
 	t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
 	env.ordererEnv.Holder.HoldFromBlock.Add(1)
@@ -409,7 +410,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	conn, err := connection.Connect(connection.NewDialConfig(&env.config.Committer.ServerConfig.Endpoint))
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(&env.config.Committer.ServerConfig.Endpoint))
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
 	return conn.CanonicalTarget()
@@ -544,8 +545,9 @@ func checkLastCommittedBlock(
 ) {
 	t.Helper()
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		lastBlock, err := coordinator.GetLastCommittedBlockNumber(ctx, nil)
+		lastCommittedBlock, err := coordinator.GetLastCommittedBlockNumber(ctx, nil)
 		require.NoError(ct, err)
-		require.Equal(ct, expectedBlockNumber, lastBlock.Number)
+		require.NotNil(ct, lastCommittedBlock.Block)
+		require.Equal(ct, expectedBlockNumber, lastCommittedBlock.Block.Number)
 	}, expectedProcessingTime, 50*time.Millisecond)
 }

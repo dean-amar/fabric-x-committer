@@ -24,7 +24,7 @@ func TestMockVCServiceCmd(t *testing.T) {
 		{
 			Name:              "start",
 			Args:              []string{"start"},
-			CmdLoggerOutputs:  []string{"Serving", s.ServerEndpoint.String()},
+			CmdLoggerOutputs:  []string{"Serving", s.ServiceEndpoints.Server.String()},
 			CmdStdOutput:      fmt.Sprintf("Starting %v service", serviceName),
 			UseConfigTemplate: config.TemplateVC,
 			System:            s,

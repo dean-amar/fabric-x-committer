@@ -1,11 +1,14 @@
 server:
-  endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
   server-creds:
-    use-tls: "{{ .ServiceTLS.UseTLS }}"
-    mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
+    use-tls: {{ .ServiceTLS.UseTLS }}
+    mutual-tls: {{ .ServiceTLS.MutualTLS }}
     cert-path: "{{ .ServiceTLS.Credentials.CertPath }}"
     key-path: "{{ .ServiceTLS.Credentials.KeyPath }}"
-    ca-cert-path: "{{ .ServiceTLS.Credentials.CACertPath }}"
+    ca-cert-paths:
+      {{- range .ServiceTLS.Credentials.CACertPaths }}
+      - "{{ . }}"
+      {{- end }}
   keep-alive:
     params:
       time: 300s
@@ -13,27 +16,32 @@ server:
     enforcement-policy:
       min-time: 60s
       permit-without-stream: false
+
 monitoring:
   server:
-    endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
 
 orderer:
   connection:
     endpoints:
       {{- range .Endpoints.Orderer }}
-      - {{ . }}
+      - {{ .Server }}
       {{- end }}
-  channel-id: {{ .ChannelID }}
-  consensus-type: BFT
+    channel-id: {{ .ChannelID }}
+    consensus-type: BFT
+
 committer:
   server:
-    endpoint: {{ .Endpoints.Coordinator }}
+    endpoint: {{ .Endpoints.Coordinator.Server }}
     server-creds:
-      use-tls: "{{ .CoordinatorClientTLSConfig.UseTLS }}"
-      mutual-tls: "{{ .CoordinatorClientTLSConfig.MutualTLS }}"
+      use-tls: {{ .CoordinatorClientTLSConfig.UseTLS }}
+      mutual-tls: {{ .CoordinatorClientTLSConfig.MutualTLS }}
       cert-path: "{{ .CoordinatorClientTLSConfig.Credentials.CertPath }}"
       key-path: "{{ .CoordinatorClientTLSConfig.Credentials.KeyPath }}"
-      ca-cert-path: "{{ .CoordinatorClientTLSConfig.Credentials.CACertPath }}"
+      ca-cert-paths:
+        {{- range .CoordinatorClientTLSConfig.Credentials.CACertPaths }}
+        - "{{ . }}"
+        {{- end }}
 
 ledger:
   path: {{ .LedgerPath }}

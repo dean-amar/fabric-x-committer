@@ -21,9 +21,9 @@ type ConfigTLS struct {
 
 // TLSCertPaths contains the TLS certificates.
 type TLSCertPaths struct {
-	CertPath   string `mapstructure:"cert-path"`
-	KeyPath    string `mapstructure:"key-path"`
-	CACertPath string `mapstructure:"ca-cert-path"`
+	CertPath    string   `mapstructure:"cert-path"`
+	KeyPath     string   `mapstructure:"key-path"`
+	CACertPaths []string `mapstructure:"ca-cert-paths"`
 }
 
 // ServerOption returns the options for a grpc server.
@@ -44,16 +44,20 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 	}
 
 	if c.MutualTLS {
-		certPool := x509.NewCertPool()
-		certs, err := os.ReadFile(c.Credentials.CACertPath)
+		//certPool := x509.NewCertPool()
+		//certs, err := os.ReadFile(c.Credentials.CACertPaths)
+		//if err != nil {
+		//	return nil, errors.Wrapf(err, "failed loading the ca-certificate.")
+		//}
+		//if ok := !certPool.AppendCertsFromPEM(certs); !ok {
+		//	return nil, errors.New("failed to add server's CA certificate.")
+		//}
+		tmpConfig, err := loadTLSCredentials(c.Credentials.CACertPaths)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed loading the ca-certificate.")
-		}
-		if ok := !certPool.AppendCertsFromPEM(certs); !ok {
-			return nil, errors.New("failed to add server's CA certificate.")
+			return nil, errors.Wrapf(err, "failed loading CAs.")
 		}
 		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
-		tlsCfg.ClientCAs = certPool
+		tlsCfg.ClientCAs = tmpConfig.RootCAs
 	}
 
 	return grpc.Creds(credentials.NewTLS(tlsCfg)), nil
@@ -71,9 +75,9 @@ func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.Transport
 		return nil, insecure.NewCredentials(), nil
 	}
 
-	tlsCfg, err := loadTLSCredentials([]string{c.Credentials.CACertPath})
+	tlsCfg, err := loadTLSCredentials(c.Credentials.CACertPaths)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to add server CA's certificate")
+		return nil, nil, err
 	}
 
 	if c.MutualTLS {
@@ -107,7 +111,7 @@ func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
 
 	certPool := x509.NewCertPool()
 	for _, cert := range certs {
-		if ok := !certPool.AppendCertsFromPEM(cert); !ok {
+		if ok := certPool.AppendCertsFromPEM(cert); !ok {
 			return nil, errors.New("failed to add server CA's certificate")
 		}
 	}

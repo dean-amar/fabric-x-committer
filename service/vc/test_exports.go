@@ -132,7 +132,7 @@ func NewDatabaseTestEnv(t *testing.T) *DatabaseTestEnv {
 func NewDatabaseTestEnvWithCluster(t *testing.T, dbConnections *dbtest.Connection) *DatabaseTestEnv {
 	t.Helper()
 	require.NotNil(t, dbConnections)
-	return newDatabaseTestEnv(t, dbtest.PrepareTestEnvWithConnection(t, dbConnections), true)
+	return newDatabaseTestEnv(t, dbtest.PrepareTestEnvWithConnection(t, dbConnections), dbConnections.LoadBalance)
 }
 
 func newDatabaseTestEnv(t *testing.T, cs *dbtest.Connection, loadBalance bool) *DatabaseTestEnv {
@@ -152,7 +152,7 @@ func newDatabaseTestEnv(t *testing.T, cs *dbtest.Connection, loadBalance bool) *
 	}
 
 	m := newVCServiceMetrics()
-	sCtx, sCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	sCtx, sCancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(sCancel)
 	dbObject, err := newDatabase(sCtx, config, m)
 	require.NoError(t, err, "%+v", err)

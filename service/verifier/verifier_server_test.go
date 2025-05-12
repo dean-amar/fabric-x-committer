@@ -388,7 +388,7 @@ func newTestState(t *testing.T, config *Config) *State {
 		protosigverifierservice.RegisterVerifierServer(grpcServer, service)
 	})
 
-	clientConnection, err := connection.Connect(connection.NewDialConfig(&config.Server.Endpoint))
+	clientConnection, err := connection.Connect(connection.NewInsecureDialConfig(&config.Server.Endpoint))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		assert.NoError(t, clientConnection.Close())

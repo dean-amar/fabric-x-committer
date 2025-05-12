@@ -26,8 +26,7 @@ type (
 	// SystemConfig represents the configuration of the one of the committer's components.
 	SystemConfig struct {
 		// Instance endpoints.
-		ServerEndpoint  *connection.Endpoint
-		MetricsEndpoint *connection.Endpoint
+		ServiceEndpoints ServiceEndpoints
 
 		// Service Tls options and certificates.
 		ServiceTLS connection.ConfigTLS
@@ -53,20 +52,26 @@ type (
 
 	// SystemEndpoints represents the endpoints of the system.
 	SystemEndpoints struct {
-		Database    []*connection.Endpoint
-		Verifier    []*connection.Endpoint
-		VCService   []*connection.Endpoint
-		Orderer     []*connection.Endpoint
-		Coordinator *connection.Endpoint
-		Sidecar     *connection.Endpoint
-		Query       *connection.Endpoint
-		LoadGen     *connection.Endpoint
+		Verifier    []ServiceEndpoints
+		VCService   []ServiceEndpoints
+		Orderer     []ServiceEndpoints
+		Coordinator ServiceEndpoints
+		Sidecar     ServiceEndpoints
+		Query       ServiceEndpoints
+		LoadGen     ServiceEndpoints
+	}
+
+	// ServiceEndpoints stores the server and metrics endpoints for a service.
+	ServiceEndpoints struct {
+		Server  *connection.Endpoint
+		Metrics *connection.Endpoint
 	}
 
 	// DatabaseConfig represents the used DB.
 	DatabaseConfig struct {
 		Name        string
 		LoadBalance bool
+		Endpoints   []*connection.Endpoint
 	}
 
 	// CoordinatorSigVcClientsTLSConfig contains the vcservice and
@@ -94,10 +99,25 @@ var (
 	TemplateVC string
 	//go:embed templates/signatureverifier.yaml
 	TemplateVerifier string
-	//go:embed templates/loadgen_orderer.yaml
-	TemplateLoadGenOrderer string
-	//go:embed templates/loadgen_committer.yaml
-	TemplateLoadGenCommitter string
+
+	TemplateLoadGenOrderer     = templateLoadGenOrdererClient + templateLoadGenCommon
+	TemplateLoadGenCommitter   = templateLoadGenCommitterClient + templateLoadGenCommon
+	TemplateLoadGenCoordinator = templateLoadGenCoordinatorClient + templateLoadGenCommon
+	TemplateLoadGenVC          = templateLoadGenVCClient + templateLoadGenCommon
+	TemplateLoadGenVerifier    = templateLoadGenVerifierClient + templateLoadGenCommon
+
+	//go:embed templates/loadgen_common.yaml
+	templateLoadGenCommon string
+	//go:embed templates/loadgen_client_orderer.yaml
+	templateLoadGenOrdererClient string
+	//go:embed templates/loadgen_client_sidecar.yaml
+	templateLoadGenCommitterClient string
+	//go:embed templates/loadgen_client_coordinator.yaml
+	templateLoadGenCoordinatorClient string
+	//go:embed templates/loadgen_client_vc.yaml
+	templateLoadGenVCClient string
+	//go:embed templates/loadgen_client_verifier.yaml
+	templateLoadGenVerifierClient string
 )
 
 // CreateConfigFromTemplate creates a config file using template yaml and writes it to the outputPath.
@@ -138,9 +158,9 @@ func WriteConfigBlock(t *testing.T, block *common.Block) string {
 	return configBlockPath
 }
 
-// WithEndpoint creates a new SystemConfig with a modified ServerEndpoint.
-func (c *SystemConfig) WithEndpoint(e *connection.Endpoint) *SystemConfig {
+// WithEndpoint creates a new SystemConfig with a modified ServerEndpoint and MetricsEndpoint.
+func (c *SystemConfig) WithEndpoint(e ServiceEndpoints) *SystemConfig {
 	s := *c
-	s.ServerEndpoint = e
+	s.ServiceEndpoints = e
 	return &s
 }

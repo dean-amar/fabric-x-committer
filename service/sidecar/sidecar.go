@@ -89,17 +89,16 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	logger.Infof("Create coordinator client and connect to %s\n", &s.config.Committer.ServerConfig.Endpoint)
-
 	committerCredentials, err := s.config.Committer.ServerConfig.ServerCreds.ClientOption()
 	if err != nil {
 		return errors.Wrapf(err, "could not load creds")
 	}
 	// connecting to the coordinator.
-	conn, connErr := connection.Connect(connection.NewDialConfigWithCreds(
+	conn, connErr := connection.Connect(connection.TempNewDialConfigWithCreds(
 		&s.config.Committer.ServerConfig.Endpoint, committerCredentials),
 	)
 	if connErr != nil {
-		return fmt.Errorf("failed to connect to coordinator: %w", connErr)
+		return errors.Wrapf(err, "failed to connect to coordinator")
 	}
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)

@@ -1,14 +1,18 @@
 server:
-  endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
   server-creds:
-    use-tls: "{{ .ServiceTLS.UseTLS }}"
-    mutual-tls: "{{ .ServiceTLS.MutualTLS }}"
+    use-tls: {{ .ServiceTLS.UseTLS }}
+    mutual-tls: {{ .ServiceTLS.MutualTLS }}
     cert-path: "{{ .ServiceTLS.Credentials.CertPath }}"
     key-path: "{{ .ServiceTLS.Credentials.KeyPath }}"
-    ca-cert-path: "{{ .ServiceTLS.Credentials.CACertPath }}"
+    ca-cert-paths:
+      {{- range .ServiceTLS.Credentials.CACertPaths }}
+      - "{{ . }}"
+      {{- end }}
+
 monitoring:
   server:
-    endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
 
 parallel-executor:
   parallelism: 40

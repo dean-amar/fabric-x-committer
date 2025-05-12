@@ -19,12 +19,12 @@ import (
 // Coordinator is a mock coordinator.
 type Coordinator struct {
 	protocoordinatorservice.CoordinatorServer
-	lastCommittedBlockNumber atomic.Int64
-	nextExpectedBlockNumber  atomic.Uint64
-	streamActive             atomic.Bool
-	numWaitingTxs            atomic.Int32
-	txsStatus                *fifoCache[*protoblocktx.StatusWithHeight]
-	txsStatusMu              sync.Mutex
+	lastCommittedBlock      atomic.Pointer[protoblocktx.BlockInfo]
+	nextExpectedBlockNumber atomic.Uint64
+	streamActive            atomic.Bool
+	numWaitingTxs           atomic.Int32
+	txsStatus               *fifoCache[*protoblocktx.StatusWithHeight]
+	txsStatusMu             sync.Mutex
 }
 
 // We don't want to utilize unlimited memory for storing the transactions status.
@@ -33,11 +33,9 @@ var defaultTxStatusStorageSize = 100_000
 
 // NewMockCoordinator creates a new mock coordinator.
 func NewMockCoordinator() *Coordinator {
-	c := &Coordinator{
+	return &Coordinator{
 		txsStatus: newFifoCache[*protoblocktx.StatusWithHeight](defaultTxStatusStorageSize),
 	}
-	c.lastCommittedBlockNumber.Store(-1)
-	return c
 }
 
 // GetConfigTransaction return the latest configuration transaction.
@@ -51,7 +49,7 @@ func (*Coordinator) GetConfigTransaction(
 func (c *Coordinator) SetLastCommittedBlockNumber(
 	_ context.Context, lastBlock *protoblocktx.BlockInfo,
 ) (*protocoordinatorservice.Empty, error) {
-	c.lastCommittedBlockNumber.Store(int64(lastBlock.Number)) //nolint:gosec
+	c.lastCommittedBlock.Store(lastBlock)
 	return nil, nil
 }
 
@@ -59,8 +57,8 @@ func (c *Coordinator) SetLastCommittedBlockNumber(
 func (c *Coordinator) GetLastCommittedBlockNumber(
 	_ context.Context,
 	_ *protocoordinatorservice.Empty,
-) (*protoblocktx.BlockInfo, error) {
-	return &protoblocktx.BlockInfo{Number: uint64(c.lastCommittedBlockNumber.Load())}, nil //nolint:gosec
+) (*protoblocktx.LastCommittedBlock, error) {
+	return &protoblocktx.LastCommittedBlock{Block: c.lastCommittedBlock.Load()}, nil
 }
 
 // GetNextExpectedBlockNumber returns the next expected block number to be received by the coordinator.

@@ -8,8 +8,6 @@ import (
 	"github.com/hyperledger/fabric/msp"
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"gopkg.in/yaml.v3"
-
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
 // NewIdentitySigner instantiate a signer for the given identity.
@@ -45,21 +43,21 @@ func NewIdentitySigner(config *IdentityConfig) (msp.SigningIdentity, error) { //
 	return signer, nil
 }
 
-// LoadTLSConfig returns TLS configuration for connections.
-func LoadTLSConfig(config *ConnectionConfig) (*cryptotls.Config, error) {
-	var conf *cryptotls.Config
-	var err error
-	switch {
-	case len(config.RootCA) > 0:
-		conf, err = connection.LoadTLSCredentialsRaw(config.RootCA)
-	case len(config.RootCAPaths) > 0:
-		conf, err = connection.LoadTLSCredentials(config.RootCAPaths)
-	}
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load TLS config")
-	}
-	return conf, nil
-}
+//// LoadTLSConfig returns TLS configuration for connections.
+//func LoadTLSConfig(config *ConnectionConfig) (*cryptotls.Config, error) {
+//	var conf *cryptotls.Config
+//	var err error
+//	switch {
+//	case len(config.RootCA) > 0:
+//		conf, err = connection.loadTLSCredentialsRaw(config.RootCA)
+//	case len(config.RootCAPaths) > 0:
+//		conf, err = connection.loadTLSCredentials(config.RootCAPaths)
+//	}
+//	if err != nil {
+//		return nil, errors.Wrap(err, "failed to load TLS config")
+//	}
+//	return conf, nil
+//}
 
 // IsTLSConfigEqual returns true of the two configurations are equal.
 func IsTLSConfigEqual(c1, c2 *cryptotls.Config) bool {

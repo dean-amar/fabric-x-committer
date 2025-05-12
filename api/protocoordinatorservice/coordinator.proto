@@ -9,7 +9,7 @@ import "api/protoblocktx/block_tx.proto";
 service Coordinator {
     rpc BlockProcessing(stream Block) returns (stream protoblocktx.TransactionsStatus);
     rpc SetLastCommittedBlockNumber (protoblocktx.BlockInfo) returns (Empty) {};
-    rpc GetLastCommittedBlockNumber (Empty) returns (protoblocktx.BlockInfo) {};
+    rpc GetLastCommittedBlockNumber (Empty) returns (protoblocktx.LastCommittedBlock) {};
     rpc GetNextExpectedBlockNumber (Empty) returns (protoblocktx.BlockInfo) {};
     rpc GetTransactionsStatus(protoblocktx.QueryStatus) returns (protoblocktx.TransactionsStatus);
     rpc GetConfigTransaction(Empty) returns (protoblocktx.ConfigTransaction) {};

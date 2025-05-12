@@ -62,7 +62,7 @@ func (p *Provider) StartPrometheusServer(
 	}
 	defer connection.CloseConnectionsLog(l)
 
-	p.url, err = url.JoinPath(scheme, l.Addr().String(), metricsSubPath)
+	p.url, err = MakeMetricsURL(l.Addr().String())
 	if err != nil {
 		return errors.Wrap(err, "failed formatting URL")
 	}
@@ -185,4 +185,9 @@ func (p *Provider) NewConnectionMetrics(opts ConnectionMetricsOpts) *ConnectionM
 // Registry returns the prometheus registry.
 func (p *Provider) Registry() *prometheus.Registry {
 	return p.registry
+}
+
+// MakeMetricsURL construct the Prometheus metrics URL.
+func MakeMetricsURL(address string) (string, error) {
+	return url.JoinPath(scheme, address, metricsSubPath)
 }

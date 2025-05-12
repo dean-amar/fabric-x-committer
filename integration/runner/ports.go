@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.ibm.com/decentralized-trust-research/scalable-committer/cmd/config"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
@@ -14,17 +15,23 @@ type portAllocator struct {
 }
 
 // allocatePorts finds a range of available ports.
-func (p *portAllocator) allocatePorts(t *testing.T, count int) []*connection.Endpoint {
+func (p *portAllocator) allocatePorts(t *testing.T, count int) []config.ServiceEndpoints {
 	t.Helper()
-	endpoints := make([]*connection.Endpoint, count)
+	endpoints := make([]config.ServiceEndpoints, count)
 	for i := range endpoints {
-		s := connection.NewLocalHostServer()
-		listener, err := s.Listener()
-		require.NoError(t, err)
-		p.listeners = append(p.listeners, listener)
-		endpoints[i] = &s.Endpoint
+		endpoints[i].Server = p.allocate(t)
+		endpoints[i].Metrics = p.allocate(t)
 	}
 	return endpoints
+}
+
+func (p *portAllocator) allocate(t *testing.T) *connection.Endpoint {
+	t.Helper()
+	s := connection.NewLocalHostServer()
+	listener, err := s.Listener()
+	require.NoError(t, err)
+	p.listeners = append(p.listeners, listener)
+	return &s.Endpoint
 }
 
 // close releases the ports to be used for their intended purpose.
