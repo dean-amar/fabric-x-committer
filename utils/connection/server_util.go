@@ -33,7 +33,6 @@ func NewLocalHostServer() *ServerConfig {
 // GrpcServer instantiate a [grpc.Server].
 func (c *ServerConfig) GrpcServer() (*grpc.Server, error) {
 	var opts []grpc.ServerOption
-
 	serverGrpcCreds, err := c.ServerCreds.ServerOption()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed loading the server's grpc credentials.")
@@ -150,5 +149,6 @@ func StartService(
 			})
 		})
 	}
+
 	return g.Wait()
 }

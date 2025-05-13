@@ -14,13 +14,9 @@ import (
 // ConfigTLS contains the certificate paths and options for TLS connections
 // between servers and clients.
 type ConfigTLS struct {
-	UseTLS      bool         `mapstructure:"use-tls"`
-	MutualTLS   bool         `mapstructure:"mutual-tls"`
-	Credentials TLSCertPaths `mapstructure:",squash"`
-}
-
-// TLSCertPaths contains the TLS certificates.
-type TLSCertPaths struct {
+	UseTLS      bool     `mapstructure:"use-tls"`
+	MutualTLS   bool     `mapstructure:"mutual-tls"`
+	ServerName  string   `mapstructure:"server-name"`
 	CertPath    string   `mapstructure:"cert-path"`
 	KeyPath     string   `mapstructure:"key-path"`
 	CACertPaths []string `mapstructure:"ca-cert-paths"`
@@ -32,7 +28,7 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 		return grpc.Creds(insecure.NewCredentials()), nil
 	}
 
-	cert, err := tls.LoadX509KeyPair(c.Credentials.CertPath, c.Credentials.KeyPath)
+	cert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed loading the server certificate and private key.")
 	}
@@ -40,6 +36,7 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		ClientAuth:   tls.NoClientCert,
+		ServerName:   "localhost",
 		MinVersion:   tls.VersionTLS12,
 	}
 
@@ -52,12 +49,16 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 		//if ok := !certPool.AppendCertsFromPEM(certs); !ok {
 		//	return nil, errors.New("failed to add server's CA certificate.")
 		//}
-		tmpConfig, err := loadTLSCredentials(c.Credentials.CACertPaths)
+		tmpConfig, err := loadTLSCredentials(c.CACertPaths)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed loading CAs.")
 		}
 		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsCfg.ClientCAs = tmpConfig.RootCAs
+	}
+
+	if c.ServerName != "" {
+		tlsCfg.ServerName = c.ServerName
 	}
 
 	return grpc.Creds(credentials.NewTLS(tlsCfg)), nil
@@ -75,17 +76,21 @@ func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.Transport
 		return nil, insecure.NewCredentials(), nil
 	}
 
-	tlsCfg, err := loadTLSCredentials(c.Credentials.CACertPaths)
+	tlsCfg, err := loadTLSCredentials(c.CACertPaths)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if c.MutualTLS {
-		clientCert, err := tls.LoadX509KeyPair(c.Credentials.CertPath, c.Credentials.KeyPath)
+		clientCert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to load credential keys")
 		}
 		tlsCfg.Certificates = []tls.Certificate{clientCert}
+	}
+
+	if c.ServerName != "" {
+		tlsCfg.ServerName = c.ServerName
 	}
 
 	return tlsCfg, credentials.NewTLS(tlsCfg), nil
@@ -120,5 +125,6 @@ func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
 	return &tls.Config{
 		RootCAs:    certPool,
 		MinVersion: tls.VersionTLS12,
+		ServerName: "localhost",
 	}, nil
 }

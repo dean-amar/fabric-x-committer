@@ -8,9 +8,9 @@ import (
 type (
 	// ClientConfig contains the endpoints, CAs, and retry profile.
 	ClientConfig struct {
-		Endpoints   []*Endpoint   `mapstructure:"endpoints"`
-		Retry       *RetryProfile `mapstructure:"reconnect"`
-		ClientCreds []*ConfigTLS  `mapstructure:"server-creds"`
+		Endpoints    []*Endpoint   `mapstructure:"endpoints"`
+		ClientsCreds []*ConfigTLS  `mapstructure:"client-creds"`
+		Retry        *RetryProfile `mapstructure:"reconnect"`
 	}
 
 	// ServerConfig describes the connection parameter for a server.

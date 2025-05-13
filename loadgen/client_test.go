@@ -185,9 +185,9 @@ func TestLoadGenForSidecar(t *testing.T) {
 
 			// Start client
 			clientConf.Adapter.SidecarClient = &adapters.SidecarClientConfig{
-				SidecarEndpoint: &sidecarServerConf.Endpoint,
-				ChannelID:       chanID,
-				OrdererServers:  ordererServers,
+				ChannelID:                  chanID,
+				OrdererServers:             ordererServers,
+				SidecarClientConfiguration: sidecarServerConf,
 			}
 			testLoadGenerator(t, clientConf)
 		})
@@ -245,7 +245,9 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 			// Start client
 			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
-				SidecarEndpoint:      &sidecarConf.Server.Endpoint,
+				SidecarClientConfiguration: &connection.ServerConfig{
+					Endpoint: sidecarConf.Server.Endpoint,
+				},
 				Orderer:              sidecarConf.Orderer,
 				BroadcastParallelism: 5,
 			}

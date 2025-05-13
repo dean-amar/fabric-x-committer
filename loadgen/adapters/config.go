@@ -17,20 +17,16 @@ type (
 
 	// OrdererClientConfig is a struct that contains the configuration for the orderer client.
 	OrdererClientConfig struct {
-		Orderer broadcastdeliver.Config `mapstructure:"orderer"`
-		// @TODO: change to connection.ServerConfig
-		SidecarEndpoint      *connection.Endpoint `mapstructure:"sidecar-endpoint"`
-		SidecarTLSConfig     connection.ConfigTLS `mapstructure:"sidecar-tls-config"`
-		BroadcastParallelism int                  `mapstructure:"broadcast-parallelism"`
+		Orderer                    broadcastdeliver.Config  `mapstructure:"orderer"`
+		SidecarClientConfiguration *connection.ServerConfig `mapstructure:"sidecar-client-config"`
+		BroadcastParallelism       int                      `mapstructure:"broadcast-parallelism"`
 	}
 
 	// SidecarClientConfig is a struct that contains the configuration for the sidecar client.
 	SidecarClientConfig struct {
-		ChannelID string `mapstructure:"channel-id"`
-		// @TODO: change to connection.ServerConfig
-		SidecarEndpoint  *connection.Endpoint       `mapstructure:"sidecar-endpoint"`
-		SidecarTLSConfig connection.ConfigTLS       `mapstructure:"sidecar-tls-config"`
-		OrdererServers   []*connection.ServerConfig `mapstructure:"orderer-servers"`
+		ChannelID                  string                     `mapstructure:"channel-id"`
+		SidecarClientConfiguration *connection.ServerConfig   `mapstructure:"sidecar-client-config"`
+		OrdererServers             []*connection.ServerConfig `mapstructure:"orderer-servers"`
 	}
 
 	// CoordinatorClientConfig is a struct that contains the configuration for the coordinator client.

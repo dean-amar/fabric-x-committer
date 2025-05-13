@@ -3,12 +3,10 @@ package coordinator
 import (
 	"context"
 	"fmt"
-	"slices"
-	"sync"
-
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"slices"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protosigverifierservice"
@@ -59,8 +57,6 @@ type (
 	}
 )
 
-var once sync.Once
-
 func newValidatorCommitterManager(c *validatorCommitterManagerConfig) *validatorCommitterManager {
 	return &validatorCommitterManager{
 		config:              c,
@@ -87,19 +83,24 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		return nil
 	})
 
+	fmt.Print("creating-config\n")
 	commonDial, dialErr := connection.NewLoadBalancedDialConfig(c.clientConfig)
 	if dialErr != nil {
 		return fmt.Errorf("failed to create connection to validator persisters: %w", dialErr)
 	}
+	fmt.Print("connecting\n")
 	commonConn, err := connection.Connect(commonDial)
 	if err != nil {
 		return fmt.Errorf("failed to create connection to validator persisters: %w", err)
 	}
+	fmt.Print("creaeting-vc-client\n")
 	vcm.commonClient = protovcservice.NewValidationAndCommitServiceClient(commonConn)
+	fmt.Print("setting-system-tables\n")
 	_, setupErr := vcm.commonClient.SetupSystemTablesAndNamespaces(ctx, nil)
 	if setupErr != nil {
 		return errors.Wrap(setupErr, "failed to setup system tables and namespaces")
 	}
+	fmt.Print("finished-init-process\n")
 
 	dialConfigs, dialErr := connection.NewDialConfigPerEndpoint(c.clientConfig)
 	if dialErr != nil {
@@ -113,20 +114,6 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		}
 		logger.Infof("validator persister manager connected to validator persister at %s", d.Address)
 		vc := newValidatorCommitter(conn, c.metrics, c.policyMgr)
-
-		//// ensure the first and only the first vcservice client will setup the system tables and namespaces.
-		//var err error
-		//once.Do(func() {
-		//	_, setupErr := vc.client.SetupSystemTablesAndNamespaces(ctx, nil)
-		//	if setupErr != nil {
-		//		err = errors.Wrap(setupErr, "failed to setup system tables and namespaces")
-		//		return
-		//	}
-		//	vcm.commonClient = vc.client
-		//})
-		//if err != nil {
-		//	return err
-		//}
 
 		logger.Debugf("Client [%d] successfully created and connected to vc", i)
 		vcm.validatorCommitter[i] = vc

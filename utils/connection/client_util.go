@@ -57,7 +57,7 @@ var knownConnectionIssues = regexp.MustCompile(`(?i)EOF|connection\s+refused|clo
 // NewLoadBalancedDialConfig creates a dial config with load balancing between the endpoints
 // in the given config.
 func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
-	tlsCredentials, err := config.ClientCreds[0].ClientOption()
+	tlsCredentials, err := config.ClientsCreds[0].ClientOption()
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
 func NewDialConfigPerEndpoint(config *ClientConfig) ([]*DialConfig, error) {
 	ret := make([]*DialConfig, len(config.Endpoints))
 	for i, e := range config.Endpoints {
-		tlsCreds, err := config.ClientCreds[i].ClientOption()
+		tlsCreds, err := credentialsForEndpoint(config, i)
 		if err != nil {
 			return nil, err
 		}
@@ -77,7 +77,8 @@ func NewDialConfigPerEndpoint(config *ClientConfig) ([]*DialConfig, error) {
 	return ret, nil
 }
 
-func TempNewDialConfigWithCreds(endpoint WithAddress, transportCredentials credentials.TransportCredentials) *DialConfig {
+// NewDialConfigWithCreds creates the default dial config with given transport credentials.
+func NewDialConfigWithCreds(endpoint WithAddress, transportCredentials credentials.TransportCredentials) *DialConfig {
 	return newDialConfig(endpoint.Address(), transportCredentials, &DefaultGrpcRetryProfile)
 }
 
@@ -89,6 +90,13 @@ func NewInsecureDialConfig(endpoint WithAddress) *DialConfig {
 // NewInsecureLoadBalancedDialConfig creates the default dial config with insecure credentials.
 func NewInsecureLoadBalancedDialConfig(endpoint []*Endpoint) *DialConfig {
 	return newLoadBalancedDialConfig(endpoint, insecure.NewCredentials(), &DefaultGrpcRetryProfile)
+}
+
+func credentialsForEndpoint(config *ClientConfig, i int) (credentials.TransportCredentials, error) {
+	if config.ClientsCreds == nil || i >= len(config.ClientsCreds) || config.ClientsCreds[i] == nil {
+		return insecure.NewCredentials(), nil
+	}
+	return config.ClientsCreds[i].ClientOption()
 }
 
 // newLoadBalancedDialConfig creates a dial config with the default values for multiple endpoints.

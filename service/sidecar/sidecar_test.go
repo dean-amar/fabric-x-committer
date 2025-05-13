@@ -150,7 +150,9 @@ func (env *sidecarTestEnv) start(ctx context.Context, t *testing.T, startBlkNum 
 	})
 	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
 		ChannelID: env.config.Orderer.ChannelID,
-		Endpoint:  &env.config.Server.Endpoint,
+		SidecarClient: &connection.ServerConfig{
+			Endpoint: env.config.Server.Endpoint,
+		},
 	}, startBlkNum)
 }
 

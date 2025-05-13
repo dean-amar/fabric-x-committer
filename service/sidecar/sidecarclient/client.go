@@ -20,10 +20,9 @@ type (
 
 	// Config is used to define the connection properties to the sidecar.
 	Config struct {
-		Endpoint  *connection.Endpoint
-		ChannelID string
-		Retry     *connection.RetryProfile
-		TLSConfig connection.ConfigTLS
+		ChannelID     string
+		Retry         *connection.RetryProfile
+		SidecarClient *connection.ServerConfig
 	}
 
 	// DeliverConfig holds the configuration needed for deliver to run.
@@ -44,9 +43,9 @@ type (
 func New(config *Config) (*Client, error) {
 	cm := &broadcastdeliver.OrdererConnectionManager{}
 	connConfig := &broadcastdeliver.ConnectionConfig{
-		Endpoints:     []*connection.OrdererEndpoint{{Endpoint: *config.Endpoint}},
+		Endpoints:     []*connection.OrdererEndpoint{{Endpoint: config.SidecarClient.Endpoint}},
 		Retry:         config.Retry,
-		ConnectionTLS: config.TLSConfig,
+		ConnectionTLS: config.SidecarClient.ServerCreds,
 	}
 	if err := cm.Update(connConfig); err != nil {
 		return nil, err

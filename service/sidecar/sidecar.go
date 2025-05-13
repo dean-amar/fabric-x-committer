@@ -94,7 +94,7 @@ func (s *Service) Run(ctx context.Context) error {
 		return errors.Wrapf(err, "could not load creds")
 	}
 	// connecting to the coordinator.
-	conn, connErr := connection.Connect(connection.TempNewDialConfigWithCreds(
+	conn, connErr := connection.Connect(connection.NewDialConfigWithCreds(
 		&s.config.Committer.ServerConfig.Endpoint, committerCredentials),
 	)
 	if connErr != nil {

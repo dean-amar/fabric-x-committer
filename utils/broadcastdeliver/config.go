@@ -20,7 +20,7 @@ type (
 	ConnectionConfig struct {
 		Endpoints     []*connection.OrdererEndpoint `mapstructure:"endpoints"`
 		Retry         *connection.RetryProfile      `mapstructure:"reconnect"`
-		ConnectionTLS connection.ConfigTLS          `mapstructure:"tls-config"`
+		ConnectionTLS *connection.ConfigTLS         `mapstructure:"tls-config"`
 	}
 
 	// IdentityConfig defines the orderer's MSP.

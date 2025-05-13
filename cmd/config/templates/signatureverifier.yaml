@@ -3,10 +3,11 @@ server:
   server-creds:
     use-tls: {{ .ServiceTLS.UseTLS }}
     mutual-tls: {{ .ServiceTLS.MutualTLS }}
-    cert-path: "{{ .ServiceTLS.Credentials.CertPath }}"
-    key-path: "{{ .ServiceTLS.Credentials.KeyPath }}"
+    server-name: {{ .ServiceTLS.ServerName }}
+    cert-path: "{{ .ServiceTLS.CertPath }}"
+    key-path: "{{ .ServiceTLS.KeyPath }}"
     ca-cert-paths:
-      {{- range .ServiceTLS.Credentials.CACertPaths }}
+      {{- range .ServiceTLS.CACertPaths }}
       - "{{ . }}"
       {{- end }}
 

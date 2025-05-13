@@ -79,7 +79,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			},
 			Committer: sidecar.CoordinatorConfig{
 				ServerConfig: &connection.ServerConfig{
-					Endpoint: *makeEndpoint("localhost", 9001),
+					Endpoint: *makeEndpoint("coordinator", 9001),
 				},
 			},
 			Ledger: sidecar.LedgerConfig{
@@ -327,7 +327,9 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarEndpoint: makeEndpoint("sidecar", 5050),
+					SidecarClientConfiguration: &connection.ServerConfig{
+						Endpoint: *makeEndpoint("sidecar", 5050),
+					},
 					Orderer: broadcastdeliver.Config{
 						Connection: broadcastdeliver.ConnectionConfig{
 							Endpoints: connection.NewOrdererEndpoints(

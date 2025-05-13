@@ -189,49 +189,49 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	for _, e := range s.Endpoints.Verifier {
 		c.Verifier = append(c.Verifier, newProcess(
-			t, verifierCMD, config.TemplateVerifier, c.createServerCerts(t, e.Server)))
+			t, verifierCMD, config.TemplateVerifier, c.createServerCerts(t, e, "verifier")))
 	}
 
 	for _, e := range s.Endpoints.VCService {
 		c.VcService = append(c.VcService, newProcess(
-			t, vcCMD, config.TemplateVC, c.createServerCerts(t, e.Server)))
+			t, vcCMD, config.TemplateVC, c.createServerCerts(t, e, "validator-committer")))
 	}
 
 	// create tls cert for coordinator.
-	coordinatorCfg := c.createServerCerts(t, s.Endpoints.Coordinator.Server)
+	coordinatorCfg := c.createServerCerts(t, s.Endpoints.Coordinator, "coordinator")
 	for range s.Endpoints.VCService {
 		coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig = append(
-			coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig, c.createClientCerts(t))
+			coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig, c.createClientCerts(t, "validator-committer"))
 	}
 	for range s.Endpoints.Verifier {
 		coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig = append(
-			coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig, c.createClientCerts(t))
+			coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig, c.createClientCerts(t, "verifier"))
 	}
 
 	t.Logf("vc-clients-config: %v", coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig)
-
+	t.Logf("coordinator-config: %v", *coordinatorCfg)
 	c.Coordinator = newProcess(t, coordinatorCMD, config.TemplateCoordinator, coordinatorCfg)
 
 	// create tls cert for the query-service.
 	c.QueryService = newProcess(t,
 		queryexecutorCMD,
 		config.TemplateQueryService,
-		c.createServerCerts(t, s.Endpoints.Query.Server),
+		c.createServerCerts(t, s.Endpoints.Query, "query-service"),
 	)
 
 	// create tls cert for the sidecar.
-	sidecarCfg := c.createServerCerts(t, s.Endpoints.Sidecar.Server)
-	sidecarCfg.CoordinatorClientTLSConfig = c.createClientCerts(t)
+	sidecarCfg := c.createServerCerts(t, s.Endpoints.Sidecar, "sidecar")
+	sidecarCfg.CoordinatorClientTLSConfig = c.createClientCerts(t, "coordinator")
 	// start the sidecar process.
 	c.Sidecar = newProcess(t, sidecarCMD, config.TemplateSidecar, sidecarCfg)
 
 	t.Log("Create clients")
 	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
-		clientConnWithCreds(t, s.Endpoints.Coordinator.Server, c.createClientCerts(t)),
+		clientConnWithCreds(t, s.Endpoints.Coordinator.Server, c.createClientCerts(t, "coordinator")),
 	)
 
 	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
-		clientConnWithCreds(t, s.Endpoints.Query.Server, c.createClientCerts(t)),
+		clientConnWithCreds(t, s.Endpoints.Query.Server, c.createClientCerts(t, "query-service")),
 	)
 
 	var err error
@@ -247,10 +247,13 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.ordererStream, err = c.ordererClient.Broadcast(t.Context())
 	require.NoError(t, err)
 
+	sidecarClientTlsCerts := c.createClientCerts(t, "sidecar")
 	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
 		ChannelID: s.ChannelID,
-		Endpoint:  s.Endpoints.Sidecar.Server,
-		TLSConfig: c.createClientCerts(t),
+		SidecarClient: &connection.ServerConfig{
+			Endpoint:    *s.Endpoints.Sidecar.Server,
+			ServerCreds: &sidecarClientTlsCerts,
+		},
 	})
 	require.NoError(t, err)
 	return c
@@ -329,7 +332,7 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	for _, cr := range c.GetAllCrypto() {
 		s.Policy.NamespacePolicies[cr.Namespace] = cr.Profile
 	}
-	s.SidecarClientTLSConfig = c.createClientCerts(t)
+	s.SidecarClientTLSConfig = c.createClientCerts(t, "sidecar")
 	newProcess(t, loadgenCMD, template, s.WithEndpoint(s.Endpoints.LoadGen)).Restart(t)
 }
 
@@ -358,7 +361,7 @@ func clientConnWithCreds(t *testing.T, e *connection.Endpoint, tlsConfig connect
 	t.Logf("tls-config: %v", tlsConfig)
 	clientCredentials, err := tlsConfig.ClientOption()
 	require.NoError(t, err)
-	serviceConnection, err := connection.Connect(connection.TempNewDialConfigWithCreds(e, clientCredentials))
+	serviceConnection, err := connection.Connect(connection.NewDialConfigWithCreds(e, clientCredentials))
 	require.NoError(t, err)
 	return serviceConnection
 }
@@ -607,30 +610,32 @@ func isMoreThanOneBitSet(bits int) bool {
 
 func (c *CommitterRuntime) createServerCerts(
 	t *testing.T,
-	endpoint *connection.Endpoint,
+	endpoints config.ServiceEndpoints,
+	serverName string,
 ) *config.SystemConfig {
 	t.Helper()
-	t.Logf("creating-server-on:%v\n", endpoint.Address())
+	t.Logf("creating-server-on:%v\n", endpoints.Server.Address())
 	serviceCfg := c.SystemConfig
-	serviceTLSCertsPath := c.TLSManager.CreateServerCertificate(t, endpoint.Host)
-	serviceCfg.ServiceTLS = c.createTLSConfig(serviceTLSCertsPath)
-	serviceCfg.ServiceEndpoints.Server = endpoint
+	serviceTLSCertsPath := c.TLSManager.CreateServerCertificate(t, serverName)
+	serviceCfg.ServiceTLS = c.createTLSConfig(serviceTLSCertsPath, serverName)
+	serviceCfg.ServiceEndpoints = endpoints
+	//serviceCfg.ServiceEndpoints.Server = endpoints.Server
+	//serviceCfg.ServiceEndpoints.Metrics = endpoints.Metrics
 	return &serviceCfg
 }
 
-func (c *CommitterRuntime) createClientCerts(t *testing.T) connection.ConfigTLS {
+func (c *CommitterRuntime) createClientCerts(t *testing.T, forServer string) connection.ConfigTLS {
 	t.Helper()
-	return c.createTLSConfig(c.TLSManager.CreateClientCertificate(t))
+	return c.createTLSConfig(c.TLSManager.CreateClientCertificate(t), forServer)
 }
 
-func (c *CommitterRuntime) createTLSConfig(paths map[string]string) connection.ConfigTLS {
+func (c *CommitterRuntime) createTLSConfig(paths map[string]string, serverName string) connection.ConfigTLS {
 	return connection.ConfigTLS{
-		UseTLS:    c.config.TLS.UseTLS,
-		MutualTLS: c.config.TLS.MutualTLS,
-		Credentials: connection.TLSCertPaths{
-			CertPath:    paths["PublicKey"],
-			KeyPath:     paths["PrivateKey"],
-			CACertPaths: []string{paths["CACertificate"]},
-		},
+		UseTLS:      c.config.TLS.UseTLS,
+		MutualTLS:   c.config.TLS.MutualTLS,
+		ServerName:  serverName,
+		CertPath:    paths["PublicKey"],
+		KeyPath:     paths["PrivateKey"],
+		CACertPaths: []string{paths["CACertificate"]},
 	}
 }
