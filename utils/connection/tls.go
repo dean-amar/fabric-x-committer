@@ -60,16 +60,12 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 }
 
 // ClientOption returns the options for a grpc client.
-//
-//nolint:ireturn //this is intentional interface return for abstraction
 func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
 	_, creds, err := c.ClientOptionWithConfig()
 	return creds, err
 }
 
 // ClientOptionWithConfig returns the options for a grpc client and the tls configuration.
-//
-//nolint:ireturn //this is intentional interface return for abstraction
 func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.TransportCredentials, error) {
 	if c == nil || !c.UseTLS {
 		return nil, insecure.NewCredentials(), nil
@@ -88,10 +84,9 @@ func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.Transport
 		tlsCfg.Certificates = []tls.Certificate{clientCert}
 	}
 
+	// ServerName is required if the certificate uses SNI
 	if c.ServerName != "" {
 		tlsCfg.ServerName = c.ServerName
-	} else {
-		// ServerName is required if the certificate uses SNI
 	}
 
 	return tlsCfg, credentials.NewTLS(tlsCfg), nil

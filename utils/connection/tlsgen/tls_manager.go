@@ -19,10 +19,10 @@ type SecureCommunicationManager struct {
 // NewSecureCommunicationManager returns a SecureCommunicationManager with a new CA.
 func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
 	t.Helper()
-	CA, err := tlsgen.NewCA()
+	ca, err := tlsgen.NewCA()
 	require.NoError(t, err)
 	return &SecureCommunicationManager{
-		CertificateAuthority: CA,
+		CertificateAuthority: ca,
 	}
 }
 
