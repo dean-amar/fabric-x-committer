@@ -10,7 +10,7 @@ import (
 	"github.com/hyperledger/fabric/common/crypto/tlsgen"
 )
 
-// SecureCommunicationManager responsible for the creation and management of
+// SecureCommunicationManager responsible for the creation of
 // TLS certificates for testing purposes by utilizing the tls generation library of 'Hyperledger Fabric'.
 type SecureCommunicationManager struct {
 	CertificateAuthority tlsgen.CA
@@ -26,6 +26,8 @@ func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
 	}
 }
 
+// CreateServerCertificate creates a server key pair given the host name as SNI,
+// Writing it to a temp testing folder and returns a map with the credential paths.
 func (scm *SecureCommunicationManager) CreateServerCertificate(t *testing.T, host string) map[string]string {
 	t.Helper()
 	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(host)
@@ -33,6 +35,8 @@ func (scm *SecureCommunicationManager) CreateServerCertificate(t *testing.T, hos
 	return createCertificatesPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
 }
 
+// CreateClientCertificate creates a client key pair,
+// Writing it to a temp testing folder and returns a map with the credential paths.
 func (scm *SecureCommunicationManager) CreateClientCertificate(t *testing.T) map[string]string {
 	t.Helper()
 	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()

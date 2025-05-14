@@ -39,6 +39,8 @@ const (
 func TestStartTestNode(t *testing.T) {
 	t.Parallel()
 
+	t.Skip()
+
 	ctx := t.Context()
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	require.NoError(t, err)

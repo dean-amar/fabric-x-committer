@@ -44,7 +44,7 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 	if c.MutualTLS {
 		tmpConfig, err := loadTLSCredentials(c.CACertPaths)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed loading CAs.")
+			return nil, errors.Wrapf(err, "failed loading CAs")
 		}
 		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsCfg.ClientCAs = tmpConfig.RootCAs
@@ -84,6 +84,8 @@ func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.Transport
 
 	if c.ServerName != "" {
 		tlsCfg.ServerName = c.ServerName
+	} else {
+		// ServerName is required if the certificate uses SNI
 	}
 
 	return tlsCfg, credentials.NewTLS(tlsCfg), nil
@@ -104,7 +106,7 @@ func loadTLSCredentials(certPaths []string) (*tls.Config, error) {
 
 func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
 	if len(certs) < 1 {
-		return nil, errors.New("no ROOT CAS")
+		return nil, errors.New("no CA certificates provided for TLS")
 	}
 
 	certPool := x509.NewCertPool()
@@ -114,7 +116,6 @@ func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
 		}
 	}
 
-	// Create the credentials and return it
 	return &tls.Config{
 		RootCAs:    certPool,
 		MinVersion: tls.VersionTLS12,
