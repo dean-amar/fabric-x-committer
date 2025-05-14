@@ -25,10 +25,8 @@ func TestTLSConnection(t *testing.T) {
 		},
 	})
 
-	//c.Start(t, runner.CommitterTxPathWithLoadGen)
 	c.Start(t, runner.FullTxPathWithLoadGen)
-	//c.Start(t, runner.FullTxPathWithQuery)
-	//c.Start(t, runner.LoadGenForCoordinator|runner.Coordinator|runner.VC|runner.Verifier)
+
 	require.Eventually(t, func() bool {
 		count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
 		t.Logf("count %d", count)

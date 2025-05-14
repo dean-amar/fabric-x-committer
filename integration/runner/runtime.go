@@ -208,8 +208,6 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig, c.createClientCerts(t, "verifier"))
 	}
 
-	t.Logf("vc-clients-config: %v", coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig)
-	t.Logf("coordinator-config: %v", *coordinatorCfg)
 	c.Coordinator = newProcess(t, coordinatorCMD, config.TemplateCoordinator, coordinatorCfg)
 
 	// create tls cert for the query-service.
@@ -619,8 +617,6 @@ func (c *CommitterRuntime) createServerCerts(
 	serviceTLSCertsPath := c.TLSManager.CreateServerCertificate(t, serverName)
 	serviceCfg.ServiceTLS = c.createTLSConfig(serviceTLSCertsPath, serverName)
 	serviceCfg.ServiceEndpoints = endpoints
-	//serviceCfg.ServiceEndpoints.Server = endpoints.Server
-	//serviceCfg.ServiceEndpoints.Metrics = endpoints.Metrics
 	return &serviceCfg
 }
 

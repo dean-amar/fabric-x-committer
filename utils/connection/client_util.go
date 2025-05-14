@@ -57,7 +57,7 @@ var knownConnectionIssues = regexp.MustCompile(`(?i)EOF|connection\s+refused|clo
 // NewLoadBalancedDialConfig creates a dial config with load balancing between the endpoints
 // in the given config.
 func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
-	tlsCredentials, err := config.ClientsCreds[0].ClientOption()
+	tlsCredentials, err := credentialsForEndpoint(config, 0)
 	if err != nil {
 		return nil, err
 	}

@@ -36,29 +36,16 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		ClientAuth:   tls.NoClientCert,
-		ServerName:   "localhost",
 		MinVersion:   tls.VersionTLS12,
 	}
 
 	if c.MutualTLS {
-		//certPool := x509.NewCertPool()
-		//certs, err := os.ReadFile(c.Credentials.CACertPaths)
-		//if err != nil {
-		//	return nil, errors.Wrapf(err, "failed loading the ca-certificate.")
-		//}
-		//if ok := !certPool.AppendCertsFromPEM(certs); !ok {
-		//	return nil, errors.New("failed to add server's CA certificate.")
-		//}
 		tmpConfig, err := loadTLSCredentials(c.CACertPaths)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed loading CAs.")
 		}
 		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsCfg.ClientCAs = tmpConfig.RootCAs
-	}
-
-	if c.ServerName != "" {
-		tlsCfg.ServerName = c.ServerName
 	}
 
 	return grpc.Creds(credentials.NewTLS(tlsCfg)), nil
@@ -125,6 +112,5 @@ func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
 	return &tls.Config{
 		RootCAs:    certPool,
 		MinVersion: tls.VersionTLS12,
-		ServerName: "localhost",
 	}, nil
 }
