@@ -19,10 +19,8 @@ import (
 )
 
 type receiverConfig struct {
-	Endpoint      *connection.Endpoint
 	ChannelID     string
 	Res           *ClientResources
-	TLSConfig     connection.ConfigTLS
 	SidecarConfig *connection.ServerConfig
 }
 
@@ -31,9 +29,7 @@ const committedBlocksQueueSize = 1024
 // runReceiver start receiving blocks from the sidecar.
 func runReceiver(ctx context.Context, config *receiverConfig) error {
 	ledgerReceiver, err := sidecarclient.New(&sidecarclient.Config{
-		ChannelID: config.ChannelID,
-		//Endpoint:  config.Endpoint,
-		//TLSConfig: config.TLSConfig,
+		ChannelID:     config.ChannelID,
 		SidecarClient: config.SidecarConfig,
 	})
 	if err != nil {

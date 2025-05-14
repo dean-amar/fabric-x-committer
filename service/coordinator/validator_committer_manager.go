@@ -83,24 +83,19 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		return nil
 	})
 
-	fmt.Print("creating-config\n")
 	commonDial, dialErr := connection.NewLoadBalancedDialConfig(c.clientConfig)
 	if dialErr != nil {
 		return fmt.Errorf("failed to create connection to validator persisters: %w", dialErr)
 	}
-	fmt.Print("connecting\n")
 	commonConn, err := connection.Connect(commonDial)
 	if err != nil {
 		return fmt.Errorf("failed to create connection to validator persisters: %w", err)
 	}
-	fmt.Print("creaeting-vc-client\n")
 	vcm.commonClient = protovcservice.NewValidationAndCommitServiceClient(commonConn)
-	fmt.Print("setting-system-tables\n")
 	_, setupErr := vcm.commonClient.SetupSystemTablesAndNamespaces(ctx, nil)
 	if setupErr != nil {
 		return errors.Wrap(setupErr, "failed to setup system tables and namespaces")
 	}
-	fmt.Print("finished-init-process\n")
 
 	dialConfigs, dialErr := connection.NewDialConfigPerEndpoint(c.clientConfig)
 	if dialErr != nil {
@@ -191,24 +186,6 @@ func (vcm *validatorCommitterManager) recoverPolicyManagerFromStateDB(ctx contex
 	})
 	return nil
 }
-
-//func newValidatorCommitter(serverConfig *connection.ServerConfig, metrics *perfMetrics, policyMgr *policyManager) (
-//	*validatorCommitter, error,
-//) {
-//	vcClientOptions, err := serverConfig.ServerCreds.ClientOption()
-//	if err != nil {
-//		return nil, errors.Wrapf(
-//			err,
-//			"failed to create tls connection options for validator committer at %s",
-//			&serverConfig.Endpoint,
-//		)
-//	}
-//	conn, err := connection.Connect(connection.NewDialConfigWithCreds(&serverConfig.Endpoint, vcClientOptions))
-//	if err != nil {
-//		return nil, errors.Wrapf(err, "failed to create connection to validator persister running at %s",
-//			&serverConfig.Endpoint)
-//	}
-//	logger.Infof("validator persister manager connected to validator persister at %s", &serverConfig.Endpoint)
 
 func newValidatorCommitter(conn *grpc.ClientConn, metrics *perfMetrics, policyMgr *policyManager) *validatorCommitter {
 	label := conn.CanonicalTarget()

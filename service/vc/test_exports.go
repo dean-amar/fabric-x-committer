@@ -81,7 +81,6 @@ func NewValidatorAndCommitServiceTestEnv(
 				Server: connection.NewLocalHostServer(),
 			},
 		}
-
 		vcs, err := NewValidatorCommitterService(initCtx, config)
 		require.NoError(t, err)
 		t.Cleanup(vcs.Close)
