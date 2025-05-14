@@ -1,4 +1,9 @@
 #!/bin/bash
+#
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 
 # This script is for building this project on your local machine
 

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 CREATE OR REPLACE FUNCTION validate_reads_%[1]s(
     keys BYTEA [],
     versions BYTEA []

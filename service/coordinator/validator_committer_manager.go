@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -58,6 +64,7 @@ type (
 )
 
 func newValidatorCommitterManager(c *validatorCommitterManagerConfig) *validatorCommitterManager {
+	logger.Info("Initializing new ValidatorCommitterManager")
 	return &validatorCommitterManager{
 		config:              c,
 		txsStatusBufferSize: cap(c.outgoingTxsStatus),
@@ -128,7 +135,7 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 	}
 
 	vcm.ready.SignalReady()
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "validator-committer manager failed")
 }
 
 func (vcm *validatorCommitterManager) setLastCommittedBlockNumber(
@@ -232,7 +239,7 @@ func (vc *validatorCommitter) sendTransactionsAndForwardStatus(
 		return vc.receiveStatusAndForwardToOutput(stream, outputValidatedTxsNode, outputTxsStatus)
 	})
 
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "sendTransactionsAndForwardStatus run failed")
 }
 
 func (vc *validatorCommitter) sendTransactionsToVCService(

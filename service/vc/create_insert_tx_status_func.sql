@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 CREATE OR REPLACE FUNCTION insert_tx_status(
     IN _tx_ids BYTEA [],
     IN _statuses INTEGER [],

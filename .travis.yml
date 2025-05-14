@@ -29,7 +29,7 @@ jobs:
     - stage: lint
       install:
         # Install dependencies
-        - scripts/install-protobuf.sh
+        - sh scripts/install-protobuf.sh
         - go install golang.org/x/tools/cmd/goimports@latest
         - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.0.2
         - pip install sqlfluff
@@ -50,15 +50,15 @@ jobs:
       script: make test-non-db-packages
     - stage: test
       name: Unit Tests (postgres)
-      install: scripts/get-and-start-postgres.sh
+      install: sh scripts/get-and-start-postgres.sh
       script: make test-db-packages
     - stage: test
       name: Unit Tests (yugabyte)
-      install: scripts/get-and-start-yuga.sh
+      install: sh scripts/get-and-start-yuga.sh
       script: make test-db-packages
     - stage: test
       name: Integration Tests (yugabyte)
-      install: scripts/get-and-start-yuga.sh
+      install: sh scripts/get-and-start-yuga.sh
       script: travis_wait 30 make integration-test
     - stage: test
       name: Build and test container images

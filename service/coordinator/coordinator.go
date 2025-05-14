@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -13,6 +19,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator/dependencygraph"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
@@ -230,11 +237,7 @@ func (c *Service) Run(ctx context.Context) error {
 
 	c.initializationDone.SignalReady()
 
-	if err := g.Wait(); err != nil {
-		logger.Errorf("coordinator processing has been stopped due to err [%v]", err)
-		return err
-	}
-	return nil
+	return utils.ProcessErr(g.Wait(), "coordinator processing has been stopped due to err")
 }
 
 // WaitForReady wait for coordinator to be ready to be exposed as gRPC service.
@@ -343,7 +346,7 @@ func (c *Service) BlockProcessing(
 		return nil
 	})
 
-	return errors.Wrap(g.Wait(), "stream with the sidecar has ended")
+	return utils.ProcessErr(g.Wait(), "stream with the sidecar has ended")
 }
 
 func (c *Service) receiveAndProcessBlock(

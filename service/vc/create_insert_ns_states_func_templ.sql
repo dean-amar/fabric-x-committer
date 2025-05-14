@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 CREATE OR REPLACE FUNCTION insert_%[1]s(
     IN _keys BYTEA [],
     IN _values BYTEA [],

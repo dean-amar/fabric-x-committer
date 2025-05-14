@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -15,6 +21,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator/dependencygraph"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
@@ -64,6 +71,7 @@ var sigInvalidTxStatus = &protovcservice.InvalidTxStatus{
 }
 
 func newSignatureVerifierManager(config *signVerifierManagerConfig) *signatureVerifierManager {
+	logger.Info("Initializing newSignatureVerifierManager")
 	return &signatureVerifierManager{
 		config:  config,
 		metrics: config.metrics,
@@ -120,7 +128,7 @@ func (svm *signatureVerifierManager) run(ctx context.Context) error {
 			})
 		})
 	}
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "signature verifier manager run failed")
 }
 
 func ingestIncomingTxsToInternalQueue(
@@ -144,6 +152,7 @@ func newSignatureVerifier(
 	config *signVerifierManagerConfig,
 	conn *grpc.ClientConn,
 ) *signatureVerifier {
+	logger.Info("Initializing new SignatureVerifier")
 	return &signatureVerifier{
 		conn:             conn,
 		client:           protosigverifierservice.NewVerifierClient(conn),
@@ -184,7 +193,7 @@ func (sv *signatureVerifier) sendTransactionsAndForwardStatus(
 		return sv.receiveStatusAndForwardToOutput(stream, outputValidatedTxs.WithContext(gCtx))
 	})
 
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "sendTransactionsAndForwardStatus run failed")
 }
 
 // NOTE: sendTransactionsToSVService filters all transient connection related errors.
