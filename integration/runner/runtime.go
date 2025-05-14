@@ -181,8 +181,15 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		MetaNamespaceVerificationKey: metaCrypto.PubKey,
 	})
 
-	t.Log("creating TLS manager")
+	t.Log("create TLS manager")
 	c.TLSManager = tlsgen.NewSecureCommunicationManager(t)
+
+	t.Log("create clients certificates per service")
+	s.ClientsConfig.Vc = c.createClientCerts(t, "validator-committer")
+	s.ClientsConfig.Verifier = c.createClientCerts(t, "verifier")
+	s.ClientsConfig.Coordinator = c.createClientCerts(t, "coordinator")
+	s.ClientsConfig.Query = c.createClientCerts(t, "query-service")
+	s.ClientsConfig.Sidecar = c.createClientCerts(t, "sidecar")
 
 	t.Log("Create processes")
 	c.MockOrderer = newProcess(t, mockordererCMD, config.TemplateMockOrderer, s)
@@ -197,39 +204,37 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			t, vcCMD, config.TemplateVC, c.createServerCerts(t, e, "validator-committer")))
 	}
 
-	// create tls cert for coordinator.
-	coordinatorCfg := c.createServerCerts(t, s.Endpoints.Coordinator, "coordinator")
-	for range s.Endpoints.VCService {
-		coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig = append(
-			coordinatorCfg.VcAndSigTLSConfig.VcClientsConfig, c.createClientCerts(t, "validator-committer"))
-	}
-	for range s.Endpoints.Verifier {
-		coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig = append(
-			coordinatorCfg.VcAndSigTLSConfig.SigClientsConfig, c.createClientCerts(t, "verifier"))
-	}
+	c.Coordinator = newProcess(t,
+		coordinatorCMD,
+		config.TemplateCoordinator,
+		c.createServerCerts(t, s.Endpoints.Coordinator, "coordinator"),
+	)
 
-	c.Coordinator = newProcess(t, coordinatorCMD, config.TemplateCoordinator, coordinatorCfg)
-
-	// create tls cert for the query-service.
 	c.QueryService = newProcess(t,
 		queryexecutorCMD,
 		config.TemplateQueryService,
 		c.createServerCerts(t, s.Endpoints.Query, "query-service"),
 	)
 
-	// create tls cert for the sidecar.
-	sidecarCfg := c.createServerCerts(t, s.Endpoints.Sidecar, "sidecar")
-	sidecarCfg.CoordinatorClientTLSConfig = c.createClientCerts(t, "coordinator")
-	// start the sidecar process.
-	c.Sidecar = newProcess(t, sidecarCMD, config.TemplateSidecar, sidecarCfg)
+	c.Sidecar = newProcess(t,
+		sidecarCMD,
+		config.TemplateSidecar,
+		c.createServerCerts(t, s.Endpoints.Sidecar, "sidecar"),
+	)
 
 	t.Log("Create clients")
 	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
-		clientConnWithCreds(t, s.Endpoints.Coordinator.Server, c.createClientCerts(t, "coordinator")),
+		clientConnWithCreds(t,
+			s.Endpoints.Coordinator.Server,
+			c.SystemConfig.ClientsConfig.Coordinator,
+		),
 	)
 
 	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
-		clientConnWithCreds(t, s.Endpoints.Query.Server, c.createClientCerts(t, "query-service")),
+		clientConnWithCreds(t,
+			s.Endpoints.Query.Server,
+			c.SystemConfig.ClientsConfig.Query,
+		),
 	)
 
 	var err error
@@ -245,12 +250,11 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.ordererStream, err = c.ordererClient.Broadcast(t.Context())
 	require.NoError(t, err)
 
-	sidecarClientTlsCerts := c.createClientCerts(t, "sidecar")
 	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
 		ChannelID: s.ChannelID,
 		SidecarClient: &connection.ServerConfig{
 			Endpoint:    *s.Endpoints.Sidecar.Server,
-			ServerCreds: &sidecarClientTlsCerts,
+			ServerCreds: &c.SystemConfig.ClientsConfig.Sidecar,
 		},
 	})
 	require.NoError(t, err)
@@ -330,7 +334,6 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	for _, cr := range c.GetAllCrypto() {
 		s.Policy.NamespacePolicies[cr.Namespace] = cr.Profile
 	}
-	s.SidecarClientTLSConfig = c.createClientCerts(t, "sidecar")
 	newProcess(t, loadgenCMD, template, s.WithEndpoint(s.Endpoints.LoadGen)).Restart(t)
 }
 
@@ -611,7 +614,6 @@ func (c *CommitterRuntime) createServerCerts(
 	serverName string,
 ) *config.SystemConfig {
 	t.Helper()
-	t.Logf("creating-server-on:%v\n", endpoints.Server.Address())
 	serviceCfg := c.SystemConfig
 	serviceTLSCertsPath := c.TLSManager.CreateServerCertificate(t, serverName)
 	serviceCfg.ServiceTLS = c.createTLSConfig(serviceTLSCertsPath, serverName)

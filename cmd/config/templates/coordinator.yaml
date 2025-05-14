@@ -21,17 +21,15 @@ verifier:
     - {{ .Server }}
     {{- end }}
   client-creds:
-    {{- range .VcAndSigTLSConfig.SigClientsConfig }}
-    - use-tls: {{ .UseTLS }}
-      mutual-tls: {{ .MutualTLS }}
-      server-name: {{ .ServerName }}
-      key-path: "{{ .KeyPath }}"
-      cert-path: "{{ .CertPath }}"
-      ca-cert-paths:
-        {{- range .CACertPaths }}
-        - "{{ . }}"
-        {{- end }}
-    {{- end }}
+    use-tls: {{ .ClientsConfig.Verifier.UseTLS }}
+    mutual-tls: {{ .ClientsConfig.Verifier.MutualTLS }}
+    server-name: {{ .ClientsConfig.Verifier.ServerName }}
+    key-path: {{ .ClientsConfig.Verifier.KeyPath }}
+    cert-path: {{ .ClientsConfig.Verifier.CertPath }}
+    ca-cert-paths:
+      {{- range .ClientsConfig.Verifier.CACertPaths }}
+      - "{{ . }}"
+      {{- end }}
 
 validator-committer:
   endpoints:
@@ -39,17 +37,16 @@ validator-committer:
     - {{ .Server }}
     {{- end }}
   client-creds:
-    {{- range .VcAndSigTLSConfig.VcClientsConfig }}
-    - use-tls: {{ .UseTLS }}
-      mutual-tls: {{ .MutualTLS }}
-      server-name: {{ .ServerName }}
-      key-path: "{{ .KeyPath }}"
-      cert-path: "{{ .CertPath }}"
-      ca-cert-paths:
-        {{- range .CACertPaths }}
-        - "{{ . }}"
-        {{- end }}
-    {{- end }}
+    use-tls: {{ .ClientsConfig.Vc.UseTLS }}
+    mutual-tls: {{ .ClientsConfig.Vc.MutualTLS }}
+    server-name: {{ .ClientsConfig.Vc.ServerName }}
+    key-path: {{ .ClientsConfig.Vc.KeyPath }}
+    cert-path: {{ .ClientsConfig.Vc.CertPath }}
+    ca-cert-paths:
+      {{- range .ClientsConfig.Vc.CACertPaths }}
+      - "{{ . }}"
+      {{- end }}
+
 
 dependency-graph:
   num-of-local-dep-constructors: 1

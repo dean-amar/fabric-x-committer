@@ -36,18 +36,16 @@ type (
 		DB        DatabaseConfig
 
 		// Per service configurations.
-		VcAndSigTLSConfig          CoordinatorSigVcClientsTLSConfig // coordinator
-		CoordinatorClientTLSConfig connection.ConfigTLS             // sidecar
-		SidecarClientTLSConfig     connection.ConfigTLS             // loadgen
-		BlockSize                  uint64                           // orderer, loadgen
-		BlockTimeout               time.Duration                    // orderer
-		ConfigBlockPath            string                           // orderer, sidecar, loadgen
-		LedgerPath                 string                           // sidecar
-		ChannelID                  string                           // sidecar, loadgen
-		Policy                     *workload.PolicyProfile          // loadgen
-		LoadGenBlockLimit          uint64                           // loadgen
-		LoadGenTXLimit             uint64                           // loadgen
-		Logging                    *logging.Config                  // for all
+		ClientsConfig     ClientsTLSConfig        // coordinator, sidecar
+		BlockSize         uint64                  // orderer, loadgen
+		BlockTimeout      time.Duration           // orderer
+		ConfigBlockPath   string                  // orderer, sidecar, loadgen
+		LedgerPath        string                  // sidecar
+		ChannelID         string                  // sidecar, loadgen
+		Policy            *workload.PolicyProfile // loadgen
+		LoadGenBlockLimit uint64                  // loadgen
+		LoadGenTXLimit    uint64                  // loadgen
+		Logging           *logging.Config         // for all
 	}
 
 	// SystemEndpoints represents the endpoints of the system.
@@ -74,11 +72,13 @@ type (
 		Endpoints   []*connection.Endpoint
 	}
 
-	// CoordinatorSigVcClientsTLSConfig contains the vcservice and
-	// sigverifier client's credentials for the coordinator.
-	CoordinatorSigVcClientsTLSConfig struct {
-		VcClientsConfig  []connection.ConfigTLS
-		SigClientsConfig []connection.ConfigTLS
+	// ClientsTLSConfig contains the client's config TLS.
+	ClientsTLSConfig struct {
+		Vc          connection.ConfigTLS
+		Verifier    connection.ConfigTLS
+		Coordinator connection.ConfigTLS
+		Sidecar     connection.ConfigTLS
+		Query       connection.ConfigTLS
 	}
 
 	// ConfigBlock represents the configuration of the config block.

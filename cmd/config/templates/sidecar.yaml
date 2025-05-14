@@ -33,13 +33,13 @@ committer:
   client:
     endpoint: {{ .Endpoints.Coordinator.Server }}
     server-creds:
-      use-tls: {{ .CoordinatorClientTLSConfig.UseTLS }}
-      mutual-tls: {{ .CoordinatorClientTLSConfig.MutualTLS }}
-      server-name: {{ .CoordinatorClientTLSConfig.ServerName }}
-      cert-path: "{{ .CoordinatorClientTLSConfig.CertPath }}"
-      key-path: "{{ .CoordinatorClientTLSConfig.KeyPath }}"
+      use-tls: {{ .ClientsConfig.Coordinator.UseTLS }}
+      mutual-tls: {{ .ClientsConfig.Coordinator.MutualTLS }}
+      server-name: {{ .ClientsConfig.Coordinator.ServerName }}
+      cert-path: {{ .ClientsConfig.Coordinator.CertPath }}
+      key-path: {{ .ClientsConfig.Coordinator.KeyPath }}
       ca-cert-paths:
-        {{- range .CoordinatorClientTLSConfig.CACertPaths }}
+        {{- range .ClientsConfig.Coordinator.CACertPaths }}
         - "{{ . }}"
         {{- end }}
 

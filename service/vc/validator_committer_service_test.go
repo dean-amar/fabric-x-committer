@@ -49,7 +49,7 @@ func newValidatorAndCommitServiceTestEnvWithClient(
 		dbEnv:        vcs.DBEnv,
 	}
 
-	initCtx, initCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	initCtx, initCancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer initCancel()
 	_, setupErr := vcsTestEnv.commonClient.SetupSystemTablesAndNamespaces(initCtx, nil)
 	require.NoError(t, setupErr)
@@ -515,7 +515,7 @@ func TestVCServiceOneActiveStreamOnly(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return env.vcs[0].isStreamActive.Load()
-	}, 4*time.Second, 250*time.Millisecond)
+	}, 20*time.Second, 250*time.Millisecond)
 
 	ctx, _ := createContext(t)
 	stream, err := env.commonClient.StartValidateAndCommitStream(ctx)

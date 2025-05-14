@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// ConfigTLS contains the certificate paths and options for TLS connections
-// between servers and clients.
+// ConfigTLS contains the options and certificate paths
+// for TLS connections between the servers and clients.
 type ConfigTLS struct {
 	UseTLS      bool     `mapstructure:"use-tls"`
 	MutualTLS   bool     `mapstructure:"mutual-tls"`
@@ -23,6 +23,8 @@ type ConfigTLS struct {
 }
 
 // ServerOption returns the options for a grpc server.
+//
+//nolint:ireturn //this is intentional interface return for abstraction
 func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 	if c == nil || !c.UseTLS {
 		return grpc.Creds(insecure.NewCredentials()), nil
@@ -30,7 +32,7 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 
 	cert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed loading the server certificate and private key.")
+		return nil, errors.Wrapf(err, "failed loading the server certificate and private key")
 	}
 
 	tlsCfg := &tls.Config{
@@ -52,12 +54,16 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 }
 
 // ClientOption returns the options for a grpc client.
+//
+//nolint:ireturn //this is intentional interface return for abstraction
 func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
 	_, creds, err := c.ClientOptionWithConfig()
 	return creds, err
 }
 
 // ClientOptionWithConfig returns the options for a grpc client and the tls configuration.
+//
+//nolint:ireturn //this is intentional interface return for abstraction
 func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.TransportCredentials, error) {
 	if c == nil || !c.UseTLS {
 		return nil, insecure.NewCredentials(), nil

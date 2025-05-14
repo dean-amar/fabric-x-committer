@@ -54,10 +54,6 @@ func StartDefaultSystem(t *testing.T) SystemConfig {
 			Orderer:     []ServiceEndpoints{{Server: &orderer.Configs[0].Endpoint}},
 			Coordinator: ServiceEndpoints{Server: &coordinator.Configs[0].Endpoint},
 		},
-		VcAndSigTLSConfig: CoordinatorSigVcClientsTLSConfig{
-			SigClientsConfig: make([]connection.ConfigTLS, len(verifier.Configs)),
-			VcClientsConfig:  make([]connection.ConfigTLS, len(vc.Configs)),
-		},
 		DB: DatabaseConfig{
 			Name:        conn.Database,
 			LoadBalance: false,

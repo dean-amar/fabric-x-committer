@@ -35,7 +35,7 @@ func (c *ServerConfig) GrpcServer() (*grpc.Server, error) {
 	var opts []grpc.ServerOption
 	serverGrpcCreds, err := c.ServerCreds.ServerOption()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed loading the server's grpc credentials.")
+		return nil, errors.Wrapf(err, "failed loading the server's grpc credentials")
 	}
 	opts = append(opts, serverGrpcCreds)
 
@@ -101,7 +101,7 @@ func RunGrpcServerMainWithError(
 	}
 	server, err := serverConfig.GrpcServer()
 	if err != nil {
-		return errors.Wrapf(err, "failed creating grpc server.")
+		return errors.Wrapf(err, "failed creating grpc server")
 	}
 	register(server)
 

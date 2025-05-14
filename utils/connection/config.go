@@ -9,7 +9,7 @@ type (
 	// ClientConfig contains the endpoints, CAs, and retry profile.
 	ClientConfig struct {
 		Endpoints    []*Endpoint   `mapstructure:"endpoints"`
-		ClientsCreds []*ConfigTLS  `mapstructure:"client-creds"`
+		ClientsCreds *ConfigTLS    `mapstructure:"client-creds"`
 		Retry        *RetryProfile `mapstructure:"reconnect"`
 	}
 

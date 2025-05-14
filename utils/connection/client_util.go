@@ -57,7 +57,7 @@ var knownConnectionIssues = regexp.MustCompile(`(?i)EOF|connection\s+refused|clo
 // NewLoadBalancedDialConfig creates a dial config with load balancing between the endpoints
 // in the given config.
 func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
-	tlsCredentials, err := credentialsForEndpoint(config, 0)
+	tlsCredentials, err := config.ClientsCreds.ClientOption()
 	if err != nil {
 		return nil, err
 	}
@@ -66,12 +66,12 @@ func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
 
 // NewDialConfigPerEndpoint creates a list of dial configs; one for each endpoint in the given config.
 func NewDialConfigPerEndpoint(config *ClientConfig) ([]*DialConfig, error) {
+	tlsCreds, err := config.ClientsCreds.ClientOption()
+	if err != nil {
+		return nil, err
+	}
 	ret := make([]*DialConfig, len(config.Endpoints))
 	for i, e := range config.Endpoints {
-		tlsCreds, err := credentialsForEndpoint(config, i)
-		if err != nil {
-			return nil, err
-		}
 		ret[i] = newDialConfig(e.Address(), tlsCreds, config.Retry)
 	}
 	return ret, nil
@@ -90,13 +90,6 @@ func NewInsecureDialConfig(endpoint WithAddress) *DialConfig {
 // NewInsecureLoadBalancedDialConfig creates the default dial config with insecure credentials.
 func NewInsecureLoadBalancedDialConfig(endpoint []*Endpoint) *DialConfig {
 	return newLoadBalancedDialConfig(endpoint, insecure.NewCredentials(), &DefaultGrpcRetryProfile)
-}
-
-func credentialsForEndpoint(config *ClientConfig, i int) (credentials.TransportCredentials, error) {
-	if config.ClientsCreds == nil || i >= len(config.ClientsCreds) || config.ClientsCreds[i] == nil {
-		return insecure.NewCredentials(), nil
-	}
-	return config.ClientsCreds[i].ClientOption()
 }
 
 // newLoadBalancedDialConfig creates a dial config with the default values for multiple endpoints.
