@@ -35,6 +35,7 @@ type (
 
 const (
 	//nolint:revive // usage: TLS configuration modes.
+	TLSEmpty  TLSMode = ""
 	TLSNone   TLSMode = "none"
 	TLSServer TLSMode = "tls"
 	TLSMutual TLSMode = "mtls"
@@ -46,6 +47,9 @@ const (
 //
 //nolint:ireturn // returning grpc.ServerOption interface is intentional for abstraction
 func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
+	if c == nil {
+		return grpc.Creds(insecure.NewCredentials()), nil
+	}
 	creds, err := c.buildServerCreds()
 	if err != nil {
 		return nil, err
@@ -59,6 +63,9 @@ func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
 // insecure credentials; otherwise, it returns TLS credentials configured
 // with or without mutual TLS, depending on the settings.
 func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
+	if c == nil {
+		return insecure.NewCredentials(), nil
+	}
 	_, creds, err := c.buildClientCreds()
 	return creds, err
 }
@@ -70,15 +77,15 @@ func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
 // insecure credentials; otherwise, it returns TLS credentials configured
 // with or without mutual TLS, depending on the settings.
 func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.TransportCredentials, error) {
+	if c == nil {
+		return nil, insecure.NewCredentials(), nil
+	}
 	return c.buildClientCreds()
 }
 
 func (c *ConfigTLS) buildServerCreds() (credentials.TransportCredentials, error) {
-	if c == nil {
-		return insecure.NewCredentials(), nil
-	}
 	switch c.Mode {
-	case TLSNone, "":
+	case TLSNone, TLSEmpty:
 		return insecure.NewCredentials(), nil
 
 	case TLSServer, TLSMutual:
@@ -110,11 +117,8 @@ func (c *ConfigTLS) buildServerCreds() (credentials.TransportCredentials, error)
 }
 
 func (c *ConfigTLS) buildClientCreds() (*tls.Config, credentials.TransportCredentials, error) {
-	if c == nil {
-		return nil, insecure.NewCredentials(), nil
-	}
 	switch c.Mode {
-	case TLSNone:
+	case TLSNone, TLSEmpty:
 		return nil, insecure.NewCredentials(), nil
 
 	case TLSServer, TLSMutual:
