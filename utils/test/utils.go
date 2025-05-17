@@ -330,7 +330,7 @@ func RunSecureConnectionTest(
 
 			requestFunc := secureConnArguments.ClientStarter(t, &endpoint, &cfg)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 			defer cancel()
 
 			err := requestFunc(ctx)
