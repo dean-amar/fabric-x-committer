@@ -34,7 +34,7 @@ type (
 )
 
 const (
-	// nolint:revive // usage: TLS configuration modes.
+	//nolint:revive // usage: TLS configuration modes.
 	TLSNone   TLSMode = "none"
 	TLSServer TLSMode = "tls"
 	TLSMutual TLSMode = "mtls"
