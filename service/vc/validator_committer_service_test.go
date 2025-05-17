@@ -33,6 +33,28 @@ type validatorAndCommitterServiceTestEnvWithClient struct {
 	dbEnv        *DatabaseTestEnv
 }
 
+func TestVCSecureConnection(t *testing.T) {
+	t.Parallel()
+	test.RunSecureConnectionTest(
+		t,
+		"validator-committer",
+		func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
+			t.Helper()
+			env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
+			return env.Configs[0].Server.Endpoint
+		},
+		func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
+			t.Helper()
+			client := createVcClientWithTLS(t, ep, cfg)
+			return func(ctx context.Context) error {
+				_, err := client.SetupSystemTablesAndNamespaces(ctx, nil)
+				return err
+			}
+		},
+		true,
+	)
+}
+
 func newValidatorAndCommitServiceTestEnvWithClient(
 	t *testing.T,
 	numServices int,

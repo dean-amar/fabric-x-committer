@@ -5,14 +5,13 @@
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
   server-creds:
-    use-tls: {{ .ServiceTLS.UseTLS }}
-    mutual-tls: {{ .ServiceTLS.MutualTLS }}
+    tls-mode: {{ .ServiceTLS.Mode }}
     server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: "{{ .ServiceTLS.CertPath }}"
-    key-path: "{{ .ServiceTLS.KeyPath }}"
+    cert-path: {{ .ServiceTLS.CertPath }}
+    key-path: {{ .ServiceTLS.KeyPath }}
     ca-cert-paths:
       {{- range .ServiceTLS.CACertPaths }}
-      - "{{ . }}"
+      - {{ . }}
       {{- end }}
 
 monitoring:
@@ -25,14 +24,13 @@ verifier:
     - {{ .Server }}
     {{- end }}
   client-creds:
-    use-tls: {{ .ClientsConfig.Verifier.UseTLS }}
-    mutual-tls: {{ .ClientsConfig.Verifier.MutualTLS }}
+    tls-mode: {{ .ClientsConfig.Verifier.Mode }}
     server-name: {{ .ClientsConfig.Verifier.ServerName }}
     key-path: {{ .ClientsConfig.Verifier.KeyPath }}
     cert-path: {{ .ClientsConfig.Verifier.CertPath }}
     ca-cert-paths:
       {{- range .ClientsConfig.Verifier.CACertPaths }}
-      - "{{ . }}"
+      - {{ . }}
       {{- end }}
 
 validator-committer:
@@ -41,14 +39,13 @@ validator-committer:
     - {{ .Server }}
     {{- end }}
   client-creds:
-    use-tls: {{ .ClientsConfig.Vc.UseTLS }}
-    mutual-tls: {{ .ClientsConfig.Vc.MutualTLS }}
+    tls-mode: {{ .ClientsConfig.Vc.Mode }}
     server-name: {{ .ClientsConfig.Vc.ServerName }}
     key-path: {{ .ClientsConfig.Vc.KeyPath }}
     cert-path: {{ .ClientsConfig.Vc.CertPath }}
     ca-cert-paths:
       {{- range .ClientsConfig.Vc.CACertPaths }}
-      - "{{ . }}"
+      - {{ . }}
       {{- end }}
 
 

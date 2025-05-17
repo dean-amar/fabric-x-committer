@@ -96,7 +96,8 @@ type (
 
 		// DBCluster configures the cluster to operate in DB cluster mode.
 		DBCluster *dbtest.Connection
-		TLS       TLSSettings
+		// TLS configures the secure level between the components: none | tls | mtls
+		TLS connection.TLSMode
 	}
 
 	// TLSSettings sets the runtime tls options.
@@ -633,12 +634,5 @@ func (c *CommitterRuntime) createClientCerts(t *testing.T, forServer string) con
 }
 
 func (c *CommitterRuntime) createTLSConfig(paths map[string]string, serverName string) connection.ConfigTLS {
-	return connection.ConfigTLS{
-		UseTLS:      c.config.TLS.UseTLS,
-		MutualTLS:   c.config.TLS.MutualTLS,
-		ServerName:  serverName,
-		CertPath:    paths["PublicKey"],
-		KeyPath:     paths["PrivateKey"],
-		CACertPaths: []string{paths["CACertificate"]},
-	}
+	return test.CreateTLSConfigFromPaths(c.config.TLS, paths, serverName)
 }

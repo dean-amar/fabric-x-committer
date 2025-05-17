@@ -8,7 +8,6 @@ package connection
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"time"
 
@@ -34,6 +33,14 @@ type (
 // NewLocalHostServer returns a default server config with endpoint "localhost:0".
 func NewLocalHostServer() *ServerConfig {
 	return &ServerConfig{Endpoint: *NewLocalHost()}
+}
+
+// NewLocalHostServerWithCreds returns a default server config with endpoint "localhost:0" given server credentials.
+func NewLocalHostServerWithCreds(creds *ConfigTLS) *ServerConfig {
+	return &ServerConfig{
+		Endpoint:    *NewLocalHost(),
+		ServerCreds: creds,
+	}
 }
 
 // GrpcServer instantiate a [grpc.Server].
@@ -143,7 +150,7 @@ func StartService(
 	defer cancelTimeout()
 	if !service.WaitForReady(ctxTimeout) {
 		cancel()
-		return fmt.Errorf("service is not ready: %w", g.Wait())
+		return errors.Newf("service is not ready: %w", g.Wait())
 	}
 
 	if register != nil && serverConfig != nil {

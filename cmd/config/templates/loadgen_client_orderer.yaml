@@ -9,14 +9,13 @@ orderer-client:
   sidecar-client-config:
     endpoint: {{ .Endpoints.Sidecar.Server }}
     server-creds:
-      use-tls: {{ .ClientsConfig.Sidecar.UseTLS }}
-      mutual-tls: {{ .ClientsConfig.Sidecar.MutualTLS }}
+      tls-mode: {{ .ClientsConfig.Sidecar.Mode }}
       server-name: {{ .ClientsConfig.Sidecar.ServerName }}
       cert-path: {{ .ClientsConfig.Sidecar.CertPath }}
       key-path: {{ .ClientsConfig.Sidecar.KeyPath }}
       ca-cert-paths:
         {{- range .ClientsConfig.Sidecar.CACertPaths }}
-        - "{{ . }}"
+        - {{ . }}
         {{- end }}
   orderer:
     connection:

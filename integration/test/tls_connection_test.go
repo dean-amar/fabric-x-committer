@@ -9,6 +9,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
 func TestMutualTLSConnection(t *testing.T) {
@@ -19,10 +20,7 @@ func TestMutualTLSConnection(t *testing.T) {
 		NumVCService: 2,
 		BlockTimeout: 2 * time.Second,
 		BlockSize:    500,
-		TLS: runner.TLSSettings{
-			UseTLS:    true,
-			MutualTLS: true,
-		},
+		TLS:          connection.TLSMutual,
 	})
 
 	c.Start(t, runner.FullTxPathWithLoadGen)
@@ -31,7 +29,7 @@ func TestMutualTLSConnection(t *testing.T) {
 		count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
 		t.Logf("count %d", count)
 		return count > 10_000
-	}, 90*time.Second, 500*time.Millisecond)
+	}, 20*time.Second, 500*time.Millisecond)
 	require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 }
 
@@ -43,10 +41,7 @@ func TestOneSidedTLSConnection(t *testing.T) {
 		NumVCService: 2,
 		BlockTimeout: 2 * time.Second,
 		BlockSize:    500,
-		TLS: runner.TLSSettings{
-			UseTLS:    true,
-			MutualTLS: false,
-		},
+		TLS:          connection.TLSServer,
 	})
 
 	c.Start(t, runner.FullTxPathWithLoadGen)

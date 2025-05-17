@@ -28,9 +28,12 @@ func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
 
 // CreateServerCertificate creates a server key pair given the host name as SNI,
 // Writing it to a temp testing folder and returns a map with the credential paths.
-func (scm *SecureCommunicationManager) CreateServerCertificate(t *testing.T, host string) map[string]string {
+func (scm *SecureCommunicationManager) CreateServerCertificate(
+	t *testing.T,
+	serverNameIndicator string,
+) map[string]string {
 	t.Helper()
-	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(host)
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(serverNameIndicator)
 	require.NoError(t, err)
 	return createCertificatesPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
 }

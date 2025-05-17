@@ -5,14 +5,13 @@
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
   server-creds:
-    use-tls: {{ .ServiceTLS.UseTLS }}
-    mutual-tls: {{ .ServiceTLS.MutualTLS }}
+    tls-mode: {{ .ServiceTLS.Mode }}
     server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: "{{ .ServiceTLS.CertPath }}"
-    key-path: "{{ .ServiceTLS.KeyPath }}"
+    cert-path: {{ .ServiceTLS.CertPath }}
+    key-path: {{ .ServiceTLS.KeyPath }}
     ca-cert-paths:
       {{- range .ServiceTLS.CACertPaths }}
-      - "{{ . }}"
+      - {{ . }}
       {{- end }}
   keep-alive:
     params:
@@ -37,14 +36,13 @@ committer:
   client:
     endpoint: {{ .Endpoints.Coordinator.Server }}
     server-creds:
-      use-tls: {{ .ClientsConfig.Coordinator.UseTLS }}
-      mutual-tls: {{ .ClientsConfig.Coordinator.MutualTLS }}
+      tls-mode: {{ .ClientsConfig.Coordinator.Mode }}
       server-name: {{ .ClientsConfig.Coordinator.ServerName }}
       cert-path: {{ .ClientsConfig.Coordinator.CertPath }}
       key-path: {{ .ClientsConfig.Coordinator.KeyPath }}
       ca-cert-paths:
         {{- range .ClientsConfig.Coordinator.CACertPaths }}
-        - "{{ . }}"
+        - {{ . }}
         {{- end }}
 
 ledger:

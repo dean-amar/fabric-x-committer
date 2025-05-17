@@ -12,113 +12,153 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// ConfigTLS contains the options and certificate paths
-// for TLS connections between the servers and clients.
-type ConfigTLS struct {
-	UseTLS      bool     `mapstructure:"use-tls"`
-	MutualTLS   bool     `mapstructure:"mutual-tls"`
-	ServerName  string   `mapstructure:"server-name"`
-	CertPath    string   `mapstructure:"cert-path"`
-	KeyPath     string   `mapstructure:"key-path"`
-	CACertPaths []string `mapstructure:"ca-cert-paths"`
-}
+type (
+	// ConfigTLS holds the TLS options and certificate paths
+	// for secure communication between servers and clients.
+	ConfigTLS struct {
+		Mode        TLSMode  `mapstructure:"tls-mode"`
+		ServerName  string   `mapstructure:"server-name"`
+		CertPath    string   `mapstructure:"cert-path"`
+		KeyPath     string   `mapstructure:"key-path"`
+		CACertPaths []string `mapstructure:"ca-cert-paths"`
+	}
 
-// ServerOption returns the options for a grpc server.
+	// TLSMode defines the desired level of TLS security.
+	TLSMode string
+)
+
+const (
+	TLSNone   TLSMode = "none"
+	TLSServer TLSMode = "tls"
+	TLSMutual TLSMode = "mtls"
+)
+
+// ServerOption returns the appropriate gRPC server option based on the TLS configuration.
+// If TLS is enabled, it returns a server option with TLS credentials; otherwise,
+// it returns an insecure option.
 //
-//nolint:ireturn //this is intentional interface return for abstraction
+//nolint:ireturn // returning grpc.ServerOption interface is intentional for abstraction
 func (c *ConfigTLS) ServerOption() (grpc.ServerOption, error) {
-	if c == nil || !c.UseTLS {
-		return grpc.Creds(insecure.NewCredentials()), nil
-	}
-
-	cert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
+	creds, err := c.buildServerCreds()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed loading the server certificate and private key")
+		return nil, err
 	}
-
-	tlsCfg := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.NoClientCert,
-		MinVersion:   tls.VersionTLS12,
-	}
-
-	if c.MutualTLS {
-		tmpConfig, err := loadTLSCredentials(c.CACertPaths)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed loading CAs")
-		}
-		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
-		tlsCfg.ClientCAs = tmpConfig.RootCAs
-	}
-
-	return grpc.Creds(credentials.NewTLS(tlsCfg)), nil
+	return grpc.Creds(creds), nil
 }
 
-// ClientOption returns the options for a grpc client.
+// ClientOption returns the gRPC transport credentials to be used by a client,
+// based on the provided TLS configuration.
+// If TLS is disabled or c is nil, it returns
+// insecure credentials; otherwise, it returns TLS credentials configured
+// with or without mutual TLS, depending on the settings.
 func (c *ConfigTLS) ClientOption() (credentials.TransportCredentials, error) {
-	_, creds, err := c.ClientOptionWithConfig()
+	_, creds, err := c.buildClientCreds()
 	return creds, err
 }
 
-// ClientOptionWithConfig returns the options for a grpc client and the tls configuration.
+// ClientOptionWithConfig returns the gRPC transport credentials and
+// the tls configuration to be used by a client,
+// based on the provided TLS configuration.
+// If TLS is disabled or c is nil, it returns
+// insecure credentials; otherwise, it returns TLS credentials configured
+// with or without mutual TLS, depending on the settings.
 func (c *ConfigTLS) ClientOptionWithConfig() (*tls.Config, credentials.TransportCredentials, error) {
-	if c == nil || !c.UseTLS {
+	return c.buildClientCreds()
+}
+
+func (c *ConfigTLS) buildServerCreds() (credentials.TransportCredentials, error) {
+	if c == nil {
+		return insecure.NewCredentials(), nil
+	}
+	switch c.Mode {
+	case TLSNone, "":
+		return insecure.NewCredentials(), nil
+
+	case TLSServer, TLSMutual:
+		cert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "while loading server certificate and private key")
+		}
+
+		tlsCfg := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+			ClientAuth:   tls.NoClientCert,
+		}
+
+		if c.Mode == TLSMutual {
+			certPool, err := buildCertPool(c.CACertPaths)
+			if err != nil {
+				return nil, err
+			}
+			tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+			tlsCfg.ClientCAs = certPool
+		}
+
+		return credentials.NewTLS(tlsCfg), nil
+
+	default:
+		return nil, errors.Errorf("unknown tls mode %v", c.Mode)
+	}
+}
+
+func (c *ConfigTLS) buildClientCreds() (*tls.Config, credentials.TransportCredentials, error) {
+	if c == nil {
 		return nil, insecure.NewCredentials(), nil
 	}
+	switch c.Mode {
+	case TLSNone:
+		return nil, insecure.NewCredentials(), nil
 
-	tlsCfg, err := loadTLSCredentials(c.CACertPaths)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if c.MutualTLS {
-		clientCert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
+	case TLSServer, TLSMutual:
+		certPool, err := buildCertPool(c.CACertPaths)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to load credential keys")
+			return nil, nil, err
 		}
-		tlsCfg.Certificates = []tls.Certificate{clientCert}
-	}
 
-	// ServerName is required if the certificate uses SNI
-	if c.ServerName != "" {
-		tlsCfg.ServerName = c.ServerName
-	}
+		tlsCfg := &tls.Config{
+			RootCAs:    certPool,
+			MinVersion: tls.VersionTLS12,
+		}
 
-	return tlsCfg, credentials.NewTLS(tlsCfg), nil
+		if c.Mode == TLSMutual {
+			cert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
+			if err != nil {
+				return nil, nil, errors.Wrapf(err, "while loading client certificate and private key")
+			}
+			tlsCfg.Certificates = []tls.Certificate{cert}
+		}
+
+		if c.ServerName != "" {
+			tlsCfg.ServerName = c.ServerName
+		}
+
+		return tlsCfg, credentials.NewTLS(tlsCfg), nil
+
+	default:
+		return nil, nil, errors.Errorf("unknown tls mode: %v", c.Mode)
+	}
 }
 
-func loadTLSCredentials(certPaths []string) (*tls.Config, error) {
-	certs := make([][]byte, len(certPaths))
-	var err error
-	for i, p := range certPaths {
-		// Load certificate of the CA who signed server's certificate
-		certs[i], err = os.ReadFile(p)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed reading the certificate path")
-		}
+func buildCertPool(paths []string) (*x509.CertPool, error) {
+	if len(paths) == 0 {
+		return nil, errors.New("no CA certificates provided")
 	}
-	return loadTLSCredentialsRaw(certs)
-}
-
-func loadTLSCredentialsRaw(certs [][]byte) (*tls.Config, error) {
-	if len(certs) < 1 {
-		return nil, errors.New("no CA certificates provided for TLS")
-	}
-
 	certPool := x509.NewCertPool()
-	for _, cert := range certs {
-		if ok := certPool.AppendCertsFromPEM(cert); !ok {
-			return nil, errors.New("failed to add server CA's certificate")
+	for _, p := range paths {
+		pemBytes, err := os.ReadFile(p)
+		if err != nil {
+			return nil, errors.Wrapf(err, "while reading CA cert %v", p)
+		}
+		if ok := certPool.AppendCertsFromPEM(pemBytes); !ok {
+			return nil, errors.Errorf("unable to parse CA cert %v", p)
 		}
 	}
-
-	return &tls.Config{
-		RootCAs:    certPool,
-		MinVersion: tls.VersionTLS12,
-	}, nil
+	return certPool, nil
 }
