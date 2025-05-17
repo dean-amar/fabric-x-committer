@@ -23,8 +23,8 @@ ENV SC_VC_DATABASE_ENDPOINTS=localhost:5433
 
 COPY ${ARCHBIN_PATH}/${TARGETOS}-${TARGETARCH} $BINS_PATH
 COPY ./cmd/config/samples $CONFIGS_PATH
-COPY ./docker/images/test_node/scripts/run-services.sh /root/
-RUN chmod a+x /root/run-services.sh
+COPY ./docker/images/test_node/scripts/. /root/
+RUN chmod a+x /root/*.sh
 
 EXPOSE 5050
 

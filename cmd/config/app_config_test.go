@@ -339,13 +339,13 @@ func TestReadConfigLoadGen(t *testing.T) {
 					Orderer: broadcastdeliver.Config{
 						Connection: broadcastdeliver.ConnectionConfig{
 							Endpoints: connection.NewOrdererEndpoints(
-								0, "", makeServer("mock-ordering-service", 4001),
+								0, "", makeServer("ordering-service", 7050),
 							),
 						},
 						ChannelID:     "channel",
 						ConsensusType: "BFT",
 					},
-					BroadcastParallelism: 50,
+					BroadcastParallelism: 1,
 				},
 			},
 			LoadProfile: &workload.Profile{
@@ -368,15 +368,15 @@ func TestReadConfigLoadGen(t *testing.T) {
 					InvalidSignatures: 0.1,
 				},
 				Seed:    12345,
-				Workers: 50,
+				Workers: 1,
 			},
 			Stream: &workload.StreamOptions{
 				RateLimit: &workload.LimiterConfig{
 					Endpoint:     *makeEndpoint("", 6997),
 					InitialLimit: 1000,
 				},
-				BuffersSize: 1_000,
-				GenBatch:    1_000,
+				BuffersSize: 10,
+				GenBatch:    10,
 			},
 			Generate: adapters.Phases{
 				Namespaces: true,

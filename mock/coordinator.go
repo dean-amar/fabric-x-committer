@@ -31,6 +31,7 @@ type Coordinator struct {
 	numWaitingTxs           atomic.Int32
 	txsStatus               *fifoCache[*protoblocktx.StatusWithHeight]
 	txsStatusMu             sync.Mutex
+	configTransaction       atomic.Pointer[protoblocktx.ConfigTransaction]
 }
 
 // We don't want to utilize unlimited memory for storing the transactions status.
@@ -45,10 +46,15 @@ func NewMockCoordinator() *Coordinator {
 }
 
 // GetConfigTransaction return the latest configuration transaction.
-func (*Coordinator) GetConfigTransaction(
+func (c *Coordinator) GetConfigTransaction(
 	context.Context, *protocoordinatorservice.Empty,
 ) (*protoblocktx.ConfigTransaction, error) {
-	return nil, nil
+	return c.configTransaction.Load(), nil
+}
+
+// SetConfigTransaction stores the given envelope data as the current config transaction.
+func (c *Coordinator) SetConfigTransaction(data []byte) {
+	c.configTransaction.Store(&protoblocktx.ConfigTransaction{Envelope: data})
 }
 
 // SetLastCommittedBlockNumber sets the last committed block number.
