@@ -56,30 +56,31 @@ type (
 // under various client TLS configurations.
 func TestCoordinatorSecureConnection(t *testing.T) {
 	t.Parallel()
-	test.RunSecureConnectionTest(
-		t,
-		"coordinator",
-		func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
-			t.Helper()
-			env := newCoordinatorTestEnv(t, &testConfig{
-				numSigService: 1,
-				numVcService:  1,
-				mockVcService: true,
-			})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-			t.Cleanup(cancel)
-			env.startWithCreds(ctx, t, tlsCfg)
-			return env.coordinator.config.Server.Endpoint
+	test.RunSecureConnectionTest(t,
+		test.SecureConnectionFunctionArguments{
+			ServerCN: "coordinator",
+			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
+				t.Helper()
+				env := newCoordinatorTestEnv(t, &testConfig{
+					numSigService: 1,
+					numVcService:  1,
+					mockVcService: true,
+				})
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+				t.Cleanup(cancel)
+				env.startWithCreds(ctx, t, tlsCfg)
+				return env.coordinator.config.Server.Endpoint
+			},
+			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
+				t.Helper()
+				client := createCoordinatorClientWithTLS(t, ep, cfg)
+				return func(ctx context.Context) error {
+					_, err := client.BlockProcessing(ctx)
+					return err
+				}
+			},
+			Parallel: true,
 		},
-		func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-			t.Helper()
-			client := createCoordinatorClientWithTLS(t, ep, cfg)
-			return func(ctx context.Context) error {
-				_, err := client.BlockProcessing(ctx)
-				return err
-			}
-		},
-		true,
 	)
 }
 

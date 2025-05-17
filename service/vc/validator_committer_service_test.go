@@ -35,23 +35,24 @@ type validatorAndCommitterServiceTestEnvWithClient struct {
 
 func TestVCSecureConnection(t *testing.T) {
 	t.Parallel()
-	test.RunSecureConnectionTest(
-		t,
-		"validator-committer",
-		func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
-			t.Helper()
-			env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
-			return env.Configs[0].Server.Endpoint
+	test.RunSecureConnectionTest(t,
+		test.SecureConnectionFunctionArguments{
+			ServerCN: "validator-committer",
+			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
+				t.Helper()
+				env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
+				return env.Configs[0].Server.Endpoint
+			},
+			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
+				t.Helper()
+				client := createVcClientWithTLS(t, ep, cfg)
+				return func(ctx context.Context) error {
+					_, err := client.SetupSystemTablesAndNamespaces(ctx, nil)
+					return err
+				}
+			},
+			Parallel: true,
 		},
-		func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-			t.Helper()
-			client := createVcClientWithTLS(t, ep, cfg)
-			return func(ctx context.Context) error {
-				_, err := client.SetupSystemTablesAndNamespaces(ctx, nil)
-				return err
-			}
-		},
-		true,
 	)
 }
 

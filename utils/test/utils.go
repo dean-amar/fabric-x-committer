@@ -274,6 +274,14 @@ func SetupDebugging() {
 	})
 }
 
+// SecureConnectionFunctionArguments groups the arguments required to run a secure connection test.
+type SecureConnectionFunctionArguments struct {
+	ServerCN      string
+	ServerStarter ServerStarter
+	ClientStarter ClientStarter
+	Parallel      bool
+}
+
 // ServerStarter is a func that receives a TLS config, start the server and return its endpoint.
 type ServerStarter func(t *testing.T, serverTLS *connection.ConfigTLS) (endpoint connection.Endpoint)
 
@@ -288,20 +296,17 @@ type RequestFunc func(ctx context.Context) error
 // the server correctly accepts or rejects connections based on the client's setup.
 func RunSecureConnectionTest(
 	t *testing.T,
-	serverCN string,
-	startServer ServerStarter,
-	createAndStartClient ClientStarter,
-	parallel bool,
+	secureConnArguments SecureConnectionFunctionArguments,
 ) {
 	t.Helper()
 
 	tlsMgr := tlsgen.NewSecureCommunicationManager(t)
-	serverCreds := tlsMgr.CreateServerCertificate(t, serverCN)
+	serverCreds := tlsMgr.CreateServerCertificate(t, secureConnArguments.ServerCN)
 	serverTLS := CreateTLSConfigFromPaths(connection.TLSMutual, serverCreds, "")
-	endpoint := startServer(t, &serverTLS)
+	endpoint := secureConnArguments.ServerStarter(t, &serverTLS)
 
 	clientCreds := tlsMgr.CreateClientCertificate(t)
-	baseClientTLS := CreateTLSConfigFromPaths(connection.TLSNone, clientCreds, serverCN)
+	baseClientTLS := CreateTLSConfigFromPaths(connection.TLSNone, clientCreds, secureConnArguments.ServerCN)
 
 	cases := []struct {
 		desc      string
@@ -315,15 +320,15 @@ func RunSecureConnectionTest(
 
 	for _, tc := range cases {
 		testCase := tc
-		t.Run(fmt.Sprintf("%s/%s", serverCN, testCase.desc), func(t *testing.T) {
-			if parallel {
+		t.Run(fmt.Sprintf("%s/%s", secureConnArguments.ServerCN, testCase.desc), func(t *testing.T) {
+			if secureConnArguments.Parallel {
 				t.Parallel()
 			}
 
 			cfg := baseClientTLS
 			cfg.Mode = testCase.tlsMode
 
-			requestFunc := createAndStartClient(t, &endpoint, &cfg)
+			requestFunc := secureConnArguments.ClientStarter(t, &endpoint, &cfg)
 
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
@@ -341,8 +346,6 @@ func RunSecureConnectionTest(
 // CreateClientWithTLS creates and returns a typed gRPC client using the provided TLS configuration.
 // It establishes a secure connection to the given endpoint
 // and returns the generated client using the provided client creation proto function.
-//
-//nolint:ireturn // generic return type (T) is intentional to allow any proto client
 func CreateClientWithTLS[T any](
 	t *testing.T,
 	endpoint *connection.Endpoint,
