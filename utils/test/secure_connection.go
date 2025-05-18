@@ -70,7 +70,7 @@ func RunSecureConnectionTest(
 			requestFunc := secureConnArguments.ClientStarter(t, &endpoint, &cfg)
 
 			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
-			defer cancel()
+			t.Cleanup(cancel)
 
 			err := requestFunc(ctx)
 			if tc.expectErr {
