@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package broadcastdeliver
 
 import (
@@ -19,8 +25,22 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
+var testGrpcRetryProfile = connection.RetryProfile{
+	InitialInterval: 200 * time.Millisecond,
+	MaxInterval:     500 * time.Millisecond,
+	Multiplier:      2,
+	MaxElapsedTime:  time.Second,
+}
+
+//nolint:paralleltest // modifies default grpc retry profile.
 func TestBroadcastDeliver(t *testing.T) {
-	t.Parallel()
+	// We use a short retry grpc-config to shorten the test time.
+	// This change prevents this test from being parallelized with other tests.
+	prevGrpcProfile := connection.DefaultGrpcRetryProfile
+	t.Cleanup(func() {
+		connection.DefaultGrpcRetryProfile = prevGrpcProfile
+	})
+	connection.DefaultGrpcRetryProfile = testGrpcRetryProfile
 	ordererService, servers, conf := makeConfig(t)
 
 	allEndpoints := conf.Connection.Endpoints
@@ -85,6 +105,7 @@ func TestBroadcastDeliver(t *testing.T) {
 	t.Log("One incorrect server")
 	fakeServer := test.RunGrpcServerForTest(ctx, t, servers[2].Configs[0])
 	waitUntilGrpcServerIsReady(ctx, t, &servers[2].Configs[0].Endpoint)
+
 	submit(t, stream, outputBlocks, expectedSubmit{
 		id:            "4",
 		success:       2,
@@ -159,8 +180,17 @@ func submit(
 	}
 
 	require.Equal(t, expected.success, strings.Count(info, "SUCCESS"), info)
-	require.Equal(t, expected.unavailable, strings.Count(info, "Unavailable"), info)
-	require.Equal(t, expected.unimplemented, strings.Count(info, "Unimplemented"), info)
+
+	// We verify that we didn't get more Unavailable or Unimplemented than expected.
+	// These errors sometimes returns DeadlineExceeded instead, so we might not get exact value.
+	require.LessOrEqual(t, strings.Count(info, "Unavailable"), expected.unavailable, info)
+	require.LessOrEqual(t, strings.Count(info, "Unimplemented"), expected.unimplemented, info)
+
+	// We count all of these errors together to ensure we didn't get fewer errors than expected.
+	nonSuccessCount := strings.Count(info, "Unavailable") +
+		strings.Count(info, "DeadlineExceeded") +
+		strings.Count(info, "Unimplemented")
+	require.Equal(t, expected.unavailable+expected.unimplemented, nonSuccessCount, info)
 
 	b, ok := outputBlocks.Read()
 	require.True(t, ok)
@@ -217,7 +247,7 @@ func makeConfig(t *testing.T) (*mock.Orderer, []test.GrpcServers, Config) {
 
 func waitUntilGrpcServerIsReady(ctx context.Context, t *testing.T, endpoint *connection.Endpoint) {
 	t.Helper()
-	newConn, err := connection.Connect(connection.NewDialConfig(endpoint))
+	newConn, err := connection.Connect(connection.NewInsecureDialConfig(endpoint))
 	require.NoError(t, err)
 	defer connection.CloseConnectionsLog(newConn)
 	test.WaitUntilGrpcServerIsReady(ctx, t, newConn)

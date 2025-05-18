@@ -1,7 +1,14 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package vc
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 
 	"github.com/cockroachdb/errors"
@@ -52,132 +59,19 @@ const (
 	queryTxIDsStatusPrepSQLStmt   = "SELECT tx_id, status, height FROM " + txStatusTableName + " WHERE tx_id = ANY($1);"
 
 	lastCommittedBlockNumberKey = "last committed block number"
-
-	createInsertTxStatusFuncSQLStmt = `
-CREATE OR REPLACE FUNCTION ` + insertTxStatusFuncName + `(
-    IN _tx_ids BYTEA [],
-    IN _statuses INTEGER [],
-    IN _heights BYTEA [],
-    OUT result TEXT,
-    OUT violating BYTEA []
-)
-AS $$
-BEGIN
-    result := 'success';
-    violating := NULL;
-
-    INSERT INTO ` + txStatusTableName + ` (tx_id, status, height)
-    VALUES (
-        unnest(_tx_ids),
-        unnest(_statuses),
-        unnest(_heights)
-    );
-
-EXCEPTION
-    WHEN unique_violation THEN
-        SELECT array_agg(t.tx_id)
-        INTO violating
-        FROM ` + txStatusTableName + ` t
-        WHERE t.tx_id = ANY(_tx_ids);
-
-        IF cardinality(violating) < cardinality(_tx_ids) THEN
-            result := cardinality(violating)::text || '-unique-violation';
-        ELSE
-            violating := NULL;
-            result := 'all-unique-violation';
-        END IF;
-END;
-$$ LANGUAGE plpgsql;
-`
-
-	createValidateReadsOnNsStatesFuncSQLTempl = `
-CREATE OR REPLACE FUNCTION ` + validateReadsOnNsFuncNamePrefix + `%[1]s(
-    keys BYTEA [],
-    versions BYTEA []
-)
-RETURNS TABLE (key_mismatched BYTEA, version_mismatched BYTEA)
-AS $$
-BEGIN
-	RETURN QUERY
-	SELECT
-		reads.keys AS key_mismatched,
-		reads.versions AS version_mismatched
-	FROM
-		unnest(keys, versions) WITH ORDINALITY AS reads(keys, versions, ord_keys)
-	LEFT JOIN
-		%[1]s ON reads.keys = %[1]s.key
-	WHERE
-		/* if the key does not exist in the committed state but read version is not null,
-		we found a mismatch */
-		(%[1]s.key IS NULL AND reads.versions IS NOT NULL)
-		OR
-		/* if the key exists in the committed state but read version is null, we found a mismatch */
-		(reads.versions IS NULL AND %[1]s.key is NOT NULL)
-		OR
-		/* if the committed version of a key is different from the read version, we found a mismatch */
-		reads.versions <> %[1]s.version;
-END;
-$$ LANGUAGE plpgsql;
-`
-
-	createUpdateNsStatesFuncSQLTempl = `
-CREATE OR REPLACE FUNCTION ` + updateNsStatesFuncNamePrefix + `%[1]s(
-    IN _keys BYTEA [],
-    IN _values BYTEA [],
-    IN _versions BYTEA []
-)
-RETURNS VOID
-AS $$
-BEGIN
-    UPDATE %[1]s
-    SET
-        value = t.value,
-        version = t.version
-    FROM (
-        SELECT *
-        FROM unnest(_keys, _values, _versions) AS t(key, value, version)
-    ) AS t
-    WHERE
-        %[1]s.key = t.key;
-END;
-$$ LANGUAGE plpgsql;
-`
-
-	createInsertNsStatesFuncSQLTempl = `
-CREATE OR REPLACE FUNCTION ` + insertNsStatesFuncNamePrefix + `%[1]s(
-    IN _keys BYTEA [],
-    IN _values BYTEA [],
-    OUT result TEXT,
-    OUT violating BYTEA []
-)
-AS $$
-BEGIN
-    result := 'success';
-    violating := NULL;
-
-    INSERT INTO %[1]s (key, value)
-    SELECT k, v
-    FROM unnest(_keys, _values) AS t(k, v);
-
-EXCEPTION
-    WHEN unique_violation THEN
-        SELECT array_agg(t_existing.key)
-        INTO violating
-        FROM %[1]s t_existing
-        WHERE t_existing.key = ANY (_keys);
-
-        IF cardinality(violating) < cardinality(_keys) THEN
-            result := cardinality(violating)::text || '-unique-violation';
-        ELSE
-            violating := NULL;
-            result := 'all-unique-violation';
-        END IF;
-END;
-$$ LANGUAGE plpgsql;
-`
 )
 
 var (
+
+	//go:embed create_insert_tx_status_func.sql
+	createInsertTxStatusFuncSQLStmt string
+	//go:embed create_validate_func_templ.sql
+	createValidateReadsOnNsStatesFuncSQLTempl string
+	//go:embed create_update_ns_states_func_templ.sql
+	createUpdateNsStatesFuncSQLTempl string
+	//go:embed create_insert_ns_states_func_templ.sql
+	createInsertNsStatesFuncSQLTempl string
+
 	systemNamespaces = []string{types.MetaNamespaceID, types.ConfigNamespaceID}
 
 	createSystemTablesAndFuncsStmts = []string{

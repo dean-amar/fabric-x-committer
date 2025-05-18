@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -43,7 +49,7 @@ func newSvMgrTestEnv(t *testing.T, numSvService int, expectedEndErrorMsg ...byte
 	pm := newPolicyManager()
 	svm := newSignatureVerifierManager(
 		&signVerifierManagerConfig{
-			serversConfig:            sc.Configs,
+			clientConfig:             test.ServerToClientConfig(sc.Configs...),
 			incomingTxsForValidation: inputTxBatch,
 			outgoingValidatedTxs:     outputValidatedTxs,
 			metrics:                  newPerformanceMetrics(),

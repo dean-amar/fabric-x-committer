@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package grpcerror
 
 import (
@@ -71,7 +77,9 @@ func TestHasCodeWithGRPCService(t *testing.T) {
 		protovcservice.RegisterValidationAndCommitServiceServer(server, vc)
 	})
 
-	conn, err := connection.Connect(connection.NewDialConfig(&vcGrpc.Configs[0].Endpoint))
+	dialConfig := connection.NewInsecureDialConfig(&vcGrpc.Configs[0].Endpoint)
+	dialConfig.SetRetryProfile(&connection.RetryProfile{MaxElapsedTime: 2 * time.Second})
+	conn, err := connection.Connect(dialConfig)
 	require.NoError(t, err)
 
 	client := protovcservice.NewValidationAndCommitServiceClient(conn)
@@ -86,7 +94,7 @@ func TestHasCodeWithGRPCService(t *testing.T) {
 	test.CheckServerStopped(t, vcGrpc.Configs[0].Endpoint.Address())
 
 	_, err = client.GetLastCommittedBlockNumber(ctx, nil)
-	require.True(t, HasCode(err, codes.Unavailable))
+	require.Truef(t, HasCode(err, codes.DeadlineExceeded), "code: %s", GetCode(err))
 	require.NoError(t, FilterUnavailableErrorCode(err))
 }
 
@@ -127,20 +135,6 @@ func TestWrapErrors(t *testing.T) {
 			expectedNilError: false,
 			expectedCode:     codes.InvalidArgument,
 			expectedMsg:      "invalid argument provided",
-		},
-		{
-			name:             "WrapNotFound returns nil for nil input",
-			createFunc:       WrapNotFound,
-			input:            nil,
-			expectedNilError: true,
-		},
-		{
-			name:             "WrapNotFound returns error with NotFound code",
-			createFunc:       WrapNotFound,
-			input:            errors.New("resource not found"),
-			expectedNilError: false,
-			expectedCode:     codes.NotFound,
-			expectedMsg:      "resource not found",
 		},
 	}
 

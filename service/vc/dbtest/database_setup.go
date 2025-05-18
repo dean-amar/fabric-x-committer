@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package dbtest
 
 import (
@@ -91,17 +97,16 @@ func PrepareTestEnvWithConnection(t *testing.T, conn *Connection) *Connection {
 	t.Logf("[%s] db name: %s", t.Name(), dbName)
 	require.NoError(t, conn.execute(ctx, fmt.Sprintf(createDBSQLTempl, dbName)))
 
+	// we copy the connection for later usage.
+	dropConn := *conn
 	t.Cleanup(func() {
 		//nolint:usetesting // t.Context is finishing right after the test resulting in context.Deadline error.
 		cleanUpCtx, cleanUpCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cleanUpCancel()
-		logger.WarnStackTrace(conn.execute(cleanUpCtx, fmt.Sprintf(dropDBSQLTempl, dbName)))
+		logger.WarnStackTrace(dropConn.execute(cleanUpCtx, fmt.Sprintf(dropDBSQLTempl, dbName)))
 	})
-	// We copy the connection and add the database name
-	connSettings := *conn
-	connSettings.Database = dbName
-
-	return &connSettings
+	conn.Database = dbName
+	return conn
 }
 
 // StartAndConnect connects to an existing Yugabyte instance or creates a containerized new one.

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package verifier
 
 import (
@@ -21,6 +27,7 @@ type verifier struct {
 }
 
 func newVerifier() *verifier {
+	logger.Info("Initializing new verifier")
 	v := &verifier{}
 	verifiers := make(map[string]*signature.NsVerifier)
 	v.verifiers.Store(&verifiers)
@@ -124,7 +131,7 @@ func (v *verifier) verifyTX(tx *protoblocktx.Tx) protoblocktx.Status {
 		//       still mark the transaction as invalid due to an MVCC conflict on the
 		//       namespace version, which would reflect the correct validation status.
 		if err := nsVerifier.VerifyNs(tx, nsIndex); err != nil {
-			logger.Debugf("Invalid signature found: %v", tx.GetId())
+			logger.Debugf("Invalid signature found: %v, namespace id: %v", tx.GetId(), ns.NsId)
 			return protoblocktx.Status_ABORTED_SIGNATURE_INVALID
 		}
 	}

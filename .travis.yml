@@ -29,9 +29,10 @@ jobs:
     - stage: lint
       install:
         # Install dependencies
-        - scripts/install-protobuf.sh
+        - sh scripts/install-protobuf.sh
         - go install golang.org/x/tools/cmd/goimports@latest
         - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.0.2
+        - pip install sqlfluff
       before_script:
         # Fetch main to only detect issues from changes to main
         - git fetch origin main:main
@@ -46,19 +47,19 @@ jobs:
         - make lint
     - stage: test
       name: Unit Test (non DB)
-      script: make test-non-db-packages
+      script: make test-no-db
     - stage: test
-      name: Unit Tests (postgres)
-      install: scripts/get-and-start-postgres.sh
-      script: make test-db-packages
+      name: Requires and Core DB Tests (postgres)
+      install: sh scripts/get-and-start-postgres.sh
+      script: make test-requires-db test-core-db
     - stage: test
-      name: Unit Tests (yugabyte)
-      install: scripts/get-and-start-yuga.sh
-      script: make test-db-packages
+      name: Core DB Tests (yugabyte)
+      install: sh scripts/get-and-start-yuga.sh
+      script: make test-core-db
     - stage: test
       name: Integration Tests (yugabyte)
-      install: scripts/get-and-start-yuga.sh
-      script: travis_wait 20 make integration-test
+      install: sh scripts/get-and-start-yuga.sh
+      script: travis_wait 30 make integration-test
     - stage: test
       name: Build and test container images
       script: make container-test -j16

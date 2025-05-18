@@ -1,0 +1,12 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# This is a partial template. It contains only the VC client configurations.
+# It should be complimented by the common load generator configuration.
+
+verifier-client:
+  endpoints:
+    {{- range .Endpoints.Verifier }}
+    - {{ .Server }}
+    {{- end }}

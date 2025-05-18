@@ -1,7 +1,14 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/cockroachdb/errors"
@@ -27,6 +34,7 @@ type (
 	// 4. Forwarding the status of the transactions to the coordinator.
 	validatorCommitterManager struct {
 		config              *validatorCommitterManagerConfig
+		commonClient        protovcservice.ValidationAndCommitServiceClient
 		validatorCommitter  []*validatorCommitter
 		txsStatusBufferSize int
 		// ready indicates that the validatorCommitter array is initialized.
@@ -47,7 +55,7 @@ type (
 	}
 
 	validatorCommitterManagerConfig struct {
-		serversConfig                  []*connection.ServerConfig
+		clientConfig                   *connection.ClientConfig
 		incomingTxsForValidationCommit <-chan dependencygraph.TxNodeBatch
 		outgoingValidatedTxsNode       chan<- dependencygraph.TxNodeBatch
 		outgoingTxsStatus              chan<- *protoblocktx.TransactionsStatus
@@ -57,6 +65,7 @@ type (
 )
 
 func newValidatorCommitterManager(c *validatorCommitterManagerConfig) *validatorCommitterManager {
+	logger.Info("Initializing new ValidatorCommitterManager")
 	return &validatorCommitterManager{
 		config:              c,
 		txsStatusBufferSize: cap(c.outgoingTxsStatus),
@@ -67,8 +76,8 @@ func newValidatorCommitterManager(c *validatorCommitterManagerConfig) *validator
 func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 	defer vcm.ready.Reset()
 	c := vcm.config
-	logger.Infof("Connections to %d vc's will be opened from vc manager", len(c.serversConfig))
-	vcm.validatorCommitter = make([]*validatorCommitter, len(c.serversConfig))
+	logger.Infof("Connections to %d vc's will be opened from vc manager", len(c.clientConfig.Endpoints))
+	vcm.validatorCommitter = make([]*validatorCommitter, len(c.clientConfig.Endpoints))
 
 	g, eCtx := errgroup.WithContext(ctx)
 
@@ -82,12 +91,32 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		return nil
 	})
 
-	for i, serverConfig := range c.serversConfig {
-		logger.Debugf("vc manager creates client to vc [%d] listening on %s", i, &serverConfig.Endpoint)
-		vc, err := newValidatorCommitter(serverConfig, c.metrics, c.policyMgr)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create validator client with %s", serverConfig.Endpoint.Address())
+	commonDial, dialErr := connection.NewLoadBalancedDialConfig(c.clientConfig)
+	if dialErr != nil {
+		return fmt.Errorf("failed to create connection to validator persisters: %w", dialErr)
+	}
+	commonConn, err := connection.Connect(commonDial)
+	if err != nil {
+		return fmt.Errorf("failed to create connection to validator persisters: %w", err)
+	}
+	vcm.commonClient = protovcservice.NewValidationAndCommitServiceClient(commonConn)
+	_, setupErr := vcm.commonClient.SetupSystemTablesAndNamespaces(ctx, nil)
+	if setupErr != nil {
+		return errors.Wrap(setupErr, "failed to setup system tables and namespaces")
+	}
+
+	dialConfigs, dialErr := connection.NewDialConfigPerEndpoint(c.clientConfig)
+	if dialErr != nil {
+		return dialErr
+	}
+	for i, d := range dialConfigs {
+		logger.Debugf("vc manager creates client to vc [%d] listening on %s", i, d.Address)
+		conn, connErr := connection.Connect(d)
+		if connErr != nil {
+			return fmt.Errorf("failed to create connection to validator persister running at %s", d.Address)
 		}
+		logger.Infof("validator persister manager connected to validator persister at %s", d.Address)
+		vc := newValidatorCommitter(conn, c.metrics, c.policyMgr)
 
 		logger.Debugf("Client [%d] successfully created and connected to vc", i)
 		vcm.validatorCommitter[i] = vc
@@ -106,46 +135,22 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		})
 	}
 
-	// TODO: add retry policy to config.
-	r := connection.RetryProfile{}
-	if err := r.Execute(ctx, "setup_system_tables_and_ns", nil, func() error {
-		_, err := utils.FirstSuccessful(
-			vcm.validatorCommitter,
-			func(vc *validatorCommitter) (*protovcservice.Empty, error) {
-				return vc.client.SetupSystemTablesAndNamespaces(ctx, nil)
-			},
-		)
-		return errors.Wrap(err, "failed to setup system tables and namespaces")
-	}); err != nil {
-		return err
-	}
-
 	vcm.ready.SignalReady()
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "validator-committer manager failed")
 }
 
 func (vcm *validatorCommitterManager) setLastCommittedBlockNumber(
 	ctx context.Context,
 	lastBlock *protoblocktx.BlockInfo,
 ) error {
-	_, err := utils.FirstSuccessful(
-		vcm.validatorCommitter,
-		func(vc *validatorCommitter) (*protovcservice.Empty, error) {
-			return vc.client.SetLastCommittedBlockNumber(ctx, lastBlock)
-		},
-	)
+	_, err := vcm.commonClient.SetLastCommittedBlockNumber(ctx, lastBlock)
 	return errors.Wrap(err, "failed setting the last committed block number")
 }
 
 func (vcm *validatorCommitterManager) getLastCommittedBlockNumber(
 	ctx context.Context,
-) (*protoblocktx.BlockInfo, error) {
-	ret, err := utils.FirstSuccessful(
-		vcm.validatorCommitter,
-		func(vc *validatorCommitter) (*protoblocktx.BlockInfo, error) {
-			return vc.client.GetLastCommittedBlockNumber(ctx, nil)
-		},
-	)
+) (*protoblocktx.LastCommittedBlock, error) {
+	ret, err := vcm.commonClient.GetLastCommittedBlockNumber(ctx, nil)
 	return ret, errors.Wrap(err, "failed getting the last committed block number")
 }
 
@@ -153,36 +158,21 @@ func (vcm *validatorCommitterManager) getTransactionsStatus(
 	ctx context.Context,
 	query *protoblocktx.QueryStatus,
 ) (*protoblocktx.TransactionsStatus, error) {
-	ret, err := utils.FirstSuccessful(
-		vcm.validatorCommitter,
-		func(vc *validatorCommitter) (*protoblocktx.TransactionsStatus, error) {
-			return vc.client.GetTransactionsStatus(ctx, query)
-		},
-	)
+	ret, err := vcm.commonClient.GetTransactionsStatus(ctx, query)
 	return ret, errors.Wrap(err, "failed getting transactions status")
 }
 
 func (vcm *validatorCommitterManager) getNamespacePolicies(
 	ctx context.Context,
 ) (*protoblocktx.NamespacePolicies, error) {
-	ret, err := utils.FirstSuccessful(
-		vcm.validatorCommitter,
-		func(vc *validatorCommitter) (*protoblocktx.NamespacePolicies, error) {
-			return vc.client.GetNamespacePolicies(ctx, nil)
-		},
-	)
+	ret, err := vcm.commonClient.GetNamespacePolicies(ctx, nil)
 	return ret, errors.Wrap(err, "failed loading policies")
 }
 
 func (vcm *validatorCommitterManager) getConfigTransaction(
 	ctx context.Context,
 ) (*protoblocktx.ConfigTransaction, error) {
-	ret, err := utils.FirstSuccessful(
-		vcm.validatorCommitter,
-		func(vc *validatorCommitter) (*protoblocktx.ConfigTransaction, error) {
-			return vc.client.GetConfigTransaction(ctx, nil)
-		},
-	)
+	ret, err := vcm.commonClient.GetConfigTransaction(ctx, nil)
 	return ret, errors.Wrap(err, "failed loading config transaction")
 }
 
@@ -205,25 +195,16 @@ func (vcm *validatorCommitterManager) recoverPolicyManagerFromStateDB(ctx contex
 	return nil
 }
 
-func newValidatorCommitter(serverConfig *connection.ServerConfig, metrics *perfMetrics, policyMgr *policyManager) (
-	*validatorCommitter, error,
-) {
-	conn, err := connection.Connect(connection.NewDialConfig(&serverConfig.Endpoint))
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create connection to validator persister running at %s",
-			&serverConfig.Endpoint)
-	}
-	logger.Infof("validator persister manager connected to validator persister at %s", &serverConfig.Endpoint)
+func newValidatorCommitter(conn *grpc.ClientConn, metrics *perfMetrics, policyMgr *policyManager) *validatorCommitter {
 	label := conn.CanonicalTarget()
 	metrics.vcservicesConnection.Disconnected(label)
 	client := protovcservice.NewValidationAndCommitServiceClient(conn)
-
 	return &validatorCommitter{
 		conn:      conn,
 		client:    client,
 		metrics:   metrics,
 		policyMgr: policyMgr,
-	}, nil
+	}
 }
 
 func (vc *validatorCommitter) sendTransactionsAndForwardStatus(
@@ -259,7 +240,7 @@ func (vc *validatorCommitter) sendTransactionsAndForwardStatus(
 		return vc.receiveStatusAndForwardToOutput(stream, outputValidatedTxsNode, outputTxsStatus)
 	})
 
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "sendTransactionsAndForwardStatus run failed")
 }
 
 func (vc *validatorCommitter) sendTransactionsToVCService(

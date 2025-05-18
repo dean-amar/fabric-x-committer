@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package main
 
 import (
@@ -24,7 +30,7 @@ func TestMockSigVerifierServiceCmd(t *testing.T) {
 		{
 			Name:              "start",
 			Args:              []string{"start"},
-			CmdLoggerOutputs:  []string{"Serving", s.ServerEndpoint.String()},
+			CmdLoggerOutputs:  []string{"Serving", s.ServiceEndpoints.Server.String()},
 			CmdStdOutput:      fmt.Sprintf("Starting %v service", serviceName),
 			UseConfigTemplate: config.TemplateVerifier,
 			System:            s,

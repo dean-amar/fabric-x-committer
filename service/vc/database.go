@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package vc
 
 import (
@@ -145,12 +151,12 @@ func (db *database) queryVersionsIfPresent(ctx context.Context, nsID string, que
 	return kToV, nil
 }
 
-func (db *database) getLastCommittedBlockNumber(ctx context.Context) (*protoblocktx.BlockInfo, error) {
+func (db *database) getLastCommittedBlockNumber(ctx context.Context) (*protoblocktx.LastCommittedBlock, error) {
 	blkInfo, err := db.getBlockInfoMetadata(ctx, lastCommittedBlockNumberKey)
-	if err != nil {
-		return blkInfo, fmt.Errorf("failed to get the last committed block number: %w", err)
+	if err != nil && !errors.Is(err, ErrMetadataEmpty) {
+		return nil, fmt.Errorf("failed to get the last committed block number: %w", err)
 	}
-	return blkInfo, nil
+	return &protoblocktx.LastCommittedBlock{Block: blkInfo}, nil
 }
 
 func (db *database) getBlockInfoMetadata(ctx context.Context, key string) (*protoblocktx.BlockInfo, error) {
@@ -167,7 +173,6 @@ func (db *database) getBlockInfoMetadata(ctx context.Context, key string) (*prot
 	if len(value) == 0 {
 		return nil, ErrMetadataEmpty
 	}
-
 	return &protoblocktx.BlockInfo{Number: binary.BigEndian.Uint64(value)}, nil
 }
 

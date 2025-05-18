@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package loadgen
 
 import (
@@ -95,8 +101,8 @@ func getAdapter(conf *adapters.AdapterConfig, res *adapters.ClientResources) (Se
 		return adapters.NewOrdererAdapter(conf.OrdererClient, res), nil
 	case conf.SidecarClient != nil:
 		return adapters.NewSidecarAdapter(conf.SidecarClient, res), nil
-	case conf.SigVerifierClient != nil:
-		return adapters.NewSVAdapter(conf.SigVerifierClient, res), nil
+	case conf.VerifierClient != nil:
+		return adapters.NewSVAdapter(conf.VerifierClient, res), nil
 	default:
 		return nil, adapters.ErrInvalidAdapterConfig
 	}
@@ -143,7 +149,7 @@ func (c *Client) Run(ctx context.Context) error {
 	if !c.conf.Generate.Load {
 		cancel()
 	}
-	return errors.Wrap(g.Wait(), "workload done")
+	return g.Wait()
 }
 
 // submitWorkloadSetupTXs writes the workload setup TXs to the channel, and waits for them to be committed.

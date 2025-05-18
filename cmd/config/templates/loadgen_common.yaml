@@ -1,14 +1,13 @@
-sidecar-client:
-  sidecar-endpoint: {{ .Endpoints.Sidecar }}
-  orderer-servers:
-    {{- range .Endpoints.Orderer }}
-    - endpoint: {{ . }}
-    {{- end }}
-  channel-id: {{ .ChannelID }}
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# This is a partial template. It contains only the common parts of the load generator's configurations.
+# It should be complimented by the client adapter configuration.
 
 monitoring:
   server:
-    endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
   latency:
     sampler:
       type: hash
@@ -51,14 +50,13 @@ load-profile:
 
 stream:
   rate-limit:
-    endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
     initial-limit: 1000
   gen-batch: 1
   buffers-size: 1
 
 generate:
-  # The sidecar does not support config TX from the stream.
-  config: false
+  config: true
   namespaces: true
   load: true
 

@@ -1,0 +1,74 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package runner
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	docker "github.com/fsouza/go-dockerclient"
+	"github.com/stretchr/testify/require"
+
+	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
+)
+
+func TestYugabyteClusterController(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	t.Cleanup(cancel)
+
+	cc, conn := StartYugaCluster(ctx, t, 3)
+	containersIDs := cc.GetNodesContainerID(t)
+
+	t.Cleanup(func() {
+		cc.stopAndRemoveCluster(t)
+		ensureContainersRemoval(t, containersIDs)
+	})
+
+	require.Equal(t, 3, cc.GetClusterSize())
+
+	dbtest.ConnectAndQueryTest(t, conn)
+
+	cc.AddNode(ctx, t)
+	require.Equal(t, 4, cc.GetClusterSize())
+
+	cc.StopAndRemoveNodeWithRole(t, FollowerNode)
+	require.Equal(t, 3, cc.GetClusterSize())
+}
+
+func TestPostgresClusterController(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	t.Cleanup(cancel)
+
+	cc, conn := StartPostgresCluster(ctx, t)
+	containersIDs := cc.GetNodesContainerID(t)
+
+	t.Cleanup(func() {
+		cc.stopAndRemoveCluster(t)
+		ensureContainersRemoval(t, containersIDs)
+	})
+
+	dbtest.ConnectAndQueryTest(t, conn)
+	require.Equal(t, 2, cc.GetClusterSize())
+
+	cc.StopAndRemoveNodeWithRole(t, FollowerNode)
+	require.Equal(t, 1, cc.GetClusterSize())
+}
+
+func ensureContainersRemoval(t *testing.T, containersIDs []string) {
+	t.Helper()
+	allContainers, err := dbtest.GetDockerClient(t).ListContainers(docker.ListContainersOptions{All: true})
+	require.NoError(t, err)
+
+	for _, c := range allContainers {
+		for _, id := range containersIDs {
+			require.NotEqual(t, c.ID, id)
+		}
+	}
+}

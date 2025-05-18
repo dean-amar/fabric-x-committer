@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package dbtest
 
 import (
@@ -33,10 +39,11 @@ var defaultRetry = &connection.RetryProfile{
 
 // Connection facilities connecting to a YugabyteDB instance.
 type Connection struct {
-	Endpoints []*connection.Endpoint
-	User      string
-	Password  string
-	Database  string
+	Endpoints   []*connection.Endpoint
+	User        string
+	Password    string
+	Database    string
+	LoadBalance bool
 }
 
 // NewConnection returns a connection parameters with the specified host:port, and the default values

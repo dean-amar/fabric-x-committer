@@ -1,19 +1,24 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 server:
-  endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
 monitoring:
   server:
-    endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
 
-sign-verifier:
-  server:
+verifier:
+  endpoints:
     {{- range .Endpoints.Verifier }}
-    - endpoint: {{ . }}
+    - {{ .Server }}
     {{- end }}
 validator-committer:
-  server:
+  endpoints:
    {{- range .Endpoints.VCService }}
-    - endpoint: {{ . }}
-    {{- end }}
+    - {{ .Server }}
+   {{- end }}
+
 dependency-graph:
   num-of-local-dep-constructors: 1
   waiting-txs-limit: 10_000

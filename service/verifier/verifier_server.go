@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package verifier
 
 import (
@@ -32,6 +38,7 @@ var (
 
 // New instantiate a new VerifierServer.
 func New(config *Config) *Server {
+	logger.Info("Initializing new verifier server")
 	m := newMonitoring()
 	s := &Server{
 		config:  config,
@@ -56,7 +63,6 @@ func (*Server) WaitForReady(context.Context) bool {
 
 // StartStream starts a verification stream.
 func (s *Server) StartStream(stream protosigverifierservice.Verifier_StartStreamServer) error {
-	logger.Infof("Starting new stream.")
 	defer logger.Debug("Interrupted stream.")
 	s.metrics.ActiveStreams.Inc()
 	defer s.metrics.ActiveStreams.Dec()

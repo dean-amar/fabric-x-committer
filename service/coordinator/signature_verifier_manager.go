@@ -1,7 +1,14 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -14,6 +21,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator/dependencygraph"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
@@ -50,7 +58,7 @@ type (
 	}
 
 	signVerifierManagerConfig struct {
-		serversConfig            []*connection.ServerConfig
+		clientConfig             *connection.ClientConfig
 		incomingTxsForValidation <-chan dependencygraph.TxNodeBatch
 		outgoingValidatedTxs     chan<- dependencygraph.TxNodeBatch
 		metrics                  *perfMetrics
@@ -63,6 +71,7 @@ var sigInvalidTxStatus = &protovcservice.InvalidTxStatus{
 }
 
 func newSignatureVerifierManager(config *signVerifierManagerConfig) *signatureVerifierManager {
+	logger.Info("Initializing newSignatureVerifierManager")
 	return &signatureVerifierManager{
 		config:  config,
 		metrics: config.metrics,
@@ -71,8 +80,8 @@ func newSignatureVerifierManager(config *signVerifierManagerConfig) *signatureVe
 
 func (svm *signatureVerifierManager) run(ctx context.Context) error {
 	c := svm.config
-	logger.Infof("Connections to %d sv's will be opened from sv manager", len(c.serversConfig))
-	svm.signVerifier = make([]*signatureVerifier, len(c.serversConfig))
+	logger.Infof("Connections to %d sv's will be opened from sv manager", len(c.clientConfig.Endpoints))
+	svm.signVerifier = make([]*signatureVerifier, len(c.clientConfig.Endpoints))
 
 	derivedCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -88,13 +97,17 @@ func (svm *signatureVerifierManager) run(ctx context.Context) error {
 		return nil
 	})
 
-	for i, serverConfig := range c.serversConfig {
-		conn, err := connection.Connect(connection.NewDialConfig(&serverConfig.Endpoint))
+	dialConfigs, dialErr := connection.NewDialConfigPerEndpoint(c.clientConfig)
+	if dialErr != nil {
+		return dialErr
+	}
+	for i, d := range dialConfigs {
+		conn, err := connection.Connect(d)
 		if err != nil {
-			return errors.Wrapf(err, "failed to create connection to signature verifier [%d] at %s",
-				i, &serverConfig.Endpoint)
+			return fmt.Errorf("failed to create connection to signature verifier [%d] at %s: %w",
+				i, d.Address, err)
 		}
-		logger.Infof("connected to signature verifier [%d] at %s", i, &serverConfig.Endpoint)
+		logger.Infof("connected to signature verifier [%d] at %s", i, d.Address)
 		label := conn.CanonicalTarget()
 		c.metrics.verifiersConnection.Disconnected(label)
 
@@ -115,7 +128,7 @@ func (svm *signatureVerifierManager) run(ctx context.Context) error {
 			})
 		})
 	}
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "signature verifier manager run failed")
 }
 
 func ingestIncomingTxsToInternalQueue(
@@ -139,6 +152,7 @@ func newSignatureVerifier(
 	config *signVerifierManagerConfig,
 	conn *grpc.ClientConn,
 ) *signatureVerifier {
+	logger.Info("Initializing new SignatureVerifier")
 	return &signatureVerifier{
 		conn:             conn,
 		client:           protosigverifierservice.NewVerifierClient(conn),
@@ -179,7 +193,7 @@ func (sv *signatureVerifier) sendTransactionsAndForwardStatus(
 		return sv.receiveStatusAndForwardToOutput(stream, outputValidatedTxs.WithContext(gCtx))
 	})
 
-	return g.Wait()
+	return utils.ProcessErr(g.Wait(), "sendTransactionsAndForwardStatus run failed")
 }
 
 // NOTE: sendTransactionsToSVService filters all transient connection related errors.

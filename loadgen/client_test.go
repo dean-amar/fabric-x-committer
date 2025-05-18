@@ -1,10 +1,15 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package loadgen
 
 import (
 	"context"
 	_ "embed"
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +88,7 @@ func TestLoadGenForSigVerifier(t *testing.T) {
 			}
 
 			// Start client
-			clientConf.Adapter.SigVerifierClient = &adapters.SVClientConfig{
+			clientConf.Adapter.VerifierClient = &adapters.VerifierClientConfig{
 				Endpoints: endpoints,
 			}
 			testLoadGenerator(t, clientConf)
@@ -106,18 +111,10 @@ func TestLoadGenForCoordinator(t *testing.T) {
 			_, vcServer := mock.StartMockVCService(t, 1)
 
 			cConf := &coordinator.Config{
-				Server:     connection.NewLocalHostServer(),
-				Monitoring: defaultMonitoring(),
-				SignVerifierConfig: &coordinator.SignVerifierConfig{
-					ServerConfig: []*connection.ServerConfig{{
-						Endpoint: sigVerServer.Configs[0].Endpoint,
-					}},
-				},
-				ValidatorCommitterConfig: &coordinator.ValidatorCommitterConfig{
-					ServerConfig: []*connection.ServerConfig{{
-						Endpoint: vcServer.Configs[0].Endpoint,
-					}},
-				},
+				Server:                   connection.NewLocalHostServer(),
+				Monitoring:               defaultMonitoring(),
+				VerifierConfig:           *test.ServerToClientConfig(sigVerServer.Configs...),
+				ValidatorCommitterConfig: *test.ServerToClientConfig(vcServer.Configs...),
 				DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 					NumOfLocalDepConstructors:       1,
 					WaitingTxsLimit:                 10_000,
@@ -288,13 +285,13 @@ func testLoadGenerator(t *testing.T, c *ClientConfig) {
 
 	if !c.Limit.HasLimit() {
 		// If we have a limit, the Prometheus server might stop before we can fetch the metrics.
-		promutil.CheckMetrics(t, &http.Client{}, client.resources.Metrics.URL(), []string{
+		promutil.CheckMetrics(t, client.resources.Metrics.URL(),
 			"loadgen_block_sent_total",
 			"loadgen_transaction_sent_total",
 			"loadgen_transaction_received_total",
 			"loadgen_valid_transaction_latency_seconds",
 			"loadgen_invalid_transaction_latency_seconds",
-		})
+		)
 	}
 
 	eventuallyMetrics(t, client.resources.Metrics, func(m metrics.MetricState) bool {

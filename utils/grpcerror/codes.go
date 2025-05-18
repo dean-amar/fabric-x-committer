@@ -1,6 +1,14 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package grpcerror
 
 import (
+	"slices"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -10,13 +18,21 @@ func HasCode(rpcErr error, code codes.Code) bool {
 	if rpcErr == nil {
 		return false
 	}
+	return GetCode(rpcErr) == code
+}
+
+// GetCode returns GRPC error code.
+func GetCode(rpcErr error) codes.Code {
+	if rpcErr == nil {
+		return codes.OK
+	}
 
 	errStatus, ok := status.FromError(rpcErr)
 	if !ok {
-		return false
+		return codes.OK
 	}
 
-	return errStatus.Code() == code
+	return errStatus.Code()
 }
 
 // WrapInternalError creates a grpc error with a [codes.Internal] status code for a given error.
@@ -34,11 +50,6 @@ func WrapCancelled(err error) error {
 	return wrap(codes.Canceled, err)
 }
 
-// WrapNotFound creates a grpc error with a [codes.NotFound] status code for a given error.
-func WrapNotFound(err error) error {
-	return wrap(codes.NotFound, err)
-}
-
 func wrap(c codes.Code, err error) error {
 	if err == nil {
 		return nil
@@ -48,9 +59,9 @@ func wrap(c codes.Code, err error) error {
 
 // FilterUnavailableErrorCode rpc error that caused due to transient connectivity issue.
 func FilterUnavailableErrorCode(rpcErr error) error {
-	if HasCode(rpcErr, codes.Unavailable) {
+	code := GetCode(rpcErr)
+	if slices.Contains([]codes.Code{codes.Unavailable, codes.DeadlineExceeded}, code) {
 		return nil
 	}
-
 	return rpcErr
 }

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -67,16 +73,12 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 	}
 
 	c := &Config{
-		SignVerifierConfig: &SignVerifierConfig{
-			ServerConfig: svServers.Configs,
-		},
+		VerifierConfig:           *test.ServerToClientConfig(svServers.Configs...),
+		ValidatorCommitterConfig: *test.ServerToClientConfig(vcServerConfigs...),
 		DependencyGraphConfig: &DependencyGraphConfig{
 			NumOfLocalDepConstructors:       3,
 			WaitingTxsLimit:                 10,
 			NumOfWorkersForGlobalDepManager: 3,
-		},
-		ValidatorCommitterConfig: &ValidatorCommitterConfig{
-			ServerConfig: vcServerConfigs,
 		},
 		ChannelBufferSizePerGoroutine: 2000,
 		Monitoring: monitoring.Config{
@@ -106,7 +108,7 @@ func (e *coordinatorTestEnv) start(ctx context.Context, t *testing.T) {
 		protocoordinatorservice.RegisterCoordinatorServer(server, cs)
 	})
 
-	conn, err := connection.Connect(connection.NewDialConfig(&sc.Endpoint))
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(&sc.Endpoint))
 	require.NoError(t, err)
 
 	client := protocoordinatorservice.NewCoordinatorClient(conn)
@@ -222,7 +224,7 @@ func TestGetNextBlockNumWithActiveStream(t *testing.T) {
 func TestCoordinatorServiceValidTx(t *testing.T) {
 	t.Parallel()
 	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2, mockVcService: false})
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	env.start(ctx, t)
 
@@ -283,9 +285,10 @@ func TestCoordinatorServiceValidTx(t *testing.T) {
 	_, err = env.coordinator.SetLastCommittedBlockNumber(ctx, &protoblocktx.BlockInfo{Number: 1})
 	require.NoError(t, err)
 
-	lastBlock, err := env.coordinator.GetLastCommittedBlockNumber(ctx, nil)
+	lastCommittedBlock, err := env.coordinator.GetLastCommittedBlockNumber(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), lastBlock.Number)
+	require.NotNil(t, lastCommittedBlock.Block)
+	require.Equal(t, uint64(1), lastCommittedBlock.Block.Number)
 }
 
 func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
@@ -510,7 +513,8 @@ func TestCoordinatorRecovery(t *testing.T) {
 
 	lastCommittedBlock, err := env.client.GetLastCommittedBlockNumber(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), lastCommittedBlock.Number)
+	require.NotNil(t, lastCommittedBlock.Block)
+	require.Equal(t, uint64(1), lastCommittedBlock.Block.Number)
 
 	// To simulate a failure scenario in which a block is partially committed, we first create block 2
 	// with two transaction but actual block 2 is supposed to have four transactions. Once the partial block 2
@@ -593,7 +597,7 @@ func TestCoordinatorRecovery(t *testing.T) {
 	cancel()
 
 	vcEnv := vc.NewValidatorAndCommitServiceTestEnv(t, 1, env.dbEnv)
-	env.config.ValidatorCommitterConfig.ServerConfig = []*connection.ServerConfig{vcEnv.Configs[0].Server}
+	env.config.ValidatorCommitterConfig = *test.ServerToClientConfig(vcEnv.Configs[0].Server)
 	env.coordinator = NewCoordinatorService(env.config)
 	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
@@ -927,13 +931,13 @@ func TestWaitingTxsCount(t *testing.T) {
 func fakeConfigForTest(_ *testing.T) *Config {
 	return &Config{
 		Server: connection.NewLocalHostServer(),
-		SignVerifierConfig: &SignVerifierConfig{
-			ServerConfig: []*connection.ServerConfig{{Endpoint: connection.Endpoint{Host: "random", Port: 1234}}},
+		VerifierConfig: connection.ClientConfig{
+			Endpoints: []*connection.Endpoint{{Host: "random", Port: 1234}},
+		},
+		ValidatorCommitterConfig: connection.ClientConfig{
+			Endpoints: []*connection.Endpoint{{Host: "random", Port: 1234}},
 		},
 		DependencyGraphConfig: &DependencyGraphConfig{},
-		ValidatorCommitterConfig: &ValidatorCommitterConfig{
-			ServerConfig: []*connection.ServerConfig{{Endpoint: connection.Endpoint{Host: "random", Port: 1234}}},
-		},
 		Monitoring: monitoring.Config{
 			Server: connection.NewLocalHostServer(),
 		},

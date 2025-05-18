@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package main
 
 import (
@@ -12,12 +18,12 @@ import (
 //nolint:paralleltest // Cannot parallelize due to logger.
 func TestMockOrderingService(t *testing.T) {
 	s := config.StartDefaultSystem(t)
-	s.Endpoints.Orderer[0] = s.ServerEndpoint
+	s.Endpoints.Orderer[0] = s.ServiceEndpoints
 	commonTests := []config.CommandTest{
 		{
 			Name:              "start",
 			Args:              []string{"start"},
-			CmdLoggerOutputs:  []string{"Serving", s.ServerEndpoint.String()},
+			CmdLoggerOutputs:  []string{"Serving", s.ServiceEndpoints.Server.String()},
 			CmdStdOutput:      fmt.Sprintf("Starting %v service", serviceName),
 			UseConfigTemplate: config.TemplateMockOrderer,
 			System:            s,

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package adapters
 
 import (
@@ -29,17 +35,19 @@ func NewCoordinatorAdapter(config *CoordinatorClientConfig, res *ClientResources
 
 // RunWorkload applies load on the coordinator.
 func (c *CoordinatorAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
-	conn, err := connection.Connect(connection.NewDialConfig(c.config.Endpoint))
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(c.config.Endpoint))
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to %s", c.config.Endpoint)
 	}
 	defer connection.CloseConnectionsLog(conn)
 	client := protocoordinatorservice.NewCoordinatorClient(conn)
-	if lastBlockNum, coordErr := client.GetLastCommittedBlockNumber(ctx, nil); coordErr != nil {
+	if lastCommittedBlock, getErr := client.GetLastCommittedBlockNumber(ctx, nil); getErr != nil {
 		// We do not return error as we can proceed assuming no blocks were committed.
-		logger.Infof("cannot fetch the last committed block number: %v", coordErr)
+		logger.Infof("cannot fetch the last committed block number: %v", getErr)
+	} else if lastCommittedBlock.Block != nil {
+		c.nextBlockNum.Store(lastCommittedBlock.Block.Number + 1)
 	} else {
-		c.nextBlockNum.Store(lastBlockNum.Number + 1)
+		c.nextBlockNum.Store(0)
 	}
 
 	logger.Info("Opening stream")

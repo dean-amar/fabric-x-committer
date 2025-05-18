@@ -9,7 +9,7 @@ import "api/protoblocktx/block_tx.proto";
 service ValidationAndCommitService {
   rpc StartValidateAndCommitStream (stream TransactionBatch) returns (stream protoblocktx.TransactionsStatus);
   rpc SetLastCommittedBlockNumber (protoblocktx.BlockInfo) returns (Empty) {};
-  rpc GetLastCommittedBlockNumber (Empty) returns (protoblocktx.BlockInfo) {};
+  rpc GetLastCommittedBlockNumber (Empty) returns (protoblocktx.LastCommittedBlock) {};
   rpc GetTransactionsStatus (protoblocktx.QueryStatus) returns (protoblocktx.TransactionsStatus) {};
   rpc GetNamespacePolicies(Empty) returns (protoblocktx.NamespacePolicies) {};
   rpc GetConfigTransaction(Empty) returns (protoblocktx.ConfigTransaction) {};

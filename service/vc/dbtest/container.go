@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package dbtest
 
 import (
@@ -6,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -41,6 +48,8 @@ type DatabaseContainer struct {
 	HostIP       string
 	Network      string
 	DatabaseType string
+	Tag          string
+	Role         string
 	Cmd          []string
 	Env          []string
 	HostPort     int
@@ -148,6 +157,7 @@ func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) 
 	require.NoError(t, dc.client.PullImage(docker.PullImageOptions{
 		Context:      ctx,
 		Repository:   dc.Image,
+		Tag:          dc.Tag,
 		OutputStream: os.Stdout,
 	}, docker.AuthConfiguration{}))
 
@@ -164,6 +174,7 @@ func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) 
 			HostConfig: &docker.HostConfig{
 				AutoRemove:   dc.AutoRm,
 				PortBindings: dc.PortBinds,
+				NetworkMode:  dc.Network,
 			},
 		},
 	)
@@ -228,7 +239,14 @@ func (dc *DatabaseContainer) GetContainerConnectionDetails(
 	})
 	require.NoError(t, err)
 
-	return connection.CreateEndpointHP(container.NetworkSettings.IPAddress, dc.DbPort.Port())
+	ipAddress := container.NetworkSettings.IPAddress
+	require.NotNil(t, ipAddress)
+	if dc.Network != "" {
+		net, ok := container.NetworkSettings.Networks[dc.Network]
+		require.True(t, ok)
+		ipAddress = net.IPAddress
+	}
+	return connection.CreateEndpointHP(ipAddress, dc.DbPort.Port())
 }
 
 // streamLogs streams the container output to the requested stream.
@@ -253,9 +271,11 @@ func (dc *DatabaseContainer) GetContainerLogs(t *testing.T) string {
 	t.Helper()
 	var outputBuffer bytes.Buffer
 	require.NoError(t, dc.client.Logs(docker.LogsOptions{
-		Stdout:       true, // Capture standard output
+		Stdout:       true,
+		Stderr:       true,
 		Container:    dc.Name,
-		OutputStream: &outputBuffer, // Capture in a string
+		OutputStream: &outputBuffer,
+		ErrorStream:  &outputBuffer,
 	}))
 
 	return outputBuffer.String()
@@ -275,6 +295,19 @@ func (dc *DatabaseContainer) StopAndRemoveContainer(t *testing.T) {
 // ContainerID returns the container ID.
 func (dc *DatabaseContainer) ContainerID() string {
 	return dc.containerID
+}
+
+// ExecuteCommand execute a given command in the container.
+func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) {
+	t.Helper()
+	require.NotNil(t, dc.client)
+	t.Logf("executing %s", strings.Join(cmd, " "))
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       cmd,
+	})
+	require.NoError(t, err)
+	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{}))
 }
 
 // GetDockerClient instantiate a new docker client.

@@ -1,5 +1,9 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 server:
-  endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
   keep-alive:
     params:
       time: 300s
@@ -9,18 +13,18 @@ server:
       permit-without-stream: false
 monitoring:
   server:
-    endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
 
 orderer:
   connection:
     endpoints:
       {{- range .Endpoints.Orderer }}
-      - {{ . }}
+      - {{ .Server }}
       {{- end }}
   channel-id: {{ .ChannelID }}
   consensus-type: BFT
 committer:
-  endpoint: {{ .Endpoints.Coordinator }}
+  endpoint: {{ .Endpoints.Coordinator.Server }}
 
 ledger:
   path: {{ .LedgerPath }}

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package test
 
 import (
@@ -35,5 +41,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Failed to build binaries")
 	}
 
+	// Waiting a seconds solves a bug where the binaries are not yet accessible by the filesystem.
+	time.Sleep(time.Second)
 	os.Exit(m.Run())
 }

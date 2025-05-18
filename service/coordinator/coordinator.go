@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -9,14 +15,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator/dependencygraph"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
@@ -112,8 +116,8 @@ func NewCoordinatorService(c *Config) *Service {
 	// local dependency constructors. Hence, we define a buffer size for dependency graph manager by multiplying the
 	// number of local dependency constructors with the buffer size per goroutine. We follow this approach to avoid
 	// giving too many configurations to the user as it would add complexity to the user experience.
-	bufSzPerChanForSignVerifierMgr := c.ChannelBufferSizePerGoroutine * len(c.SignVerifierConfig.ServerConfig)
-	bufSzPerChanForValCommitMgr := c.ChannelBufferSizePerGoroutine * len(c.ValidatorCommitterConfig.ServerConfig)
+	bufSzPerChanForSignVerifierMgr := c.ChannelBufferSizePerGoroutine * len(c.VerifierConfig.Endpoints)
+	bufSzPerChanForValCommitMgr := c.ChannelBufferSizePerGoroutine * len(c.ValidatorCommitterConfig.Endpoints)
 	bufSzPerChanForLocalDepMgr := c.ChannelBufferSizePerGoroutine * c.DependencyGraphConfig.NumOfLocalDepConstructors
 
 	queues := &channels{
@@ -141,7 +145,7 @@ func NewCoordinatorService(c *Config) *Service {
 
 	svMgr := newSignatureVerifierManager(
 		&signVerifierManagerConfig{
-			serversConfig:            c.SignVerifierConfig.ServerConfig,
+			clientConfig:             &c.VerifierConfig,
 			incomingTxsForValidation: queues.depGraphToSigVerifierFreeTxs,
 			outgoingValidatedTxs:     queues.sigVerifierToVCServiceValidatedTxs,
 			metrics:                  metrics,
@@ -151,7 +155,7 @@ func NewCoordinatorService(c *Config) *Service {
 
 	vcMgr := newValidatorCommitterManager(
 		&validatorCommitterManagerConfig{
-			serversConfig:                  c.ValidatorCommitterConfig.ServerConfig,
+			clientConfig:                   &c.ValidatorCommitterConfig,
 			incomingTxsForValidationCommit: queues.sigVerifierToVCServiceValidatedTxs,
 			outgoingValidatedTxsNode:       queues.vcServiceToDepGraphValidatedTxs,
 			outgoingTxsStatus:              queues.vcServiceToCoordinatorTxStatus,
@@ -217,37 +221,23 @@ func (c *Service) Run(ctx context.Context) error {
 	}
 
 	// We attempt to recover the policy manager and the last committed block number from the state DB.
-	// To prevent crashing due to intermittent connectivity issues to the VC, we retry the recovery.
-	// TODO: add retry policy to config.
-	r := connection.RetryProfile{}
-	if err := r.Execute(ctx, "recover_policy_from_state", nil, func() error {
-		return c.validatorCommitterMgr.recoverPolicyManagerFromStateDB(ctx)
-	}); err != nil {
+	if err := c.validatorCommitterMgr.recoverPolicyManagerFromStateDB(ctx); err != nil {
 		return err
 	}
-	if err := r.Execute(ctx, "get_last_committed_block_number", nil, func() error {
-		lastCommittedBlock, getErr := c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
-		if grpcerror.HasCode(getErr, codes.NotFound) {
-			// no block has been committed.
-			c.nextExpectedBlockNumberToBeReceived.Store(0)
-			return nil
-		}
-		if getErr != nil {
-			return getErr
-		}
-		c.nextExpectedBlockNumberToBeReceived.Store(lastCommittedBlock.Number + 1)
-		return nil
-	}); err != nil {
-		return err
+	lastCommittedBlock, getErr := c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
+	if getErr != nil {
+		return getErr
+	}
+	if lastCommittedBlock.Block == nil {
+		// no block has been committed.
+		c.nextExpectedBlockNumberToBeReceived.Store(0)
+	} else {
+		c.nextExpectedBlockNumberToBeReceived.Store(lastCommittedBlock.Block.Number + 1)
 	}
 
 	c.initializationDone.SignalReady()
 
-	if err := g.Wait(); err != nil {
-		logger.Errorf("coordinator processing has been stopped due to err [%v]", err)
-		return err
-	}
-	return nil
+	return utils.ProcessErr(g.Wait(), "coordinator processing has been stopped due to err")
 }
 
 // WaitForReady wait for coordinator to be ready to be exposed as gRPC service.
@@ -278,7 +268,7 @@ func (c *Service) SetLastCommittedBlockNumber(
 func (c *Service) GetLastCommittedBlockNumber(
 	ctx context.Context,
 	_ *protocoordinatorservice.Empty,
-) (*protoblocktx.BlockInfo, error) {
+) (*protoblocktx.LastCommittedBlock, error) {
 	return c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
 }
 
@@ -356,7 +346,7 @@ func (c *Service) BlockProcessing(
 		return nil
 	})
 
-	return errors.Wrap(g.Wait(), "stream with the sidecar has ended")
+	return utils.ProcessErr(g.Wait(), "stream with the sidecar has ended")
 }
 
 func (c *Service) receiveAndProcessBlock(

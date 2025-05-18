@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package adapters
 
 import (
@@ -12,7 +18,7 @@ type (
 		SidecarClient     *SidecarClientConfig     `mapstructure:"sidecar-client"`
 		CoordinatorClient *CoordinatorClientConfig `mapstructure:"coordinator-client"`
 		VCClient          *VCClientConfig          `mapstructure:"vc-client"`
-		SigVerifierClient *SVClientConfig          `mapstructure:"sig-verifier-client"`
+		VerifierClient    *VerifierClientConfig    `mapstructure:"verifier-client"`
 	}
 
 	// OrdererClientConfig is a struct that contains the configuration for the orderer client.
@@ -39,8 +45,8 @@ type (
 		Endpoints []*connection.Endpoint `mapstructure:"endpoints"`
 	}
 
-	// SVClientConfig is a struct that contains the configuration for the signature verifier client.
-	SVClientConfig struct {
+	// VerifierClientConfig is a struct that contains the configuration for the verifier client.
+	VerifierClientConfig struct {
 		Endpoints []*connection.Endpoint `mapstructure:"endpoints"`
 	}
 )

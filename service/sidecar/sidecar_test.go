@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package sidecar
 
 import (
@@ -43,6 +49,7 @@ type sidecarTestEnv struct {
 	sidecar        *Service
 	gServer        *grpc.Server
 	committedBlock chan *common.Block
+	configBlock    *common.Block
 }
 
 type sidecarTestConfig struct {
@@ -95,6 +102,7 @@ func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
 	ordererEndpoints := ordererEnv.AllEndpoints()
 	configBlock := ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
 		OrdererEndpoints: ordererEndpoints,
+		ChannelID:        ordererEnv.TestConfig.ChanID,
 	})
 
 	var genesisBlockFilePath string
@@ -138,6 +146,7 @@ func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
 		coordinatorServer: coordinatorServer,
 		ordererEnv:        ordererEnv,
 		config:            *sidecarConf,
+		configBlock:       configBlock,
 	}
 }
 
@@ -219,9 +228,10 @@ func TestSidecarConfigUpdate(t *testing.T) {
 	}
 
 	t.Log("We expect the block to be held")
-	lastBlock, err := env.coordinator.GetLastCommittedBlockNumber(ctx, nil)
+	lastCommittedBlock, err := env.coordinator.GetLastCommittedBlockNumber(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, expectedBlock-1, lastBlock.Number)
+	require.NotNil(t, lastCommittedBlock.Block)
+	require.Equal(t, expectedBlock-1, lastCommittedBlock.Block.Number)
 
 	t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
 	env.ordererEnv.Holder.HoldFromBlock.Add(1)
@@ -239,7 +249,48 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Cleanup(cancel)
 	env.start(ctx, t, 0)
 	env.requireBlock(ctx, t, 0)
-	// TODO: implement
+
+	t.Log("Stop the sidecar service and ledger service")
+	cancel()
+	require.Eventually(t, func() bool {
+		return test.CheckServerStopped(t, env.config.Server.Endpoint.Address())
+	}, 4*time.Second, 500*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return !env.coordinator.IsStreamActive()
+	}, 2*time.Second, 250*time.Millisecond)
+
+	// Important: Close the sidecar explicitly to release LevelDB resources
+	require.NotNil(t, env.sidecar)
+	env.sidecar.Close()
+
+	// Create a new context for the remaining operations
+	newCtx, newCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(newCancel)
+
+	t.Log("Modify the Sidecar config, use illegal host endpoint")
+	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
+	// as the sidecar expects the Endpoints to be non-empty.
+	env.config.Orderer.Connection.Endpoints = []*connection.OrdererEndpoint{
+		{Endpoint: connection.Endpoint{Host: "localhost", Port: 9999}},
+	}
+
+	var err error
+	t.Log("Create a new sidecar with the new configuration")
+	env.sidecar, err = New(&env.config)
+	require.NoError(t, err)
+	t.Cleanup(env.sidecar.Close)
+
+	// The Genesis block path is empty since the test didn't set WithConfigBlock:
+	t.Log("Set the coordinator config block to use orderer AllEndpoints.")
+	env.coordinator.SetConfigTransaction(env.configBlock.Data.Data[0])
+
+	t.Log("Start the new sidecar")
+	env.start(newCtx, t, 0)
+
+	env.requireBlock(newCtx, t, 0)
+
+	// Now we can send transactions with the new configuration
+	env.sendTransactionsAndEnsureCommitted(newCtx, t, 1)
 }
 
 func TestSidecarRecovery(t *testing.T) {
@@ -407,7 +458,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	conn, err := connection.Connect(connection.NewDialConfig(&env.config.Committer.Endpoint))
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(&env.config.Committer.Endpoint))
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
 	return conn.CanonicalTarget()
@@ -542,8 +593,9 @@ func checkLastCommittedBlock(
 ) {
 	t.Helper()
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		lastBlock, err := coordinator.GetLastCommittedBlockNumber(ctx, nil)
+		lastCommittedBlock, err := coordinator.GetLastCommittedBlockNumber(ctx, nil)
 		require.NoError(ct, err)
-		require.Equal(ct, expectedBlockNumber, lastBlock.Number)
+		require.NotNil(ct, lastCommittedBlock.Block)
+		require.Equal(ct, expectedBlockNumber, lastCommittedBlock.Block.Number)
 	}, expectedProcessingTime, 50*time.Millisecond)
 }

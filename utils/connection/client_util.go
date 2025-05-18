@@ -1,8 +1,14 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package connection
 
 import (
 	"context"
-	_ "embed"
+	"fmt"
 	"io"
 	"net"
 	"regexp"
@@ -13,24 +19,32 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver/manual"
 	"google.golang.org/grpc/status"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 )
 
 const (
-	maxMsgSize = 100 * 1024 * 1024
 	// Connected indicates that the connection to the service is currently established.
 	Connected = 1.0
 	// Disconnected indicates that the connection to the service is currently not established.
 	Disconnected = 0
+
+	// defaultGrpcMaxAttempts is set to a high number to allow the timeout to dictate the retry end condition.
+	defaultGrpcMaxAttempts = 1024
+	maxMsgSize             = 100 * 1024 * 1024
+	scResolverSchema       = "sc.connection"
 )
 
 type (
 	// DialConfig represents the dial options to create a connection.
 	DialConfig struct {
-		WithAddress
+		Address  string
 		DialOpts []grpc.DialOption
+		// Resolver may be updated to update the connection's endpoints.
+		Resolver *manual.Resolver
 	}
 
 	// WithAddress represents any type that can generate an address.
@@ -41,42 +55,87 @@ type (
 
 var logger = logging.New("connection")
 
-// GrpcConfig defines the retry policy for a gRPC client connection.
-// This policy differs from grpc.WithBlock(), which only blocks during the initial connection.
-// The retry policy applies to all subsequent gRPC calls made through the client connection.
-// Our GRPC retry policy is applicable only for the following status codes:
-//
-//	(1) UNAVAILABLE	The service is currently unavailable (e.g., transient network issue, server down).
-//	(2) DEADLINE_EXCEEDED	Operation took too long (deadline passed).
-//	(3) RESOURCE_EXHAUSTED	Some resource (e.g., quota) has been exhausted; the operation cannot proceed.
-//
-//go:embed grpc_config.json
-var GrpcConfig string
+// DefaultGrpcRetryProfile defines the retry policy for a gRPC client connection.
+var DefaultGrpcRetryProfile RetryProfile
 
 var knownConnectionIssues = regexp.MustCompile(`(?i)EOF|connection\s+refused|closed\s+network\s+connection`)
 
-// NewDialConfig creates the default dial config with new credentials.
-func NewDialConfig(endpoint WithAddress) *DialConfig {
-	return NewDialConfigWithCreds(endpoint, insecure.NewCredentials())
+// NewLoadBalancedDialConfig creates a dial config with load balancing between the endpoints
+// in the given config.
+func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
+	tlsCredentials, err := tlsFromConnectionConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return newLoadBalancedDialConfig(config.Endpoints, tlsCredentials, config.Retry), nil
 }
 
-// NewDialConfigWithCreds creates the default dial config with the given credentials.
-func NewDialConfigWithCreds(endpoint WithAddress, creds credentials.TransportCredentials) *DialConfig {
+// NewDialConfigPerEndpoint creates a list of dial configs; one for each endpoint in the given config.
+func NewDialConfigPerEndpoint(config *ClientConfig) ([]*DialConfig, error) {
+	tlsCredentials, err := tlsFromConnectionConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*DialConfig, len(config.Endpoints))
+	for i, e := range config.Endpoints {
+		ret[i] = newDialConfig(e.Address(), tlsCredentials, config.Retry)
+	}
+	return ret, err
+}
+
+// NewInsecureDialConfig creates the default dial config with insecure credentials.
+func NewInsecureDialConfig(endpoint WithAddress) *DialConfig {
+	return newDialConfig(endpoint.Address(), insecure.NewCredentials(), &DefaultGrpcRetryProfile)
+}
+
+// NewInsecureLoadBalancedDialConfig creates the default dial config with insecure credentials.
+func NewInsecureLoadBalancedDialConfig(endpoint []*Endpoint) *DialConfig {
+	return newLoadBalancedDialConfig(endpoint, insecure.NewCredentials(), &DefaultGrpcRetryProfile)
+}
+
+// newLoadBalancedDialConfig creates a dial config with the default values for multiple endpoints.
+func newLoadBalancedDialConfig(
+	endpoint []*Endpoint, creds credentials.TransportCredentials, retry *RetryProfile,
+) *DialConfig {
+	resolverEndpoints := make([]resolver.Endpoint, len(endpoint))
+	for i, e := range endpoint {
+		resolverEndpoints[i] = resolver.Endpoint{Addresses: []resolver.Address{{Addr: e.Address()}}}
+	}
+	r := manual.NewBuilderWithScheme(scResolverSchema)
+	r.UpdateState(resolver.State{Endpoints: resolverEndpoints})
+	dialConfig := newDialConfig(fmt.Sprintf("%s:///%s", r.Scheme(), "method"), creds, retry)
+	dialConfig.Resolver = r
+	dialConfig.DialOpts = append(dialConfig.DialOpts, grpc.WithResolvers(r))
+	return dialConfig
+}
+
+// newDialConfig creates a dial config with the default values.
+func newDialConfig(
+	address string, creds credentials.TransportCredentials, retry *RetryProfile,
+) *DialConfig {
 	return &DialConfig{
-		WithAddress: endpoint,
+		Address: address,
 		DialOpts: []grpc.DialOption{
+			grpc.WithDefaultServiceConfig(retry.MakeGrpcRetryPolicyJSON()),
 			grpc.WithTransportCredentials(creds),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(maxMsgSize),
 				grpc.MaxCallSendMsgSize(maxMsgSize),
 			),
+			grpc.WithMaxCallAttempts(defaultGrpcMaxAttempts),
 		},
 	}
 }
 
+// SetRetryProfile replaces the GRPC retry policy.
+func (d *DialConfig) SetRetryProfile(profile *RetryProfile) {
+	// Index 0 is reserved for the GRPC retry policy.
+	d.DialOpts[0] = grpc.WithDefaultServiceConfig(profile.MakeGrpcRetryPolicyJSON())
+}
+
 // CloseConnections calls [closer.Close()] for all the given connections and return the close errors.
 func CloseConnections[T io.Closer](connections ...T) error {
-	logger.Infof("Closing %d connections.\n", len(connections))
+	logger.Infof("Closing %d connections.", len(connections))
 	errs := make([]error, len(connections))
 	for i, closer := range connections {
 		errs[i] = filterAcceptableCloseErr(closer.Close())
@@ -116,11 +175,9 @@ func filterAcceptableCloseErr(err error) error {
 // Connect creates a new [grpc.ClientConn] with the given [DialConfig].
 // It will not attempt to create a connection with the remote.
 func Connect(config *DialConfig) (*grpc.ClientConn, error) {
-	address := config.Address()
-	config.DialOpts = append(config.DialOpts, grpc.WithDefaultServiceConfig(GrpcConfig))
-	cc, err := grpc.NewClient(address, config.DialOpts...)
+	cc, err := grpc.NewClient(config.Address, config.DialOpts...)
 	if err != nil {
-		logger.Errorf("Error connecting to %s: %v", address, err)
+		logger.Errorf("Error openning connection to %s: %v", config.Address, err)
 		return nil, errors.Wrap(err, "error connecting to grpc")
 	}
 	return cc, nil
@@ -134,7 +191,7 @@ func OpenConnections[T WithAddress](
 	logger.Infof("Opening connections to %d endpoints: %v.\n", len(endpoints), endpoints)
 	connections := make([]*grpc.ClientConn, len(endpoints))
 	for i, endpoint := range endpoints {
-		conn, err := Connect(NewDialConfigWithCreds(endpoint, transportCredentials))
+		conn, err := Connect(newDialConfig(endpoint.Address(), transportCredentials, &DefaultGrpcRetryProfile))
 		if err != nil {
 			logger.Errorf("Error connecting: %v", err)
 			CloseConnectionsLog(connections[:i]...)

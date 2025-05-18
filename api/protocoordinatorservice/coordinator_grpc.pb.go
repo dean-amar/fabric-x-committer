@@ -35,7 +35,7 @@ const (
 type CoordinatorClient interface {
 	BlockProcessing(ctx context.Context, opts ...grpc.CallOption) (Coordinator_BlockProcessingClient, error)
 	SetLastCommittedBlockNumber(ctx context.Context, in *protoblocktx.BlockInfo, opts ...grpc.CallOption) (*Empty, error)
-	GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.BlockInfo, error)
+	GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.LastCommittedBlock, error)
 	GetNextExpectedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.BlockInfo, error)
 	GetTransactionsStatus(ctx context.Context, in *protoblocktx.QueryStatus, opts ...grpc.CallOption) (*protoblocktx.TransactionsStatus, error)
 	GetConfigTransaction(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.ConfigTransaction, error)
@@ -90,8 +90,8 @@ func (c *coordinatorClient) SetLastCommittedBlockNumber(ctx context.Context, in 
 	return out, nil
 }
 
-func (c *coordinatorClient) GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.BlockInfo, error) {
-	out := new(protoblocktx.BlockInfo)
+func (c *coordinatorClient) GetLastCommittedBlockNumber(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*protoblocktx.LastCommittedBlock, error) {
+	out := new(protoblocktx.LastCommittedBlock)
 	err := c.cc.Invoke(ctx, Coordinator_GetLastCommittedBlockNumber_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func (c *coordinatorClient) NumberOfWaitingTransactionsForStatus(ctx context.Con
 type CoordinatorServer interface {
 	BlockProcessing(Coordinator_BlockProcessingServer) error
 	SetLastCommittedBlockNumber(context.Context, *protoblocktx.BlockInfo) (*Empty, error)
-	GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.BlockInfo, error)
+	GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.LastCommittedBlock, error)
 	GetNextExpectedBlockNumber(context.Context, *Empty) (*protoblocktx.BlockInfo, error)
 	GetTransactionsStatus(context.Context, *protoblocktx.QueryStatus) (*protoblocktx.TransactionsStatus, error)
 	GetConfigTransaction(context.Context, *Empty) (*protoblocktx.ConfigTransaction, error)
@@ -159,7 +159,7 @@ func (UnimplementedCoordinatorServer) BlockProcessing(Coordinator_BlockProcessin
 func (UnimplementedCoordinatorServer) SetLastCommittedBlockNumber(context.Context, *protoblocktx.BlockInfo) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLastCommittedBlockNumber not implemented")
 }
-func (UnimplementedCoordinatorServer) GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.BlockInfo, error) {
+func (UnimplementedCoordinatorServer) GetLastCommittedBlockNumber(context.Context, *Empty) (*protoblocktx.LastCommittedBlock, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLastCommittedBlockNumber not implemented")
 }
 func (UnimplementedCoordinatorServer) GetNextExpectedBlockNumber(context.Context, *Empty) (*protoblocktx.BlockInfo, error) {

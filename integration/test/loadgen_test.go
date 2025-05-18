@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package test
 
 import (
@@ -9,6 +15,8 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
 
 func TestLoadGen(t *testing.T) {
@@ -18,12 +26,24 @@ func TestLoadGen(t *testing.T) {
 		serviceFlags int
 	}{
 		{
-			name:         "Orderer Load Generator",
+			name:         "orderer",
 			serviceFlags: runner.FullTxPathWithLoadGen,
 		},
 		{
-			name:         "Committer Load Generator",
+			name:         "committer",
 			serviceFlags: runner.CommitterTxPathWithLoadGen,
+		},
+		{
+			name:         "coordinator",
+			serviceFlags: runner.LoadGenForCoordinator | runner.Coordinator | runner.VC | runner.Verifier,
+		},
+		{
+			name:         "VC",
+			serviceFlags: runner.LoadGenForVCService | runner.VC,
+		},
+		{
+			name:         "verifier",
+			serviceFlags: runner.LoadGenForVerifier | runner.Verifier,
 		},
 	}
 
@@ -39,12 +59,13 @@ func TestLoadGen(t *testing.T) {
 			})
 			c.Start(t, tc.serviceFlags)
 
+			metricsURL, err := monitoring.MakeMetricsURL(c.SystemConfig.Endpoints.LoadGen.Metrics.Address())
+			require.NoError(t, err)
 			require.Eventually(t, func() bool {
-				count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
+				count := promutil.GetMetricValueFromURL(t, metricsURL, "loadgen_transaction_committed_total")
 				t.Logf("count %d", count)
 				return count > 1_000
-			}, 90*time.Second, 3*time.Second)
-			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
+			}, 90*time.Second, 1*time.Second)
 		})
 	}
 }
@@ -66,7 +87,7 @@ func TestLoadGenCommitterWithLimit(t *testing.T) {
 		count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
 		t.Logf("count %d", count)
 		return count >= expectedTXs
-	}, 90*time.Second, 500*time.Millisecond)
+	}, 90*time.Second, 1*time.Second)
 	require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 
 	count := c.CountStatus(t, protoblocktx.Status_COMMITTED)

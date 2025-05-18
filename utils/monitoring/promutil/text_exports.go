@@ -1,9 +1,17 @@
 package promutil
 
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,25 +22,43 @@ import (
 )
 
 // CheckMetrics checks the metrics endpoint for the expected metrics.
-func CheckMetrics(t *testing.T, client *http.Client, url string, expectedMetrics []string) {
+func CheckMetrics(t *testing.T, url string, expectedMetrics ...string) {
 	t.Helper()
-	resp, err := client.Get(url)
-	require.NoError(t, err)
-
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	bys, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	metricsOutput := string(bys)
-
+	metricsOutput := getMetricsFromURL(t, url)
+	t.Log(metricsOutput)
 	for _, expected := range expectedMetrics {
 		require.Contains(t, metricsOutput, expected)
 	}
+}
+
+// GetMetricValueFromURL reads the metrics endpoint and fetch the value of a specific metric.
+func GetMetricValueFromURL(t *testing.T, url, metricName string) int {
+	t.Helper()
+	metricsOutput := getMetricsFromURL(t, url)
+	r, err := regexp.Compile(`(?m)^` + metricName + `\s+([\d.]+)`)
+	require.NoError(t, err)
+	m := r.FindStringSubmatch(metricsOutput)
+	val, err := strconv.ParseFloat(m[1], 64)
+	require.NoError(t, err)
+	return int(math.Round(val))
+}
+
+func getMetricsFromURL(t *testing.T, url string) string {
+	t.Helper()
+	client := &http.Client{}
+	defer client.CloseIdleConnections()
+	var val string
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := client.Get(url)
+		require.NoError(ct, err)
+		require.NotNil(ct, resp)
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+		b, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(ct, resp.Body.Close())
+		val = string(b)
+	}, time.Minute, 100*time.Millisecond)
+	return val
 }
 
 // GetMetricValue returns the value of a prometheus metric.

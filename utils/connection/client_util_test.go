@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package connection_test
 
 import (
@@ -5,93 +11,165 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sync"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/status"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/mock"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
+//nolint:paralleltest // modifies grpc logger.
 func TestGRPCRetry(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel()
+	// We start GRPC logging for this test to allow visibility into the retry process.
+	// This change prevents us from running this test in parallel to others.
+	grpclog.SetLoggerV2(grpclog.NewLoggerV2(os.Stderr, io.Discard, os.Stderr))
+	t.Cleanup(func() {
+		grpclog.SetLoggerV2(grpclog.NewLoggerV2(io.Discard, io.Discard, os.Stderr))
+	})
 
-	regService := func(server *grpc.Server, _ int) {
+	t.Log("Starting service")
+	regService := func(server *grpc.Server) {
 		protovcservice.RegisterValidationAndCommitServiceServer(server, mock.NewMockVcService())
 	}
+	serverConfig := connection.NewLocalHostServer()
 
-	vcGrpc := test.StartGrpcServersForTest(ctx, t, 1, regService)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	vcGrpc := test.RunGrpcServerForTest(ctx, t, serverConfig, regService)
 
-	conn, err := connection.Connect(connection.NewDialConfig(&vcGrpc.Configs[0].Endpoint))
+	t.Log("Setup dial config")
+	dialConfig := connection.NewInsecureDialConfig(&serverConfig.Endpoint)
+
+	t.Log("Connecting")
+	conn, err := connection.Connect(dialConfig)
 	require.NoError(t, err)
-
-	connStatus := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "conn_status",
-		Help: "connection status: 0 --- disconnected, 1 --- connected.",
-	}, []string{"target"})
-
+	t.Cleanup(func() {
+		assert.NoError(t, conn.Close())
+	})
 	client := protovcservice.NewValidationAndCommitServiceClient(conn)
+
+	t.Log("Sanity check")
 	_, err = client.GetNamespacePolicies(ctx, nil)
 	require.NoError(t, err)
 
-	failureCount := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "failure_total",
-		Help: "total number of connection failures.",
-	}, []string{"target"})
-
-	waitForConnection(ctx, conn, connStatus, failureCount)
-
-	label := []string{conn.CanonicalTarget()}
-	connStatusM, err := connStatus.GetMetricWithLabelValues(label...)
-	require.NoError(t, err)
-	promutil.RequireIntMetricValue(t, connection.Connected, connStatusM)
-
-	connFailureM, err := failureCount.GetMetricWithLabelValues(label...)
-	require.NoError(t, err)
-	promutil.RequireIntMetricValue(t, 0, connFailureM)
-
-	// stopping the grpc server
+	t.Log("Stopping the grpc server")
 	cancel()
-	vcGrpc.Servers[0].Stop()
-	test.CheckServerStopped(t, vcGrpc.Configs[0].Endpoint.Address())
+	vcGrpc.Stop()
+	test.CheckServerStopped(t, serverConfig.Endpoint.Address())
 
-	_, err = client.GetNamespacePolicies(ctx, nil)
-	require.Error(t, err)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	ctx2, cancel2 := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel2()
+	// We override the context to avoid mistakenly using the previous one.
+	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
 	go func() {
-		defer wg.Done()
-		waitForConnection(ctx2, conn, connStatus, failureCount)
+		time.Sleep(30 * time.Second)
+		t.Log("Service is starting")
+		test.RunGrpcServerForTest(ctx, t, serverConfig, regService)
 	}()
 
-	time.Sleep(5 * time.Second)
+	t.Log("Attempting to connect with default GRPC config")
+	_, err = client.GetNamespacePolicies(ctx, nil)
+	require.NoError(t, err)
 
-	promutil.RequireIntMetricValue(t, 1, connFailureM)
-	promutil.RequireIntMetricValue(t, connection.Disconnected, connStatusM)
+	dialConfig.SetRetryProfile(&connection.RetryProfile{MaxElapsedTime: 2 * time.Second})
+	conn2, err := connection.Connect(dialConfig)
+	require.NoError(t, err)
+	client2 := protovcservice.NewValidationAndCommitServiceClient(conn2)
 
-	test.StartGrpcServersWithConfigForTest(ctx2, t, vcGrpc.Configs, regService)
+	t.Log("Sanity check with lower timeout")
+	_, err = client2.GetNamespacePolicies(ctx, nil)
+	require.NoError(t, err)
 
-	wg.Wait()
-	promutil.RequireIntMetricValue(t, connection.Connected, connStatusM)
+	t.Log("Stopping the grpc server")
+	cancel()
+	vcGrpc.Stop()
+	test.CheckServerStopped(t, serverConfig.Endpoint.Address())
+
+	// We override the context to avoid mistakenly using the previous one.
+	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+
+	go func() {
+		time.Sleep(30 * time.Second)
+		t.Log("Service is starting")
+		test.RunGrpcServerForTest(ctx, t, serverConfig, regService)
+	}()
+
+	t.Log("Attempting to connect again with lower timeout")
+	_, err = client2.GetNamespacePolicies(ctx, nil)
+	require.Error(t, err)
+}
+
+//nolint:paralleltest // modifies grpc logger.
+func TestGRPCRetryMultiEndpoints(t *testing.T) {
+	// We start GRPC logging for this test to allow visibility into the retry process.
+	// This change prevents us from running this test in parallel to others.
+	grpclog.SetLoggerV2(grpclog.NewLoggerV2(os.Stderr, io.Discard, os.Stderr))
+	t.Cleanup(func() {
+		grpclog.SetLoggerV2(grpclog.NewLoggerV2(io.Discard, io.Discard, os.Stderr))
+	})
+
+	t.Log("Starting service")
+	regService := func(server *grpc.Server) {
+		protovcservice.RegisterValidationAndCommitServiceServer(server, mock.NewMockVcService())
+	}
+	serverConfig := connection.NewLocalHostServer()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	test.RunGrpcServerForTest(ctx, t, serverConfig, regService)
+
+	t.Log("Connecting")
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(&serverConfig.Endpoint))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, conn.Close())
+	})
+	client := protovcservice.NewValidationAndCommitServiceClient(conn)
+
+	t.Log("Sanity check")
+	_, err = client.GetNamespacePolicies(ctx, nil)
+	require.NoError(t, err)
+
+	t.Log("Creating fake service address")
+	fakeServerConfig := connection.NewLocalHostServer()
+	l, err := fakeServerConfig.Listener()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		connection.CloseConnectionsLog(l)
+	})
+
+	t.Log("Setup dial config for multiple endpoints")
+	fakeDialConfig := connection.NewInsecureLoadBalancedDialConfig([]*connection.Endpoint{
+		// We put the fake one first to ensure we iterate over it.
+		&fakeServerConfig.Endpoint,
+		&serverConfig.Endpoint,
+	})
+
+	t.Log("Connecting to multiple endpoints")
+	multiConn, err := connection.Connect(fakeDialConfig)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, multiConn.Close())
+	})
+	multiClient := protovcservice.NewValidationAndCommitServiceClient(multiConn)
+	for i := range 100 {
+		t.Logf("Fetch attempt: %d", i)
+		_, err = multiClient.GetNamespacePolicies(ctx, nil)
+		require.NoError(t, err)
+	}
 }
 
 type fakeBroadcastDeliver struct{}
@@ -157,7 +235,7 @@ func newFilterTestEnv(t *testing.T) *filterTestEnv {
 	env.server = test.RunGrpcServerForTest(serviceCtx, t, env.serverConf, func(server *grpc.Server) {
 		peer.RegisterDeliverServer(server, env.service)
 	})
-	conn, err := connection.Connect(connection.NewDialConfig(&env.serverConf.Endpoint))
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(&env.serverConf.Endpoint))
 	require.NoError(t, err)
 	env.client = peer.NewDeliverClient(conn)
 
@@ -300,37 +378,4 @@ func TestCloseConnections(t *testing.T) {
 		}
 		require.NoError(t, connection.CloseConnections(closers...))
 	})
-}
-
-func waitForConnection(
-	ctx context.Context,
-	conn *grpc.ClientConn,
-	connStatus *prometheus.GaugeVec,
-	failureCount *prometheus.CounterVec,
-) {
-	label := []string{conn.CanonicalTarget()}
-	defer func() {
-		promutil.SetGaugeVec(connStatus, label, connection.Connected)
-	}()
-
-	if conn.GetState() == connectivity.Ready {
-		return
-	}
-
-	promutil.AddToCounterVec(failureCount, label, 1)
-	promutil.SetGaugeVec(connStatus, label, connection.Disconnected)
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			conn.Connect()
-			if conn.GetState() == connectivity.Ready {
-				return
-			}
-		}
-	}
 }

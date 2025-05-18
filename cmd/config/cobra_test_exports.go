@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package config
 
 import (
@@ -45,17 +51,19 @@ func StartDefaultSystem(t *testing.T) SystemConfig {
 	require.NoError(t, err)
 	connection.CloseConnectionsLog(listen)
 	return SystemConfig{
-		ServerEndpoint: &server.Endpoint,
+		ServiceEndpoints: ServiceEndpoints{
+			Server: &server.Endpoint,
+		},
 		Endpoints: SystemEndpoints{
-			Database:    conn.Endpoints,
-			Verifier:    []*connection.Endpoint{&verifier.Configs[0].Endpoint},
-			VCService:   []*connection.Endpoint{&vc.Configs[0].Endpoint},
-			Orderer:     []*connection.Endpoint{&orderer.Configs[0].Endpoint},
-			Coordinator: &coordinator.Configs[0].Endpoint,
+			Verifier:    []ServiceEndpoints{{Server: &verifier.Configs[0].Endpoint}},
+			VCService:   []ServiceEndpoints{{Server: &vc.Configs[0].Endpoint}},
+			Orderer:     []ServiceEndpoints{{Server: &orderer.Configs[0].Endpoint}},
+			Coordinator: ServiceEndpoints{Server: &coordinator.Configs[0].Endpoint},
 		},
 		DB: DatabaseConfig{
 			Name:        conn.Database,
 			LoadBalance: false,
+			Endpoints:   conn.Endpoints,
 		},
 		LedgerPath: t.TempDir(),
 		ChannelID:  "channel1",

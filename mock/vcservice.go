@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package mock
 
 import (
@@ -11,7 +17,6 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
 )
@@ -22,7 +27,7 @@ type VcService struct {
 	protovcservice.ValidationAndCommitServiceServer
 	txBatchChan        chan *protovcservice.TransactionBatch
 	numBatchesReceived atomic.Uint32
-	lastCommittedBlock atomic.Int64
+	lastCommittedBlock atomic.Pointer[protoblocktx.BlockInfo]
 	txsStatus          *fifoCache[*protoblocktx.StatusWithHeight]
 	txsStatusMu        sync.Mutex
 	// MockFaultyNodeDropSize allows mocking a faulty node by dropping some TXs.
@@ -31,12 +36,10 @@ type VcService struct {
 
 // NewMockVcService returns a new VcService.
 func NewMockVcService() *VcService {
-	m := &VcService{
+	return &VcService{
 		txBatchChan: make(chan *protovcservice.TransactionBatch),
 		txsStatus:   newFifoCache[*protoblocktx.StatusWithHeight](defaultTxStatusStorageSize),
 	}
-	m.lastCommittedBlock.Store(-1)
-	return m
 }
 
 // SetLastCommittedBlockNumber set the last committed block number in the database/ledger.
@@ -44,7 +47,7 @@ func (v *VcService) SetLastCommittedBlockNumber(
 	_ context.Context,
 	lastBlock *protoblocktx.BlockInfo,
 ) (*protovcservice.Empty, error) {
-	v.lastCommittedBlock.Store(int64(lastBlock.Number)) //nolint:gosec
+	v.lastCommittedBlock.Store(lastBlock)
 	return nil, nil
 }
 
@@ -52,11 +55,8 @@ func (v *VcService) SetLastCommittedBlockNumber(
 func (v *VcService) GetLastCommittedBlockNumber(
 	_ context.Context,
 	_ *protovcservice.Empty,
-) (*protoblocktx.BlockInfo, error) {
-	if v.lastCommittedBlock.Load() == -1 {
-		return nil, grpcerror.WrapNotFound(vc.ErrMetadataEmpty)
-	}
-	return &protoblocktx.BlockInfo{Number: uint64(v.lastCommittedBlock.Load())}, nil //nolint:gosec
+) (*protoblocktx.LastCommittedBlock, error) {
+	return &protoblocktx.LastCommittedBlock{Block: v.lastCommittedBlock.Load()}, nil
 }
 
 // GetNamespacePolicies is a mock implementation of the protovcservice.GetNamespacePolicies.

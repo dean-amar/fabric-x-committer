@@ -1,15 +1,19 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 server:
   endpoint: :9001
 monitoring:
   server:
     endpoint: :2119
 
-sign-verifier:
-  server:
-    - endpoint: signature-verifier:5001
+verifier:
+  endpoints:
+    - signature-verifier:5001
 validator-committer:
-  server:
-    - endpoint: validator-persister:6001
+  endpoints:
+    - validator-persister:6001
 
 dependency-graph:
   num-of-local-dep-constructors: 1

@@ -1,12 +1,16 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 server:
-  endpoint: {{ .ServerEndpoint | default "localhost:0" }}
+  endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
 monitoring:
   server:
-    endpoint: {{ .MetricsEndpoint | default "localhost:0" }}
+    endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
 
 database:
   endpoints:
-    {{- range .Endpoints.Database }}
+    {{- range .DB.Endpoints }}
     - {{ . }}
     {{- end }}
   username: "yugabyte"

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package dependencygraph
 
 import (
@@ -56,6 +62,7 @@ func newLocalDependencyConstructor(
 	outgoingTxsNode chan<- *transactionNodeBatch,
 	metrics *perfMetrics,
 ) *localDependencyConstructor {
+	logger.Info("Initializing new localDependencyConstructor")
 	return &localDependencyConstructor{
 		incomingTransactions:     incomingTxs,
 		outgoingTransactionsNode: outgoingTxsNode,
@@ -66,6 +73,7 @@ func newLocalDependencyConstructor(
 }
 
 func (p *localDependencyConstructor) run(ctx context.Context, numWorkers int) {
+	logger.Infof("Starting localDependencyConstructor with %d workers", numWorkers)
 	g, gCtx := errgroup.WithContext(ctx)
 	for range numWorkers {
 		g.Go(func() error {

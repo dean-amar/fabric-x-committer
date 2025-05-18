@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package test
 
 import (
@@ -39,6 +45,17 @@ func FailHandler(t *testing.T) {
 		t.Errorf("received error message: %s", message)
 		t.FailNow()
 	})
+}
+
+// ServerToClientConfig is used to create client configuration from existing server(s).
+func ServerToClientConfig(servers ...*connection.ServerConfig) *connection.ClientConfig {
+	endpoints := make([]*connection.Endpoint, len(servers))
+	for i, server := range servers {
+		endpoints[i] = &server.Endpoint
+	}
+	return &connection.ClientConfig{
+		Endpoints: endpoints,
+	}
 }
 
 // RunGrpcServerForTest starts a GRPC server using a register method.
@@ -154,7 +171,7 @@ func RunServiceForTest(
 
 	initCtx, initCancel := context.WithTimeout(dCtx, 2*time.Minute)
 	tb.Cleanup(initCancel)
-	require.True(tb, waitFunc(initCtx))
+	require.True(tb, waitFunc(initCtx), "service is not ready")
 	return ready
 }
 

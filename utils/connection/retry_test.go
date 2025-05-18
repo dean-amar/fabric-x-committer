@@ -1,6 +1,13 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package connection
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -118,6 +125,34 @@ func TestExecute(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGrpcRetryJSON(t *testing.T) {
+	t.Parallel()
+	templateExpectedJSON := `
+	{
+	  "loadBalancingConfig": [{"round_robin": {}}],
+	  "methodConfig": [{
+		"name": [{}],
+		"retryPolicy": {
+		  "maxAttempts": 1024,
+		  "backoffMultiplier": 1.5,
+		  "initialBackoff": "0.5s",
+		  "maxBackoff": "10.0s",
+		  "retryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"]
+		},
+		"timeout": "%d.0s"
+	  }]
+	}`
+	profile := RetryProfile{}
+	jsonRaw := profile.MakeGrpcRetryPolicyJSON()
+	require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, 900), jsonRaw)
+
+	profile = RetryProfile{
+		MaxElapsedTime: 15 * time.Second,
+	}
+	jsonRaw = profile.MakeGrpcRetryPolicyJSON()
+	require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, 15), jsonRaw)
 }
 
 // makeOp returns an operation and a pointer to a call counter.

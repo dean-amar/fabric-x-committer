@@ -1,3 +1,7 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 monitoring:
   server:
     endpoint: :2110
@@ -11,14 +15,15 @@ monitoring:
       bucket-count: 1000
 
 orderer-client:
-  sidecar-endpoint: sidecar:5050
+  sidecar-endpoint: sidecar:4001
   orderer:
     connection:
       endpoints:
-        - broadcast,deliver,mock-ordering-service:4001
+        - broadcast,deliver,ordering-service:7050
     consensus-type: BFT
     channel-id: channel
-  broadcast-parallelism: 50
+  # We set low values to reduce the CPU load during tests.
+  broadcast-parallelism: 1
 
 load-profile:
   key:
@@ -39,15 +44,16 @@ load-profile:
   conflicts:
     invalid-signatures: 0.1
   seed: 12345
-  workers: 50
+  # We set low values to reduce the CPU load during tests.
+  workers: 1
 
 stream:
   rate-limit:
     endpoint: :6997
-    initial-limit: 1000
-  # We set low values for the buffer and batch to reduce the CPU load during tests.
-  buffers-size: 1_000
-  gen-batch: 1_000
+    initial-limit: 1_000
+  # We set low values to reduce the CPU load during tests.
+  buffers-size: 10
+  gen-batch: 10
 generate:
   namespaces: true
   load: true

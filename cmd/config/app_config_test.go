@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package config
 
 import (
@@ -120,15 +126,11 @@ func TestReadConfigCoordinator(t *testing.T) {
 		expectedConfig: &coordinator.Config{
 			Server:     makeServer("", 9001),
 			Monitoring: makeMonitoring("", 2119),
-			SignVerifierConfig: &coordinator.SignVerifierConfig{
-				ServerConfig: []*connection.ServerConfig{
-					{Endpoint: *makeEndpoint("signature-verifier", 5001)},
-				},
+			VerifierConfig: connection.ClientConfig{
+				Endpoints: []*connection.Endpoint{makeEndpoint("signature-verifier", 5001)},
 			},
-			ValidatorCommitterConfig: &coordinator.ValidatorCommitterConfig{
-				ServerConfig: []*connection.ServerConfig{
-					makeServer("validator-persister", 6001),
-				},
+			ValidatorCommitterConfig: connection.ClientConfig{
+				Endpoints: []*connection.Endpoint{makeEndpoint("validator-persister", 6001)},
 			},
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors:       1,
@@ -327,17 +329,17 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarEndpoint: makeEndpoint("sidecar", 5050),
+					SidecarEndpoint: makeEndpoint("sidecar", 4001),
 					Orderer: broadcastdeliver.Config{
 						Connection: broadcastdeliver.ConnectionConfig{
 							Endpoints: connection.NewOrdererEndpoints(
-								0, "", makeServer("mock-ordering-service", 4001),
+								0, "", makeServer("ordering-service", 7050),
 							),
 						},
 						ChannelID:     "channel",
 						ConsensusType: "BFT",
 					},
-					BroadcastParallelism: 50,
+					BroadcastParallelism: 1,
 				},
 			},
 			LoadProfile: &workload.Profile{
@@ -360,15 +362,15 @@ func TestReadConfigLoadGen(t *testing.T) {
 					InvalidSignatures: 0.1,
 				},
 				Seed:    12345,
-				Workers: 50,
+				Workers: 1,
 			},
 			Stream: &workload.StreamOptions{
 				RateLimit: &workload.LimiterConfig{
 					Endpoint:     *makeEndpoint("", 6997),
 					InitialLimit: 1000,
 				},
-				BuffersSize: 1_000,
-				GenBatch:    1_000,
+				BuffersSize: 10,
+				GenBatch:    10,
 			},
 			Generate: adapters.Phases{
 				Namespaces: true,

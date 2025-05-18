@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package sidecar
 
 import (
@@ -42,7 +48,7 @@ func newRelayTestEnv(t *testing.T) *relayTestEnv {
 		metrics,
 	)
 
-	conn, err := connection.Connect(connection.NewDialConfig(&coordinatorEndpoint))
+	conn, err := connection.Connect(connection.NewInsecureDialConfig(&coordinatorEndpoint))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, conn.Close()) })
 

@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package coordinator
 
 import (
@@ -46,7 +52,7 @@ func newVcMgrTestEnv(t *testing.T, numVCService int) *vcMgrTestEnv {
 
 	vcm := newValidatorCommitterManager(
 		&validatorCommitterManagerConfig{
-			serversConfig:                  servers.Configs,
+			clientConfig:                   test.ServerToClientConfig(servers.Configs...),
 			incomingTxsForValidationCommit: inputTxs,
 			outgoingValidatedTxsNode:       outputTxs,
 			outgoingTxsStatus:              outputTxsStatus,

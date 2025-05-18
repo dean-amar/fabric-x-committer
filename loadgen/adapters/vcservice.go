@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package adapters
 
 import (
@@ -31,6 +37,24 @@ func NewVCAdapter(config *VCClientConfig, res *ClientResources) *VcAdapter {
 
 // RunWorkload applies load on the VC.
 func (c *VcAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
+	commonConn, connErr := connection.Connect(connection.NewInsecureLoadBalancedDialConfig(c.config.Endpoints))
+	if connErr != nil {
+		return errors.Wrapf(connErr, "failed to create connection to validator persisters")
+	}
+	commonClient := protovcservice.NewValidationAndCommitServiceClient(commonConn)
+	_, setupError := commonClient.SetupSystemTablesAndNamespaces(ctx, nil)
+	if setupError != nil {
+		return errors.Wrap(setupError, "failed to setup system tables and namespaces")
+	}
+	if lastCommittedBlock, getErr := commonClient.GetLastCommittedBlockNumber(ctx, nil); getErr != nil {
+		// We do not return error as we can proceed assuming no blocks were committed.
+		logger.Infof("failed getting last committed block number: %v", getErr)
+	} else if lastCommittedBlock.Block != nil {
+		c.nextBlockNum.Store(lastCommittedBlock.Block.Number + 1)
+	} else {
+		c.nextBlockNum.Store(0)
+	}
+
 	connections, connErr := connection.OpenConnections(c.config.Endpoints, insecure.NewCredentials())
 	if connErr != nil {
 		return errors.Wrap(connErr, "failed opening connection to vc-service")
@@ -38,21 +62,8 @@ func (c *VcAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
 	defer connection.CloseConnectionsLog(connections...)
 
 	streams := make([]protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient, 0, len(connections))
-	for i, conn := range connections {
+	for _, conn := range connections {
 		client := protovcservice.NewValidationAndCommitServiceClient(conn)
-		_, err := client.SetupSystemTablesAndNamespaces(ctx, nil)
-		if err != nil {
-			return errors.Wrap(err, "failed to setup system tables and namespaces")
-		}
-		if i == 0 {
-			if lastBlockNum, err := client.GetLastCommittedBlockNumber(ctx, nil); err != nil {
-				// We do not return error as we can proceed assuming no blocks were committed.
-				logger.Infof("failed getting last committed block number: %v", err)
-			} else {
-				c.nextBlockNum.Store(lastBlockNum.Number + 1)
-			}
-		}
-
 		logger.Info("Opening VC stream")
 		stream, streamErr := client.StartValidateAndCommitStream(ctx)
 		if streamErr != nil {

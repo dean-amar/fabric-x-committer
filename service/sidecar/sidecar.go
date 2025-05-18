@@ -1,3 +1,9 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package sidecar
 
 import (
@@ -89,7 +95,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	logger.Infof("Create coordinator client and connect to %s\n", &s.config.Committer.Endpoint)
-	conn, connErr := connection.Connect(connection.NewDialConfig(&s.config.Committer.Endpoint))
+	conn, connErr := connection.Connect(connection.NewInsecureDialConfig(&s.config.Committer.Endpoint))
 	if connErr != nil {
 		return fmt.Errorf("failed to connect to coordinator: %w", connErr)
 	}

@@ -1,3 +1,7 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 #########################
 # Makefile Targets Summary
 #########################
@@ -71,11 +75,12 @@ MAKEFLAGS += --jobs=16
 # Quickstart
 #########################
 
-DB_PACKAGES_REGEXP = .*/scalable-committer/(service/(coordinator|vc|query)|loadgen|cmd)
+CORE_DB_PACKAGES_REGEXP = .*/scalable-committer/service/(vc|query)
+REQUIRES_DB_PACKAGES_REGEXP = .*/scalable-committer/(service/coordinator|loadgen|cmd)
 HEAVY_PACKAGES_REGEXP = .*/scalable-committer/(docker|integration)
 
+# Excludes integration and container tests. Use `make integration-test` and `make container-test`.
 test: build
-	@# Excludes integration and container tests. Use `make integration-test` and `make container-test`.
 	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")
 
 integration-test: build
@@ -87,11 +92,17 @@ container-test: build-test-node-image build-mock-orderer-image
 test-package-%: build
 	$(go_cmd) test -timeout 30m -v ./$*/...
 
-test-db-packages: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(DB_PACKAGES_REGEXP)")
+# Tests for components that directly talk to the DB, where different DBs might affect behaviour.
+test-core-db: build
+	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(CORE_DB_PACKAGES_REGEXP)")
 
-test-non-db-packages: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
+# Tests for components that depend on the DB layer, but are agnostic to the specific DB used.
+test-requires-db: build
+	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(REQUIRES_DB_PACKAGES_REGEXP)")
+
+# Tests that require no DB at all, e.g., pure logic, utilities
+test-no-db: build
+	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(CORE_DB_PACKAGES_REGEXP)|$(REQUIRES_DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
 
 test-cover: build
 	$(go_cmd) test -v -coverprofile=coverage.profile ./...
@@ -141,8 +152,8 @@ $(cache_dir) $(mod_cache_dir):
 	# Use the host local gocache and gomodcache folder to avoid rebuilding and re-downloading every time
 	mkdir -p "$(cache_dir)" "$(mod_cache_dir)"
 
-BUILD_TARGETS=coordinator signatureverifier validatorpersister sidecar queryexecutor \
-			  loadgen mockvcservice mocksigservice mockorderingservice
+BUILD_TARGETS=coordinator signatureverifier validatorpersister sidecar queryexecutor loadgen \
+			  mockvcservice mocksigservice mockorderingservice
 
 build: $(output_dir) $(BUILD_TARGETS)
 
@@ -221,8 +232,8 @@ pull-db-image: FORCE
 lint: FORCE
 	@echo "Running Go Linters..."
 	golangci-lint run --color=always --new-from-rev=main --timeout=4m
-	@echo "Linting Complete. Parsing Errors..."
-
+	@echo "Running SQL Linters..."
+	sh scripts/sql-lint.sh
 
 # This rule can be used to find and fix lint issues for specific package.
 full-lint-%: FORCE
