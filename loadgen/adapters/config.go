@@ -23,9 +23,9 @@ type (
 
 	// OrdererClientConfig is a struct that contains the configuration for the orderer client.
 	OrdererClientConfig struct {
-		Orderer                    broadcastdeliver.Config  `mapstructure:"orderer"`
-		SidecarClientConfiguration *connection.ServerConfig `mapstructure:"sidecar-client-config"`
-		BroadcastParallelism       int                      `mapstructure:"broadcast-parallelism"`
+		Orderer                    broadcastdeliver.Config `mapstructure:"orderer"`
+		SidecarClientConfiguration connection.ServerConfig `mapstructure:"sidecar-client-config"`
+		BroadcastParallelism       int                     `mapstructure:"broadcast-parallelism"`
 	}
 
 	// SidecarClientConfig is a struct that contains the configuration for the sidecar client.

@@ -333,7 +333,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarClientConfiguration: &connection.ServerConfig{
+					SidecarClientConfiguration: connection.ServerConfig{
 						Endpoint: *makeEndpoint("sidecar", 4001),
 					},
 					Orderer: broadcastdeliver.Config{

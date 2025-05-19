@@ -251,7 +251,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 			// Start client
 			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
-				SidecarClientConfiguration: &connection.ServerConfig{
+				SidecarClientConfiguration: connection.ServerConfig{
 					Endpoint: sidecarConf.Server.Endpoint,
 				},
 				Orderer:              sidecarConf.Orderer,
