@@ -34,8 +34,9 @@ orderer:
   consensus-type: BFT
 committer:
   client:
-    endpoint: {{ .Endpoints.Coordinator.Server }}
-    server-creds:
+    endpoints:
+      - {{ .Endpoints.Coordinator.Server }}
+    client-creds:
       tls-mode: {{ .ClientsConfig.Coordinator.Mode }}
       server-name: {{ .ClientsConfig.Coordinator.ServerName }}
       cert-path: {{ .ClientsConfig.Coordinator.CertPath }}

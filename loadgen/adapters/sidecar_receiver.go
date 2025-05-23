@@ -27,7 +27,7 @@ import (
 type receiverConfig struct {
 	ChannelID     string
 	Res           *ClientResources
-	SidecarConfig *connection.ServerConfig
+	SidecarConfig *connection.ClientConfig
 }
 
 const committedBlocksQueueSize = 1024

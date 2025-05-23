@@ -156,3 +156,14 @@ func (e *OrdererEndpoint) setID(idStr string) error {
 	e.ID = uint32(id)
 	return nil
 }
+
+// ToOrdererEndpoints convert one or more endpoints to an OrdererEndpoint list.
+func ToOrdererEndpoints(endpoints ...*Endpoint) []*OrdererEndpoint {
+	var ordererEndpoints []*OrdererEndpoint //nolint:prealloc
+	for _, ep := range endpoints {
+		ordererEndpoints = append(ordererEndpoints, &OrdererEndpoint{
+			Endpoint: *ep,
+		})
+	}
+	return ordererEndpoints
+}

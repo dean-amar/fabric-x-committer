@@ -45,7 +45,7 @@ type (
 	// CoordinatorConfig holds the endpoint of the coordinator component in the
 	// committer service.
 	CoordinatorConfig struct {
-		ServerConfig *connection.ServerConfig `mapstructure:"client"`
+		Config *connection.ClientConfig `mapstructure:"client"`
 	}
 
 	// LedgerConfig holds the ledger path.

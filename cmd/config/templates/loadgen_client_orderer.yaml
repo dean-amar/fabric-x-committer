@@ -7,8 +7,9 @@
 
 orderer-client:
   sidecar-client-config:
-    endpoint: {{ .Endpoints.Sidecar.Server }}
-    server-creds:
+    endpoints:
+      - {{ .Endpoints.Sidecar.Server }}
+    client-creds:
       tls-mode: {{ .ClientsConfig.Sidecar.Mode }}
       server-name: {{ .ClientsConfig.Sidecar.ServerName }}
       cert-path: {{ .ClientsConfig.Sidecar.CertPath }}

@@ -271,3 +271,16 @@ func SetupDebugging() {
 		Development: true,
 	})
 }
+
+// MakeClientConfig creates a client configuration for test purposes given host and port.
+func MakeClientConfig(ep ...*connection.Endpoint) *connection.ClientConfig {
+	return MakeClientConfigWithCreds(nil, ep...)
+}
+
+// MakeClientConfigWithCreds creates a client configuration for test purposes given host, port, and creds.
+func MakeClientConfigWithCreds(tlsConfig *connection.ConfigTLS, ep ...*connection.Endpoint) *connection.ClientConfig {
+	return &connection.ClientConfig{
+		Endpoints:    ep,
+		ClientsCreds: tlsConfig,
+	}
+}

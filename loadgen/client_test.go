@@ -173,9 +173,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 					ConsensusType: broadcastdeliver.Bft,
 				},
 				Committer: sidecar.CoordinatorConfig{
-					ServerConfig: &connection.ServerConfig{
-						Endpoint: coordinatorServer.Configs[0].Endpoint,
-					},
+					Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
 				},
 				Monitoring: defaultMonitoring(),
 				Ledger: sidecar.LedgerConfig{
@@ -193,7 +191,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 			clientConf.Adapter.SidecarClient = &adapters.SidecarClientConfig{
 				ChannelID:                  chanID,
 				OrdererServers:             ordererServers,
-				SidecarClientConfiguration: sidecarServerConf,
+				SidecarClientConfiguration: test.ServerToClientConfig(sidecarServerConf),
 			}
 			testLoadGenerator(t, clientConf)
 		})
@@ -224,9 +222,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					ConsensusType: broadcastdeliver.Bft,
 				},
 				Committer: sidecar.CoordinatorConfig{
-					ServerConfig: &connection.ServerConfig{
-						Endpoint: coordinatorServer.Configs[0].Endpoint,
-					},
+					Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
 				},
 				Monitoring: defaultMonitoring(),
 				Ledger: sidecar.LedgerConfig{
@@ -251,11 +247,9 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 			// Start client
 			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
-				SidecarClientConfiguration: connection.ServerConfig{
-					Endpoint: sidecarConf.Server.Endpoint,
-				},
-				Orderer:              sidecarConf.Orderer,
-				BroadcastParallelism: 5,
+				SidecarClientConfiguration: *test.MakeClientConfig(&sidecarConf.Server.Endpoint),
+				Orderer:                    sidecarConf.Orderer,
+				BroadcastParallelism:       5,
 			}
 			testLoadGenerator(t, clientConf)
 		})

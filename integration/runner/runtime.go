@@ -259,10 +259,10 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
 		ChannelID: s.ChannelID,
-		SidecarClient: &connection.ServerConfig{
-			Endpoint:    *s.Endpoints.Sidecar.Server,
-			ServerCreds: &c.SystemConfig.ClientsConfig.Sidecar,
-		},
+		SidecarClient: test.MakeClientConfigWithCreds(
+			&c.SystemConfig.ClientsConfig.Sidecar,
+			s.Endpoints.Sidecar.Server,
+		),
 	})
 	require.NoError(t, err)
 	return c

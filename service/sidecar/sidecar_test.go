@@ -162,9 +162,7 @@ func newSidecarTestEnvWithCreds(
 			},
 		},
 		Committer: CoordinatorConfig{
-			ServerConfig: &connection.ServerConfig{
-				Endpoint: coordinatorServer.Configs[0].Endpoint,
-			},
+			Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
 		},
 		Ledger: LedgerConfig{
 			Path: t.TempDir(),
@@ -222,11 +220,8 @@ func (env *sidecarTestEnv) startSidecarClient(
 ) {
 	t.Helper()
 	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
-		ChannelID: env.config.Orderer.ChannelID,
-		SidecarClient: &connection.ServerConfig{
-			Endpoint:    env.config.Server.Endpoint,
-			ServerCreds: sidecarClientCreds,
-		},
+		ChannelID:     env.config.Orderer.ChannelID,
+		SidecarClient: test.MakeClientConfigWithCreds(sidecarClientCreds, &env.config.Server.Endpoint),
 	}, startBlkNum)
 }
 
@@ -527,7 +522,9 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	conn, err := connection.Connect(connection.NewInsecureDialConfig(&env.config.Committer.ServerConfig.Endpoint))
+	dialConfig, err := connection.NewLoadBalancedDialConfig(env.config.Committer.Config)
+	require.NoError(t, err)
+	conn, err := connection.Connect(dialConfig)
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
 	return conn.CanonicalTarget()

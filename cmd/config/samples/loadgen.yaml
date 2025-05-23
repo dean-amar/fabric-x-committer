@@ -16,7 +16,8 @@ monitoring:
 
 orderer-client:
   sidecar-client-config:
-    endpoint: sidecar:4001
+    endpoints:
+      - sidecar:4001
   orderer:
     connection:
       endpoints:

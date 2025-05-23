@@ -61,10 +61,8 @@ func TestLedgerService(t *testing.T) {
 	ensureAtLeastHeight(t, ls, 1)
 
 	receivedBlocksFromLedgerService := sidecarclient.StartSidecarClient(t.Context(), t, &sidecarclient.Config{
-		ChannelID: channelID,
-		SidecarClient: &connection.ServerConfig{
-			Endpoint: config.Endpoint,
-		},
+		ChannelID:     channelID,
+		SidecarClient: test.MakeClientConfig(&config.Endpoint),
 	}, 0)
 
 	blk1 := createBlockForTest(1, protoutil.BlockHeaderHash(blk0.Header), [3]string{"3", "4", "5"})

@@ -30,7 +30,7 @@ func NewViperWithSidecarDefaults() *viper.Viper {
 	v := NewViperWithServiceDefault(4001, 2114)
 	v.SetDefault("orderer.channel-id", "mychannel")
 	v.SetDefault("orderer.connection.endpoints", "broadcast,deliver,localhost:7050")
-	v.SetDefault("committer.client.endpoint", "localhost:9001")
+	v.SetDefault("committer.client.endpoints", "localhost:9001")
 	v.SetDefault("ledger.path", "./ledger/")
 	return v
 }
