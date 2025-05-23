@@ -29,7 +29,6 @@ cache_dir       ?= $(shell $(go_cmd) env GOCACHE)
 mod_cache_dir   ?= $(shell $(go_cmd) env GOMODCACHE)
 go_version      ?= 1.24
 golang_image    ?= golang:$(go_version)-bookworm
-db_image        ?= yugabytedb/yugabyte:2.20.7.0-b58
 
 dockerfile_base_dir       ?= $(project_dir)/docker/images
 dockerfile_test_node_dir  ?= $(dockerfile_base_dir)/test_node
@@ -52,9 +51,12 @@ os             ?= $(shell $(go_cmd) env GOOS)
 arch           ?= $(shell $(go_cmd) env GOARCH)
 multiplatform  ?= false
 env            ?= env GOOS=$(os) GOARCH=$(arch)
-go_build       ?= $(env) $(go_cmd) build -buildvcs=false -o
+build_flags    ?= -buildvcs=false -o
+go_build       ?= $(env) $(go_cmd) build $(build_flags)
 
 arch_output_dir_rel = $(arch_output_dir:${project_dir}/%=%)
+
+PYTHON_CMD ?= python
 
 # Set additional parameter to build the test-node for different platforms and push
 # E.g., make multiplatform=true docker_push=true build-test-node-image
@@ -75,27 +77,38 @@ MAKEFLAGS += --jobs=16
 # Quickstart
 #########################
 
-DB_PACKAGES_REGEXP = .*/scalable-committer/(service/(coordinator|vc|query)|loadgen|cmd)
+CORE_DB_PACKAGES_REGEXP = .*/scalable-committer/service/(vc|query)
+REQUIRES_DB_PACKAGES_REGEXP = .*/scalable-committer/(service/coordinator|loadgen|cmd)
 HEAVY_PACKAGES_REGEXP = .*/scalable-committer/(docker|integration)
 
+# Excludes integration and container tests.
+# Use `test-integration`, `test-integration-runtime`, and `test-container`.
 test: build
-	@# Excludes integration and container tests. Use `make integration-test` and `make container-test`.
 	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")
 
-integration-test: build
-	$(go_cmd) test -timeout 30m -v ./integration/...
+test-integration: build
+	$(go_cmd) test -timeout 30m -v ./integration/... -skip "DBResiliency.*"
 
-container-test: build-test-node-image build-mock-orderer-image
+test-integration-db-resiliency: build
+	$(go_cmd) test -timeout 30m -v ./integration/... -run "DBResiliency.*"
+
+test-container: build-test-node-image build-mock-orderer-image
 	$(go_cmd) test -v ./docker/...
 
 test-package-%: build
 	$(go_cmd) test -timeout 30m -v ./$*/...
 
-test-db-packages: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(DB_PACKAGES_REGEXP)")
+# Tests for components that directly talk to the DB, where different DBs might affect behaviour.
+test-core-db: build
+	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(CORE_DB_PACKAGES_REGEXP)")
 
-test-non-db-packages: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
+# Tests for components that depend on the DB layer, but are agnostic to the specific DB used.
+test-requires-db: build
+	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(REQUIRES_DB_PACKAGES_REGEXP)")
+
+# Tests that require no DB at all, e.g., pure logic, utilities
+test-no-db: build
+	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(CORE_DB_PACKAGES_REGEXP)|$(REQUIRES_DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
 
 test-cover: build
 	$(go_cmd) test -v -coverprofile=coverage.profile ./...
@@ -157,6 +170,7 @@ build-arch-%: FORCE
 		os=$(word 1, $(subst -, ,$*)) \
 		arch=$(word 2, $(subst -, ,$*)) \
 		output_dir=$(arch_output_dir)/$* \
+		build_flags="-ldflags '-w -s' $(build_flags)" \
 		build
 
 coordinator: FORCE $(output_dir)
@@ -198,11 +212,10 @@ build-docker: FORCE $(cache_dir) $(mod_cache_dir)
     make build output_dir=$(output_dir) env="$(env)"
 	scripts/amend-permissions.sh "$(cache_dir)" "$(mod_cache_dir)"
 
-build-test-node-image: build-arch pull-db-image
+build-test-node-image: build-arch
 	${docker_cmd} build $(docker_build_flags) \
 		-f $(dockerfile_test_node_dir)/Dockerfile \
 		-t ${image_namespace}/committer-test-node:${version} \
-		--build-arg DB_IMAGE=${db_image} \
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		. $(docker_push_arg)
 
@@ -219,14 +232,13 @@ build-mock-orderer-image: build-arch
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		.
 
-pull-db-image: FORCE
-	${docker_cmd} pull ${db_image}
-
 lint: FORCE
 	@echo "Running Go Linters..."
 	golangci-lint run --color=always --new-from-rev=main --timeout=4m
 	@echo "Running SQL Linters..."
-	sh scripts/sql-lint.sh
+	git ls-files '*.sql' | sort -u | ${PYTHON_CMD} -m sqlfluff lint --dialect postgres
+	@echo "Running License Header Linters..."
+	scripts/license-lint.sh
 
 # This rule can be used to find and fix lint issues for specific package.
 full-lint-%: FORCE

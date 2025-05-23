@@ -1,3 +1,8 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
 #### Type of change
 
 <!--- What type of change? Pick one option and delete the others. -->

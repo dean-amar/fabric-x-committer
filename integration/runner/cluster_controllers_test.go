@@ -17,7 +17,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 )
 
-func TestYugabyteClusterController(t *testing.T) {
+func TestDBResiliencyYugabyteClusterController(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
@@ -41,7 +41,7 @@ func TestYugabyteClusterController(t *testing.T) {
 	require.Equal(t, 3, cc.GetClusterSize())
 }
 
-func TestPostgresClusterController(t *testing.T) {
+func TestDBResiliencyPostgresClusterController(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)

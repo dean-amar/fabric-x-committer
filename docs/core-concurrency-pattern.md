@@ -1,3 +1,8 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
 # Core Concurrency Pattern
 
    1. [errgroup - Synchronization, Error Propagation, and Context Cancellation for Goroutines](#errgroup-synchronization,-error-propagation,-and-context-cancellation-for-goroutines) - [Code](https://cs.opensource.google/go/x/sync)

@@ -1,3 +1,8 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
 # Scalable Committer docker-compose based test deployment
 
 This docker-compose based deployment allows to start and use a simple Scalable Committer deployment.

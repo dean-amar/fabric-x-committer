@@ -1,3 +1,7 @@
+// Copyright IBM Corp. All Rights Reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
+//
 module github.ibm.com/decentralized-trust-research/scalable-committer
 
 go 1.24

@@ -55,7 +55,7 @@ func TestStartTestNode(t *testing.T) {
 	require.NoError(t, err)
 	defer connection.CloseConnectionsLog(dockerClient)
 
-	stopAndRemoveContainersByName(ctx, t, dockerClient, "orderer", "committer")
+	stopAndRemoveContainersByName(ctx, t, dockerClient, "orderer", "committer", "load-gen")
 
 	workload.NewTxSignerVerifier(&workload.PolicyProfile{})
 	block, err := workload.CreateConfigBlock(&workload.PolicyProfile{
