@@ -94,9 +94,10 @@ func (s *Service) Run(ctx context.Context) error {
 		_ = s.metrics.StartPrometheusServer(pCtx, s.config.Monitoring.Server, s.monitorQueues)
 	}()
 
-	logger.Infof("Create coordinator client and connect to %s\n", connection.AddressString(
+	logger.Infof("Create coordinator client and connect to %s", connection.AddressString(
 		s.config.Committer.Config.Endpoints...),
 	)
+
 	committerDialConfig, err := connection.NewLoadBalancedDialConfig(s.config.Committer.Config)
 	if err != nil {
 		return errors.Wrapf(err, "could not load coordinator dial config")
@@ -108,6 +109,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)
+
 	logger.Infof("sidecar connected to coordinator at %s", connection.AddressString(
 		s.config.Committer.Config.Endpoints...),
 	)

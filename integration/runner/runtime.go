@@ -99,12 +99,6 @@ type (
 		// TLS configures the secure level between the components: none | tls | mtls
 		TLS connection.TLSMode
 	}
-
-	// TLSSettings sets the runtime tls options.
-	TLSSettings struct {
-		UseTLS    bool
-		MutualTLS bool
-	}
 )
 
 // Service flags.
@@ -611,10 +605,6 @@ func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, b
 	}, 2*time.Minute, 250*time.Millisecond)
 }
 
-func isMoreThanOneBitSet(bits int) bool {
-	return bits != 0 && bits&(bits-1) != 0
-}
-
 func (c *CommitterRuntime) createServerCerts(
 	t *testing.T,
 	endpoints config.ServiceEndpoints,
@@ -635,4 +625,8 @@ func (c *CommitterRuntime) createClientCerts(t *testing.T, forServer string) con
 
 func (c *CommitterRuntime) createTLSConfig(paths map[string]string, serverName string) connection.ConfigTLS {
 	return test.CreateTLSConfigFromPaths(c.config.TLS, paths, serverName)
+}
+
+func isMoreThanOneBitSet(bits int) bool {
+	return bits != 0 && bits&(bits-1) != 0
 }

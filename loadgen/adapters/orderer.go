@@ -45,9 +45,9 @@ func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream TxStream) err
 	g.Go(func() error {
 		defer dCancel() // We stop sending if we can't track the received items.
 		return runReceiver(gCtx, &receiverConfig{
-			SidecarConfig: &c.config.SidecarClientConfiguration,
 			ChannelID:     c.config.Orderer.ChannelID,
 			Res:           c.res,
+			SidecarConfig: &c.config.SidecarClientConfiguration,
 		})
 	})
 

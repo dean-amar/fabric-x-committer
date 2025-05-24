@@ -18,6 +18,7 @@ import (
 
 // SecureCommunicationManager responsible for the creation of
 // TLS certificates for testing purposes by utilizing the tls generation library of 'Hyperledger Fabric'.
+// Path map convention: private-key, public-key, ca-certificate.
 type SecureCommunicationManager struct {
 	CertificateAuthority tlsgen.CA
 }
@@ -32,7 +33,7 @@ func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
 	}
 }
 
-// CreateServerCertificate creates a server key pair given the host name as SNI,
+// CreateServerCertificate creates a server key pair given SNI,
 // Writing it to a temp testing folder and returns a map with the credential paths.
 func (scm *SecureCommunicationManager) CreateServerCertificate(
 	t *testing.T,
@@ -72,9 +73,9 @@ func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]st
 
 func createDataFromKeyPair(keyPair *tlsgen.CertKeyPair, caCertificate []byte) map[string][]byte {
 	data := make(map[string][]byte)
-	data["PrivateKey"] = keyPair.Key
-	data["PublicKey"] = keyPair.Cert
-	data["CACertificate"] = caCertificate
+	data["private-key"] = keyPair.Key
+	data["public-key"] = keyPair.Cert
+	data["ca-certificate"] = caCertificate
 	return data
 }
 

@@ -161,7 +161,7 @@ func startCommitter(
 			"SC_SIDECAR_ORDERER_CONNECTION_ENDPOINTS=" + serviceEndpoint(ordererPort),
 			"SC_LOADGEN_ORDERER_CLIENT_ORDERER_CHANNEL_ID=" + channelName,
 			"SC_LOADGEN_ORDERER_CLIENT_ORDERER_CONNECTION_ENDPOINTS=" + serviceEndpoint(ordererPort),
-			"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_CONFIG_ENDPOINT=" + serviceEndpoint(sidecarPort),
+			"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_CONFIG_ENDPOINTS=" + serviceEndpoint(sidecarPort),
 			"SC_QUERY_SERVER_ENDPOINT=:" + queryServicePort,
 		},
 		Tty: true,

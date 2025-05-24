@@ -19,22 +19,24 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
 )
 
-// SecureConnectionFunctionArguments groups the arguments required to run a secure connection test.
-type SecureConnectionFunctionArguments struct {
-	ServerCN      string
-	ServerStarter ServerStarter
-	ClientStarter ClientStarter
-	Parallel      bool
-}
+type (
+	// SecureConnectionFunctionArguments groups the arguments required to run a secure connection test.
+	SecureConnectionFunctionArguments struct {
+		ServerCN      string
+		ServerStarter ServerStarter
+		ClientStarter ClientStarter
+		Parallel      bool
+	}
 
-// ServerStarter is a func that receives a TLS config, start the server and return its endpoint.
-type ServerStarter func(t *testing.T, serverTLS *connection.ConfigTLS) (endpoint connection.Endpoint)
+	// ServerStarter is a func that receives a TLS config, start the server and return its endpoint.
+	ServerStarter func(t *testing.T, serverTLS *connection.ConfigTLS) (endpoint connection.Endpoint)
 
-// ClientStarter dials the service and returns a func that executes a request.
-type ClientStarter func(t *testing.T, endpoint *connection.Endpoint, cfg *connection.ConfigTLS) RequestFunc
+	// ClientStarter dials the service and returns a func that executes a request.
+	ClientStarter func(t *testing.T, endpoint *connection.Endpoint, cfg *connection.ConfigTLS) RequestFunc
 
-// RequestFunc performs a request and returns the resulting error.
-type RequestFunc func(ctx context.Context) error
+	// RequestFunc performs a request and returns the resulting error.
+	RequestFunc func(ctx context.Context) error
+)
 
 // RunSecureConnectionTest starts a gRPC server with mTLS enabled and
 // tests client connections using various TLS configurations to verify that
@@ -122,8 +124,8 @@ func CreateTLSConfigFromPaths(
 	return connection.ConfigTLS{
 		Mode:        connectionMode,
 		ServerName:  serverName,
-		CertPath:    paths["PublicKey"],
-		KeyPath:     paths["PrivateKey"],
-		CACertPaths: []string{paths["CACertificate"]},
+		KeyPath:     paths["private-key"],
+		CertPath:    paths["public-key"],
+		CACertPaths: []string{paths["ca-certificate"]},
 	}
 }

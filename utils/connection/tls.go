@@ -22,7 +22,8 @@ type (
 	// ConfigTLS holds the TLS options and certificate paths
 	// for secure communication between servers and clients.
 	ConfigTLS struct {
-		Mode        TLSMode  `mapstructure:"tls-mode"`
+		Mode TLSMode `mapstructure:"tls-mode"`
+		// ServerName is required by the client if the server's certificate uses SNI.
 		ServerName  string   `mapstructure:"server-name"`
 		CertPath    string   `mapstructure:"cert-path"`
 		KeyPath     string   `mapstructure:"key-path"`
