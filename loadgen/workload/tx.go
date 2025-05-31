@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package workload
 
 import (
+	"context"
 	"math/rand"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
@@ -117,11 +118,11 @@ type BlockGenerator struct {
 }
 
 // Next generate a new block.
-func (g *BlockGenerator) Next() *protocoordinatorservice.Block {
-	txs := GenerateArray(g.TxGenerator, int(g.BlockSize)) //nolint:gosec // integer overflow conversion uint64 -> int
+func (g *BlockGenerator) Next(ctx context.Context) *protocoordinatorservice.Block {
+	txs := g.TxGenerator.NextN(ctx, int(g.BlockSize)) //nolint:gosec // integer overflow conversion uint64 -> int
 	// Generators return nil when their stream is done.
 	// This indicates that the block generator should also be done.
-	if txs[len(txs)-1] == nil {
+	if len(txs) == 0 || txs[len(txs)-1] == nil {
 		return nil
 	}
 

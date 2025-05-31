@@ -14,7 +14,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
@@ -35,34 +34,11 @@ type (
 	// ServiceAdapter encapsulates the common interface for adapters.
 	ServiceAdapter interface {
 		// RunWorkload apply the generated workload.
-		RunWorkload(ctx context.Context, txStream adapters.TxStream) error
+		RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error
 		// Progress returns a value that indicates progress as the number grows.
 		Progress() uint64
 		// Supports specify which phases an adapter supports.
 		Supports() adapters.Phases
-	}
-
-	// clientStream implements the TxStream interface.
-	clientStream struct {
-		workloadSetupTXs channel.Reader[*protoblocktx.Tx]
-		txStream         *workload.TxStream
-		blockSize        uint64
-	}
-
-	// clientBlockGenerator is a block generator that first submit blocks from the workloadSetupTXs,
-	// and blocks until indicated that it was committed.
-	// Then, it submits blocks from the tx stream.
-	clientBlockGenerator struct {
-		workloadSetupTXs channel.Reader[*protoblocktx.Tx]
-		blockGen         *workload.BlockGenerator
-	}
-
-	// clientTxGenerator is a TX generator that first submit TXs from the workloadSetupTXs,
-	// and blocks until indicated that it was committed.
-	// Then, it submits transactions from the tx stream.
-	clientTxGenerator struct {
-		workloadSetupTXs channel.Reader[*protoblocktx.Tx]
-		txGen            *workload.RateLimiterGenerator[*protoblocktx.Tx]
 	}
 )
 
@@ -77,6 +53,7 @@ func NewLoadGenClient(conf *ClientConfig) (*Client, error) {
 		txStream: workload.NewTxStream(conf.LoadProfile, conf.Stream),
 		resources: adapters.ClientResources{
 			Profile: conf.LoadProfile,
+			Stream:  conf.Stream,
 			Limit:   conf.Limit,
 		},
 	}
@@ -125,12 +102,12 @@ func (c *Client) Run(ctx context.Context) error {
 	c.txStream.WaitForReady(gCtx)
 
 	workloadSetupTXs := make(chan *protoblocktx.Tx, 1)
-	cs := &clientStream{
-		blockSize:        c.conf.LoadProfile.Block.Size,
-		workloadSetupTXs: channel.NewReader(gCtx, workloadSetupTXs),
+	cs := &workload.StreamWithSetup{
+		BlockSize:        c.conf.LoadProfile.Block.Size,
+		WorkloadSetupTXs: channel.NewReader(gCtx, workloadSetupTXs),
 	}
 	if c.conf.Generate.Load {
-		cs.txStream = c.txStream
+		cs.TxStream = c.txStream
 	}
 	g.Go(func() error {
 		defer cancel() // We should stop if the workload is over.
@@ -198,60 +175,4 @@ func makeWorkloadSetupTXs(config *ClientConfig) ([]*protoblocktx.Tx, error) {
 		workloadSetupTXs = append(workloadSetupTXs, metaNsTX)
 	}
 	return workloadSetupTXs, nil
-}
-
-// MakeBlocksGenerator instantiate clientBlockGenerator.
-func (c *clientStream) MakeBlocksGenerator() workload.Generator[*protocoordinatorservice.Block] {
-	cg := &clientBlockGenerator{
-		workloadSetupTXs: c.workloadSetupTXs,
-	}
-	if c.txStream != nil {
-		cg.blockGen = &workload.BlockGenerator{
-			TxGenerator: c.txStream.MakeGenerator(),
-			BlockSize:   c.blockSize,
-		}
-	}
-	return cg
-}
-
-// MakeTxGenerator instantiate clientTxGenerator.
-func (c *clientStream) MakeTxGenerator() workload.Generator[*protoblocktx.Tx] {
-	cg := &clientTxGenerator{
-		workloadSetupTXs: c.workloadSetupTXs,
-	}
-	if c.txStream != nil {
-		cg.txGen = c.txStream.MakeGenerator()
-	}
-	return cg
-}
-
-// Next generate the next block.
-func (g *clientBlockGenerator) Next() *protocoordinatorservice.Block {
-	if g.workloadSetupTXs != nil {
-		if tx, ok := g.workloadSetupTXs.Read(); ok {
-			return &protocoordinatorservice.Block{
-				Txs:    []*protoblocktx.Tx{tx},
-				TxsNum: []uint32{0},
-			}
-		}
-		g.workloadSetupTXs = nil
-	}
-	if g.blockGen != nil {
-		return g.blockGen.Next()
-	}
-	return nil
-}
-
-// Next generate the next TX.
-func (g *clientTxGenerator) Next() *protoblocktx.Tx {
-	if g.workloadSetupTXs != nil {
-		if tx, ok := g.workloadSetupTXs.Read(); ok {
-			return tx
-		}
-		g.workloadSetupTXs = nil
-	}
-	if g.txGen != nil {
-		return g.txGen.Next()
-	}
-	return nil
 }

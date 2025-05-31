@@ -8,7 +8,7 @@ virt: vm
 os: linux
 dist: noble
 go:
-  - "1.24"
+  - "1.24.3"
 
 cache:
   directories:
