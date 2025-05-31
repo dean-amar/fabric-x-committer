@@ -14,6 +14,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
@@ -34,7 +35,7 @@ func NewCoordinatorAdapter(config *CoordinatorClientConfig, res *ClientResources
 }
 
 // RunWorkload applies load on the coordinator.
-func (c *CoordinatorAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
+func (c *CoordinatorAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
 	conn, err := connection.Connect(connection.NewInsecureDialConfig(c.config.Endpoint))
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to %s", c.config.Endpoint)
@@ -60,13 +61,17 @@ func (c *CoordinatorAdapter) RunWorkload(ctx context.Context, txStream TxStream)
 	defer dCancel()
 	g, gCtx := errgroup.WithContext(dCtx)
 	g.Go(func() error {
-		return c.sendBlocks(gCtx, txStream, stream.Send)
+		return sendBlocks(gCtx, &c.commonAdapter, txStream, identityMapper, stream.Send)
 	})
 	g.Go(func() error {
 		defer dCancel() // We stop sending if we can't track the received items.
 		return c.receiveStatus(gCtx, stream)
 	})
 	return errors.Wrap(g.Wait(), "workload done")
+}
+
+func identityMapper(block *protocoordinatorservice.Block) (*protocoordinatorservice.Block, error) {
+	return block, nil
 }
 
 // Progress a submitted block indicates progress for the coordinator as it guaranteed to preserve the order.

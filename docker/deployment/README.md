@@ -3,9 +3,9 @@ Copyright IBM Corp. All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 -->
-# Scalable Committer docker-compose based test deployment
+# docker-compose based test deployment
 
-This docker-compose based deployment allows to start and use a simple Scalable Committer deployment.
+This docker-compose based deployment allows to start and use a simple Committer deployment.
 See [compose.yaml](compose.yaml) for the deployment details.
 
 ```bash

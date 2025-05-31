@@ -13,7 +13,7 @@
 # build-arch: Builds all binaries for linux/(<cur-arch> amd64 arm64 s390x)
 # build-docker: Builds all binaries in a docker container
 # docker-builder-run: Executes a command from within a golang docker image.
-# docker-runner-image: Builds the scalable-committer docker image containing all binaries
+# docker-runner-image: Builds the committer docker image containing all binaries
 # lint: Runs golangci-lint
 
 #########################
@@ -27,7 +27,7 @@ output_dir      ?= $(project_dir)/bin
 arch_output_dir ?= $(project_dir)/archbin
 cache_dir       ?= $(shell $(go_cmd) env GOCACHE)
 mod_cache_dir   ?= $(shell $(go_cmd) env GOMODCACHE)
-go_version      ?= 1.24
+go_version      ?= 1.24.3
 golang_image    ?= golang:$(go_version)-bookworm
 
 dockerfile_base_dir       ?= $(project_dir)/docker/images
@@ -74,27 +74,33 @@ endif
 MAKEFLAGS += --jobs=16
 
 #########################
-# Quickstart
+# Tests
 #########################
 
-CORE_DB_PACKAGES_REGEXP = .*/scalable-committer/service/(vc|query)
-REQUIRES_DB_PACKAGES_REGEXP = .*/scalable-committer/(service/coordinator|loadgen|cmd)
-HEAVY_PACKAGES_REGEXP = .*/scalable-committer/(docker|integration)
+ROOT_PKG_REGEXP = github.ibm.com/decentralized-trust-research/scalable-committer
+CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query)
+REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(service/coordinator|loadgen|cmd)
+HEAVY_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(docker|integration)
 
 # Excludes integration and container tests.
-# Use `test-integration`, `test-integration-runtime`, and `test-container`.
+# Use `test-integration`, `test-integration-db-resiliency`, and `test-container`.
 test: build
 	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")
 
+# Integration tests excluding DB resiliency tests.
+# Use `test-integration-db-resiliency`.
 test-integration: build
 	$(go_cmd) test -timeout 30m -v ./integration/... -skip "DBResiliency.*"
 
+# DB resiliency integration tests.
 test-integration-db-resiliency: build
 	$(go_cmd) test -timeout 30m -v ./integration/... -run "DBResiliency.*"
 
+# Tests the all-in-one docker image.
 test-container: build-test-node-image build-mock-orderer-image
 	$(go_cmd) test -v ./docker/...
 
+# Test a specific package.
 test-package-%: build
 	$(go_cmd) test -timeout 30m -v ./$*/...
 
@@ -127,7 +133,11 @@ clean: FORCE
 	@rm -rf $(arch_output_dir)
 
 kill-test-docker: FORCE
-	$(docker_cmd) ps -aq -f name=sc_yugabyte_unit_tests | xargs $(DOCKER_CMD) rm -f
+	$(docker_cmd) ps -aq -f name=sc_yugabyte_unit_tests | xargs $(docker_cmd) rm -f
+	$(docker_cmd) ps -aq -f name=sc_postgres_unit_tests | xargs $(docker_cmd) rm -f
+
+bench-loadgen: FORCE
+	$(go_cmd) test ./loadgen/workload/... -bench "BenchmarkGen.*" -run=^$
 
 #########################
 # Generate protos
@@ -231,6 +241,10 @@ build-mock-orderer-image: build-arch
 		--build-arg PORTS=7050 \
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		.
+
+#########################
+# Linter
+#########################
 
 lint: FORCE
 	@echo "Running Go Linters..."

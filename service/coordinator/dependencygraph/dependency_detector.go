@@ -6,12 +6,6 @@ SPDX-License-Identifier: Apache-2.0
 
 package dependencygraph
 
-import (
-	"context"
-
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-)
-
 type (
 	dependencyDetector struct {
 		// readOnlyKeyToWaitingTxs holds a map of key to transaction that have only read the key.
@@ -25,8 +19,6 @@ type (
 		// readWriteKeyToWaitingTxs holds a map of key to transaction that have read and written the key.
 		// readWriteKeyToWaitingTxs is used to establish write-read, write-write and read-write dependencies.
 		readWriteKeyToWaitingTxs keyToTransactions
-
-		workers *workerPool
 	}
 
 	// keyToTransactions holds a map of key to transactions that have read or written the key.
@@ -40,7 +32,6 @@ func newDependencyDetector() *dependencyDetector {
 		readOnlyKeyToWaitingTxs:  make(keyToTransactions),
 		writeOnlyKeyToWaitingTxs: make(keyToTransactions),
 		readWriteKeyToWaitingTxs: make(keyToTransactions),
-		workers:                  newWorkerPool(3, 3),
 	}
 }
 
@@ -101,48 +92,22 @@ func (d *dependencyDetector) addWaitingTx(txNode *TransactionNode) {
 
 // mergeWaitingTx merges the waiting transaction's reads and writes from
 // another dependency detector. This method is not thread-safe.
-func (d *dependencyDetector) mergeWaitingTx(ctx context.Context, depDetector *dependencyDetector) {
+func (d *dependencyDetector) mergeWaitingTx(depDetector *dependencyDetector) {
 	// NOTE: The given depDetector is not modified ever after we reach here.
 	//       Hence, we don't need to copy the map and can safely assign them instead.
-	done := channel.Make[any](ctx, 3)
-	d.workers.Submit(ctx, func() {
-		d.readOnlyKeyToWaitingTxs.merge(depDetector.readOnlyKeyToWaitingTxs)
-		done.Write(nil)
-	})
-	d.workers.Submit(ctx, func() {
-		d.writeOnlyKeyToWaitingTxs.merge(depDetector.writeOnlyKeyToWaitingTxs)
-		done.Write(nil)
-	})
-	d.workers.Submit(ctx, func() {
-		d.readWriteKeyToWaitingTxs.merge(depDetector.readWriteKeyToWaitingTxs)
-		done.Write(nil)
-	})
-	for range 3 {
-		done.Read()
-	}
+	d.readOnlyKeyToWaitingTxs.merge(depDetector.readOnlyKeyToWaitingTxs)
+	d.writeOnlyKeyToWaitingTxs.merge(depDetector.writeOnlyKeyToWaitingTxs)
+	d.readWriteKeyToWaitingTxs.merge(depDetector.readWriteKeyToWaitingTxs)
 }
 
 // removeWaitingTx removes the given transaction's reads and writes from the dependency detector
 // so that getDependenciesOf() does not consider them when calculating dependencies.
 // This method is not thread-safe.
-func (d *dependencyDetector) removeWaitingTx(ctx context.Context, txsNode TxNodeBatch) {
-	done := channel.Make[any](ctx, 3)
+func (d *dependencyDetector) removeWaitingTx(txsNode TxNodeBatch) {
 	for _, txNode := range txsNode {
-		d.workers.Submit(ctx, func() {
-			d.readOnlyKeyToWaitingTxs.remove(txNode.rwKeys.readsOnly, txNode)
-			done.Write(nil)
-		})
-		d.workers.Submit(ctx, func() {
-			d.writeOnlyKeyToWaitingTxs.remove(txNode.rwKeys.writesOnly, txNode)
-			done.Write(nil)
-		})
-		d.workers.Submit(ctx, func() {
-			d.readWriteKeyToWaitingTxs.remove(txNode.rwKeys.readsAndWrites, txNode)
-			done.Write(nil)
-		})
-		for range 3 {
-			done.Read()
-		}
+		d.readOnlyKeyToWaitingTxs.remove(txNode.rwKeys.readsOnly, txNode)
+		d.writeOnlyKeyToWaitingTxs.remove(txNode.rwKeys.writesOnly, txNode)
+		d.readWriteKeyToWaitingTxs.remove(txNode.rwKeys.readsAndWrites, txNode)
 	}
 }
 

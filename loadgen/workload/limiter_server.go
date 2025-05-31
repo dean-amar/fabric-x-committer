@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/ratelimit"
+	"golang.org/x/time/rate"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
@@ -22,37 +22,18 @@ type LimiterConfig struct {
 	InitialLimit int                 `mapstructure:"initial-limit"`
 }
 
-type limiterHolder struct {
-	limiter ratelimit.Limiter
-}
-
-func (h *limiterHolder) Take() time.Time {
-	return h.limiter.Take()
-}
-
-func getLimiter(limit int) ratelimit.Limiter {
-	if limit < 1 {
-		logger.Infof("Setting to unlimited (value passed: %d).", limit)
-		return ratelimit.NewUnlimited()
-	}
-	logger.Infof("Setting limit to %d requests per second.", limit)
-	return ratelimit.New(limit)
-}
-
 // NewLimiter instantiate a new rate limiter with optional remote control capabilities.
-func NewLimiter(c *LimiterConfig) ratelimit.Limiter {
+func NewLimiter(c *LimiterConfig, burst int) *rate.Limiter {
 	if c == nil {
-		return ratelimit.NewUnlimited()
+		return getLimiter(0, burst)
 	}
 
-	initialLimiter := getLimiter(c.InitialLimit)
+	limiter := getLimiter(c.InitialLimit, burst)
 
 	// Allow fixed limit.
 	if c.Endpoint.Empty() {
-		return initialLimiter
+		return limiter
 	}
-
-	rl := limiterHolder{limiter: initialLimiter}
 
 	// start remote-limiter controller.
 	logger.Infof("Start remote controller listener on %s\n", c.Endpoint.Address())
@@ -72,8 +53,7 @@ func NewLimiter(c *LimiterConfig) ratelimit.Limiter {
 		}
 		logger.Infof("Setting limit to %d", request.Limit)
 
-		rl.limiter = getLimiter(request.Limit)
-
+		limiter.SetLimit(getRate(request.Limit))
 		c.IndentedJSON(http.StatusOK, request)
 	})
 	go func() {
@@ -83,5 +63,18 @@ func NewLimiter(c *LimiterConfig) ratelimit.Limiter {
 		}
 	}()
 
-	return &rl
+	return limiter
+}
+
+func getLimiter(limitPerSecond, burst int) *rate.Limiter {
+	if limitPerSecond < 1 {
+		logger.Debugf("Setting to unlimited (value passed: %d).", limitPerSecond)
+		return rate.NewLimiter(rate.Inf, burst)
+	}
+	logger.Debugf("Setting limit to %d requests per second.", limitPerSecond)
+	return rate.NewLimiter(getRate(limitPerSecond), burst)
+}
+
+func getRate(limitPerSecond int) rate.Limit {
+	return rate.Every(time.Second / time.Duration(limitPerSecond))
 }

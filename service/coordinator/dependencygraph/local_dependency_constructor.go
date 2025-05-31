@@ -34,8 +34,8 @@ type (
 
 		// lastOutputtedID is the last transaction ID that was outputted by the
 		// localDependencyConstructor. It is used to ensure that the transactions
-		// are outputted in the same order as they were received by the scalable
-		// committer. The id field in the transactionBatch denotes the order.
+		// are outputted in the same order as they were received by the committer.
+		// The id field in the transactionBatch denotes the order.
 		lastOutputtedID *atomic.Uint64
 		orderEnforcer   *sync.Cond
 		metrics         *perfMetrics
@@ -125,7 +125,7 @@ func (p *localDependencyConstructor) construct(ctx context.Context) {
 		//       for various transaction batches. However, when we output the
 		// 	     transaction batches to the global dependency manager, we need to
 		//       ensure that the order of the transaction batches is the same as
-		//       the order in which they were received by the scalable committer.
+		//       the order in which they were received by the committer.
 		//       This is achieved by using the lastOutputtedID field. The first
 		//       ever value of id field is 1 and should not be 0.
 		p.orderEnforcer.L.Lock()

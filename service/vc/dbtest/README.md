@@ -33,9 +33,8 @@ docker ps -aq -f name=sc_postgres_unit_tests | xargs docker rm -f
 
 ## Testing
 
-Once Postgres is up and running you can run the tests of VCService.
-(Note that command below assumes we are in `scalable-committer/vcservice/yuga`)
+Once Postgres is up and running you can run the tests of VC service.
 ```bash
-DB_DEPLOYMENT=local go test ..
+DB_DEPLOYMENT=local go test ./service/vc/dbtest/...
 ```
 

@@ -25,7 +25,6 @@ import (
 func CheckMetrics(t *testing.T, url string, expectedMetrics ...string) {
 	t.Helper()
 	metricsOutput := getMetricsFromURL(t, url)
-	t.Log(metricsOutput)
 	for _, expected := range expectedMetrics {
 		require.Contains(t, metricsOutput, expected)
 	}
