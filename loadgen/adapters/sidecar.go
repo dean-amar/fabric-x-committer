@@ -40,7 +40,7 @@ func NewSidecarAdapter(config *SidecarClientConfig, res *ClientResources) *Sidec
 }
 
 // RunWorkload applies load on the sidecar.
-func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
+func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
 	if len(c.config.OrdererServers) == 0 {
 		return errors.New("no orderer servers configured")
 	}
@@ -86,16 +86,13 @@ func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream TxStream) err
 		})
 	})
 	g.Go(func() error {
-		return c.sendBlocks(gCtx, txStream, func(block *protocoordinatorservice.Block) error {
-			fabricBlock, err := c.mapSidecarBlock(block)
-			if err != nil {
-				return err
-			}
-			if !orderer.SubmitBlock(gCtx, fabricBlock) {
-				return errors.New("failed to submit block")
-			}
-			return nil
-		})
+		return sendBlocks(gCtx, &c.commonAdapter, txStream, c.mapSidecarBlock,
+			func(fabricBlock *common.Block) error {
+				if !orderer.SubmitBlock(gCtx, fabricBlock) {
+					return errors.New("failed to submit block")
+				}
+				return nil
+			})
 	})
 	return errors.Wrap(g.Wait(), "workload done")
 }

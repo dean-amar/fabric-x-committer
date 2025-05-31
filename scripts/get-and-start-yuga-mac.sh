@@ -20,9 +20,12 @@ fi
 
 cd "$YUGA_DIR" || exit 1
 
-DATA_DIR=$(mktemp -d -t yuga)
+DATA_DIR=$(mktemp -d -t "yuga.XXXX")
 echo "Using temporary data dir: $DATA_DIR"
 ulimit -n unlimited
+
+alias python='${PYTHON_CMD:-python}'
+${PYTHON_CMD:-python} -m pip install setuptools
 ./bin/yugabyted start \
   --advertise_address 0.0.0.0 \
   --callhome false \

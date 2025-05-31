@@ -1,3 +1,8 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
 # Docker Registry 
 
 ## Artifactory
@@ -50,8 +55,8 @@ For example:
 ```shell
 docker run \
     -p 5050:5050 \
-    -v /root/go/src/github.ibm.com/decentralized-trust-research/cbdc-platform-deployment/out/local-deployment/config/sidecar-machine/fabric.mytopos/crypto/peerOrganizations/defaultpeerorg.example.com/peers/endorser-1.defaultpeerorg.example.com/tss/endorser/msp/signcerts/endorser-cert.pem:/root/pubkey/sc_pubkey.pem \
-    -v /root/go/src/github.ibm.com/decentralized-trust-research/cbdc-platform-deployment/out/local-deployment/config/sidecar-machine/fabric.mytopos/crypto/:/root/config/crypto/ \
+    -v config/sidecar-machine/fabric.mytopos/crypto/peerOrganizations/defaultpeerorg.example.com/peers/endorser-1.defaultpeerorg.example.com/tss/endorser/msp/signcerts/endorser-cert.pem:/root/pubkey/sc_pubkey.pem \
+    -v config/sidecar-machine/fabric.mytopos/crypto/:/root/config/crypto/ \
     -e SC_SIDECAR_ORDERER_ORDERER_CONNECTION_PROFILE_MSP_DIR="/root/config/crypto/peerOrganizations/defaultpeerorg.example.com/peers/peerservice-machine1.defaultpeerorg.example.com/msp" \
     -e SC_SIDECAR_ORDERER_ORDERER_CONNECTION_PROFILE_ROOT_CA_PATHS="/root/config/crypto/ca-certs.pem" \
     -e SC_SIDECAR_ORDERER_CHANNEL_ID="mychannel" \

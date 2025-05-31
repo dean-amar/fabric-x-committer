@@ -13,7 +13,7 @@
 # build-arch: Builds all binaries for linux/(<cur-arch> amd64 arm64 s390x)
 # build-docker: Builds all binaries in a docker container
 # docker-builder-run: Executes a command from within a golang docker image.
-# docker-runner-image: Builds the scalable-committer docker image containing all binaries
+# docker-runner-image: Builds the committer docker image containing all binaries
 # lint: Runs golangci-lint
 
 #########################
@@ -27,9 +27,8 @@ output_dir      ?= $(project_dir)/bin
 arch_output_dir ?= $(project_dir)/archbin
 cache_dir       ?= $(shell $(go_cmd) env GOCACHE)
 mod_cache_dir   ?= $(shell $(go_cmd) env GOMODCACHE)
-go_version      ?= 1.24
+go_version      ?= 1.24.3
 golang_image    ?= golang:$(go_version)-bookworm
-db_image        ?= yugabytedb/yugabyte:2.20.7.0-b58
 
 dockerfile_base_dir       ?= $(project_dir)/docker/images
 dockerfile_test_node_dir  ?= $(dockerfile_base_dir)/test_node
@@ -52,9 +51,12 @@ os             ?= $(shell $(go_cmd) env GOOS)
 arch           ?= $(shell $(go_cmd) env GOARCH)
 multiplatform  ?= false
 env            ?= env GOOS=$(os) GOARCH=$(arch)
-go_build       ?= $(env) $(go_cmd) build -buildvcs=false -o
+build_flags    ?= -buildvcs=false -o
+go_build       ?= $(env) $(go_cmd) build $(build_flags)
 
 arch_output_dir_rel = $(arch_output_dir:${project_dir}/%=%)
+
+PYTHON_CMD ?= python
 
 # Set additional parameter to build the test-node for different platforms and push
 # E.g., make multiplatform=true docker_push=true build-test-node-image
@@ -72,23 +74,33 @@ endif
 MAKEFLAGS += --jobs=16
 
 #########################
-# Quickstart
+# Tests
 #########################
 
-CORE_DB_PACKAGES_REGEXP = .*/scalable-committer/service/(vc|query)
-REQUIRES_DB_PACKAGES_REGEXP = .*/scalable-committer/(service/coordinator|loadgen|cmd)
-HEAVY_PACKAGES_REGEXP = .*/scalable-committer/(docker|integration)
+ROOT_PKG_REGEXP = github.ibm.com/decentralized-trust-research/scalable-committer
+CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query)
+REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(service/coordinator|loadgen|cmd)
+HEAVY_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(docker|integration)
 
-# Excludes integration and container tests. Use `make integration-test` and `make container-test`.
+# Excludes integration and container tests.
+# Use `test-integration`, `test-integration-db-resiliency`, and `test-container`.
 test: build
 	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")
 
-integration-test: build
-	$(go_cmd) test -timeout 30m -v ./integration/...
+# Integration tests excluding DB resiliency tests.
+# Use `test-integration-db-resiliency`.
+test-integration: build
+	$(go_cmd) test -timeout 30m -v ./integration/... -skip "DBResiliency.*"
 
-container-test: build-test-node-image build-mock-orderer-image
+# DB resiliency integration tests.
+test-integration-db-resiliency: build
+	$(go_cmd) test -timeout 30m -v ./integration/... -run "DBResiliency.*"
+
+# Tests the all-in-one docker image.
+test-container: build-test-node-image build-mock-orderer-image
 	$(go_cmd) test -v ./docker/...
 
+# Test a specific package.
 test-package-%: build
 	$(go_cmd) test -timeout 30m -v ./$*/...
 
@@ -121,7 +133,11 @@ clean: FORCE
 	@rm -rf $(arch_output_dir)
 
 kill-test-docker: FORCE
-	$(docker_cmd) ps -aq -f name=sc_yugabyte_unit_tests | xargs $(DOCKER_CMD) rm -f
+	$(docker_cmd) ps -aq -f name=sc_yugabyte_unit_tests | xargs $(docker_cmd) rm -f
+	$(docker_cmd) ps -aq -f name=sc_postgres_unit_tests | xargs $(docker_cmd) rm -f
+
+bench-loadgen: FORCE
+	$(go_cmd) test ./loadgen/workload/... -bench "BenchmarkGen.*" -run=^$
 
 #########################
 # Generate protos
@@ -164,6 +180,7 @@ build-arch-%: FORCE
 		os=$(word 1, $(subst -, ,$*)) \
 		arch=$(word 2, $(subst -, ,$*)) \
 		output_dir=$(arch_output_dir)/$* \
+		build_flags="-ldflags '-w -s' $(build_flags)" \
 		build
 
 coordinator: FORCE $(output_dir)
@@ -205,11 +222,10 @@ build-docker: FORCE $(cache_dir) $(mod_cache_dir)
     make build output_dir=$(output_dir) env="$(env)"
 	scripts/amend-permissions.sh "$(cache_dir)" "$(mod_cache_dir)"
 
-build-test-node-image: build-arch pull-db-image
+build-test-node-image: build-arch
 	${docker_cmd} build $(docker_build_flags) \
 		-f $(dockerfile_test_node_dir)/Dockerfile \
 		-t ${image_namespace}/committer-test-node:${version} \
-		--build-arg DB_IMAGE=${db_image} \
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		. $(docker_push_arg)
 
@@ -226,14 +242,17 @@ build-mock-orderer-image: build-arch
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		.
 
-pull-db-image: FORCE
-	${docker_cmd} pull ${db_image}
+#########################
+# Linter
+#########################
 
 lint: FORCE
 	@echo "Running Go Linters..."
 	golangci-lint run --color=always --new-from-rev=main --timeout=4m
 	@echo "Running SQL Linters..."
-	sh scripts/sql-lint.sh
+	git ls-files '*.sql' | sort -u | ${PYTHON_CMD} -m sqlfluff lint --dialect postgres
+	@echo "Running License Header Linters..."
+	scripts/license-lint.sh
 
 # This rule can be used to find and fix lint issues for specific package.
 full-lint-%: FORCE

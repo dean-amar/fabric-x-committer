@@ -377,7 +377,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				Load:       true,
 			},
 			Limit: &adapters.GenerateLimit{
-				Blocks: 10_000,
+				Transactions: 5_000,
 			},
 		},
 	}}

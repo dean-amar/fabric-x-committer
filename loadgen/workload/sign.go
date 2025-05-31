@@ -37,7 +37,7 @@ type (
 )
 
 var defaultPolicy = Policy{
-	Scheme: signature.NoScheme,
+	Scheme: signature.Ecdsa,
 }
 
 // NewTxSignerVerifier creates a new TxSignerVerifier given a workload profile.

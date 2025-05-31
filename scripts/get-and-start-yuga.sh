@@ -26,10 +26,12 @@ ulimit -n 100000
 echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
-DATA_DIR=$(mktemp -d -t yuga)
+DATA_DIR=$(mktemp -d -t "yuga.XXXX")
 echo "Using temporary data dir: $DATA_DIR"
 
 echo "Running YugabyteDB"
+alias python='${PYTHON_CMD:-python}'
+${PYTHON_CMD:-python} -m pip install setuptools
 bin/yugabyted start \
   --advertise_address 0.0.0.0 \
   --callhome false \

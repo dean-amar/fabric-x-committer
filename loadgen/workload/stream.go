@@ -11,8 +11,8 @@ import (
 	"math/rand"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/ratelimit"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
@@ -37,7 +37,7 @@ type (
 	stream struct {
 		options *StreamOptions
 		ready   *channel.Ready
-		limiter ratelimit.Limiter
+		limiter *rate.Limiter
 	}
 )
 
@@ -53,7 +53,7 @@ func NewTxStream(
 	modifierGenerators ...Generator[Modifier],
 ) *TxStream {
 	signer := NewTxSignerVerifier(profile.Transaction.Policy)
-	txStream := &TxStream{stream: newStream(options)}
+	txStream := &TxStream{stream: newStream(profile, options)}
 	for _, w := range makeWorkersData(profile) {
 		modifiers := make([]Modifier, 0, len(modifierGenerators)+2)
 		if len(profile.Conflicts.Dependencies) > 0 {
@@ -105,7 +105,7 @@ func (s *TxStream) MakeGenerator() *RateLimiterGenerator[*protoblocktx.Tx] {
 
 // NewQueryGenerator creates workers that generates queries into a queue.
 func NewQueryGenerator(profile *Profile, options *StreamOptions) *QueryStream {
-	qs := &QueryStream{stream: newStream(options)}
+	qs := &QueryStream{stream: newStream(profile, options)}
 	for _, w := range makeWorkersData(profile) {
 		queryGen := newQueryGenerator(NewRandFromSeedGenerator(w.seed), w.keyGen, profile)
 		qs.gen = append(qs.gen, queryGen)
@@ -176,11 +176,15 @@ func ingestBatchesToQueue[T any](ctx context.Context, c chan<- []T, g Generator[
 	}
 }
 
-func newStream(options *StreamOptions) stream {
+func newStream(profile *Profile, options *StreamOptions) stream {
+	// We allow bursting with a full block.
+	// We also need to support bursting with the size of the generated batch
+	// as we fetch the entire batch regardless of the block size.
+	burst := max(int(options.GenBatch), int(profile.Block.Size)) //nolint:gosec // uint64 -> int.
 	return stream{
 		options: options,
 		ready:   channel.NewReady(),
-		limiter: NewLimiter(options.RateLimit),
+		limiter: NewLimiter(options.RateLimit, burst),
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
@@ -36,7 +37,7 @@ func NewVCAdapter(config *VCClientConfig, res *ClientResources) *VcAdapter {
 }
 
 // RunWorkload applies load on the VC.
-func (c *VcAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
+func (c *VcAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
 	commonConn, connErr := connection.Connect(connection.NewInsecureLoadBalancedDialConfig(c.config.Endpoints))
 	if connErr != nil {
 		return errors.Wrapf(connErr, "failed to create connection to validator persisters")
@@ -77,9 +78,7 @@ func (c *VcAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
 	g, gCtx := errgroup.WithContext(dCtx)
 	for _, stream := range streams {
 		g.Go(func() error {
-			return c.sendBlocks(ctx, txStream, func(block *protocoordinatorservice.Block) error {
-				return stream.Send(mapVCBatch(block))
-			})
+			return sendBlocks(ctx, &c.commonAdapter, txStream, mapVCBatch, stream.Send)
 		})
 		g.Go(func() error {
 			defer dCancel() // We stop sending if we can't track the received items.
@@ -112,7 +111,7 @@ func (c *VcAdapter) receiveStatus(
 	return nil
 }
 
-func mapVCBatch(block *protocoordinatorservice.Block) *protovcservice.TransactionBatch {
+func mapVCBatch(block *protocoordinatorservice.Block) (*protovcservice.TransactionBatch, error) {
 	txs := make([]*protovcservice.Transaction, len(block.Txs))
 	for i, tx := range block.Txs {
 		txs[i] = &protovcservice.Transaction{
@@ -122,5 +121,5 @@ func mapVCBatch(block *protocoordinatorservice.Block) *protovcservice.Transactio
 			TxNum:       block.TxsNum[i],
 		}
 	}
-	return &protovcservice.TransactionBatch{Transactions: txs}
+	return &protovcservice.TransactionBatch{Transactions: txs}, nil
 }

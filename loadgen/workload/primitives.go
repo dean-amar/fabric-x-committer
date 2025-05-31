@@ -7,10 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package workload
 
 import (
+	"context"
 	"math/rand"
 
 	"github.com/google/uuid"
-	"go.uber.org/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 // Generator generates new T each time Next() is called.
@@ -102,38 +103,51 @@ func (g *UUIDGenerator) Next() string {
 // It limits the generated rate using Limiter.
 // It will finish once Chan is closed.
 type RateLimiterGenerator[T any] struct {
-	Chan      <-chan []T
-	Limiter   ratelimit.Limiter
-	lastBatch []T
-	index     int
+	Chan    <-chan []T
+	Limiter *rate.Limiter
+	items   []T
 }
 
 // Next yields a value at the required rate.
-func (g *RateLimiterGenerator[T]) Next() T {
-	if g.Chan == nil {
+func (g *RateLimiterGenerator[T]) Next(ctx context.Context) T {
+	ret := g.NextN(ctx, 1)
+	if len(ret) == 0 {
 		return *new(T)
 	}
-	if g.index >= len(g.lastBatch) {
-		var ok bool
-		g.lastBatch, ok = <-g.Chan
-		g.index = 0
-		if !ok {
-			g.Chan = nil
-			return *new(T)
-		}
-		if len(g.lastBatch) == 0 {
-			return *new(T)
-		}
-	}
-	next := g.lastBatch[g.index]
-	g.index++
-	g.Limiter.Take()
-	return next
+	return ret[0]
 }
 
 // NextN returns the next N values from the generator.
-func (g *RateLimiterGenerator[T]) NextN(num int) []T {
-	return GenerateArray(g, num)
+func (g *RateLimiterGenerator[T]) NextN(ctx context.Context, size int) []T {
+	if g.Chan == nil {
+		return nil
+	}
+
+	var fetchedCount int
+	for len(g.items) < size {
+		newBatch, ok := <-g.Chan
+		if !ok || len(newBatch) == 0 {
+			g.Chan = nil
+			ret := g.items
+			g.items = nil
+			return ret
+		}
+		fetchedCount += len(newBatch)
+		g.items = append(g.items, newBatch...)
+	}
+
+	if fetchedCount > 0 {
+		// We wait according to the limiter.
+		// To reduce contention, we only wait once per call, and only if we fetched new items.
+		err := g.Limiter.WaitN(ctx, fetchedCount)
+		if err != nil {
+			logger.Warnf("rate limiter: %v", err)
+		}
+	}
+
+	ret := g.items[:size]
+	g.items = g.items[size:]
+	return ret
 }
 
 // GenerateArray generates an array of items of the requested size given a generator.

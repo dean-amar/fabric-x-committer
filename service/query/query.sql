@@ -1,4 +1,10 @@
-/* template for the querying rows for each namespace. */
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+
+Template for the querying rows for each namespace.
+*/
 SELECT
     key,
     value,

@@ -19,7 +19,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 )
 
-func TestYugabyteFollowerNodeCrashHandling(t *testing.T) {
+func TestDBResiliencyYugabyteFollowerNodeCrash(t *testing.T) {
 	t.Parallel()
 
 	clusterController, clusterConnection := runner.StartYugaCluster(createInitContext(t), t, 3)
@@ -31,7 +31,7 @@ func TestYugabyteFollowerNodeCrashHandling(t *testing.T) {
 	waitForCommittedTxs(t, c, 15_000)
 }
 
-func TestYugabyteLeaderNodeCrashHandling(t *testing.T) {
+func TestDBResiliencyYugabyteLeaderNodeCrash(t *testing.T) {
 	t.Parallel()
 
 	clusterController, clusterConnection := runner.StartYugaCluster(createInitContext(t), t, 3)
@@ -49,7 +49,7 @@ func TestYugabyteLeaderNodeCrashHandling(t *testing.T) {
 	waitForCommittedTxs(t, c, 15_000)
 }
 
-func TestPrimaryPostgresNodeCrashHandling(t *testing.T) {
+func TestDBResiliencyPrimaryPostgresNodeCrash(t *testing.T) {
 	t.Parallel()
 
 	clusterController, clusterConnection := runner.StartPostgresCluster(createInitContext(t), t)
@@ -62,7 +62,7 @@ func TestPrimaryPostgresNodeCrashHandling(t *testing.T) {
 	waitForCommittedTxs(t, c, 15_000)
 }
 
-func TestSecondaryPostgresNodeCrashHandling(t *testing.T) {
+func TestDBResiliencySecondaryPostgresNodeCrash(t *testing.T) {
 	t.Parallel()
 
 	clusterController, clusterConnection := runner.StartPostgresCluster(createInitContext(t), t)

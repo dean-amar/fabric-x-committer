@@ -72,6 +72,8 @@ func (r *relay) run(ctx context.Context, config *relayRunConfig) error { //nolin
 	r.nextBlockNumberToBeCommitted.Store(config.nextExpectedBlockByCoordinator)
 	r.incomingBlockToBeCommitted = config.incomingBlockToBeCommitted
 	r.outgoingCommittedBlock = config.outgoingCommittedBlock
+	r.blkNumToBlkWithStatus.Clear()
+	r.txIDToBlkNum.Clear()
 
 	rCtx, rCancel := context.WithCancel(ctx)
 	defer rCancel()

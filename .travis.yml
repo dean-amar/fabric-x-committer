@@ -1,10 +1,14 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 language: go
 arch: amd64
 virt: vm
 os: linux
-dist: focal
+dist: noble
 go:
-  - "1.24"
+  - "1.24.3"
 
 cache:
   directories:
@@ -23,25 +27,26 @@ before_install:
   - export GOPRIVATE=github.ibm.com
   - export DB_DEPLOYMENT=local
   - git config --global url."https://${GITHUB_USER}:${GITHUB_TOKEN}@github.ibm.com".insteadOf "https://github.ibm.com"
+  # We use Python 3.12 for sqlfluff
+  - pyenv global 3.12
+  - export PYTHON_CMD="python3.12"
 
 jobs:
   include:
     - stage: lint
       install:
-        # Install dependencies
-        - sh scripts/install-protobuf.sh
-        - go install golang.org/x/tools/cmd/goimports@latest
-        - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.0.2
-        - pip install sqlfluff
+        # Install development dependencies
+        - scripts/install-dev-dependencies.sh
       before_script:
         # Fetch main to only detect issues from changes to main
         - git fetch origin main:main
         # Apply formatting
-        - find . -name \*.go -not -name \*.pb.go -exec goimports -d -e -local "github.ibm.com/decentralized-trust-research/scalable-committer" {} \; | tee /dev/stderr | [ $(wc -c) -eq 0 ]
-        - find . -name \*.go -not -name \*.pb.go -exec gofmt -d -e  {} \; | tee /dev/stderr | [ $(wc -c) -eq 0 ]
+        - gofmt -w .
+        - goimports -local "github.ibm.com/decentralized-trust-research/scalable-committer" -w .
+        # Re make protobufs, overwriting any formatting
         - PATH="$HOME/bin:$PATH" make proto
       script:
-        # Check if original code changed due to formatting
+        # Check if original code changed due to formatting or protobuf generation
         - git diff | tee /dev/stderr | [ $(wc -c) -eq 0 ]
         # Run lint and test
         - make lint
@@ -50,16 +55,19 @@ jobs:
       script: make test-no-db
     - stage: test
       name: Requires and Core DB Tests (postgres)
-      install: sh scripts/get-and-start-postgres.sh
+      install: scripts/get-and-start-postgres.sh
       script: make test-requires-db test-core-db
     - stage: test
       name: Core DB Tests (yugabyte)
-      install: sh scripts/get-and-start-yuga.sh
+      install: scripts/get-and-start-yuga.sh
       script: make test-core-db
     - stage: test
       name: Integration Tests (yugabyte)
-      install: sh scripts/get-and-start-yuga.sh
-      script: travis_wait 30 make integration-test
+      install: scripts/get-and-start-yuga.sh
+      script: travis_wait 30 make test-integration
     - stage: test
-      name: Build and test container images
-      script: make container-test -j16
+      name: Integration DB Resiliency (container)
+      script: make test-integration-db-resiliency
+    - stage: test
+      name: Build and test all-in-one test image (container)
+      script: make test-container -j16

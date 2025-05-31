@@ -168,7 +168,9 @@ func readAndWriteKeys(txNamespaces []*protoblocktx.TxNamespace) *readWriteKeys {
 		default:
 			key = constructCompositeKey(types.MetaNamespaceID, []byte(ns.NsId))
 		}
-		readOnlyKeys = append(readOnlyKeys, key)
+		if key != "" {
+			readOnlyKeys = append(readOnlyKeys, key)
+		}
 
 		for _, ro := range ns.ReadsOnly {
 			readOnlyKeys = append(readOnlyKeys, constructCompositeKey(ns.NsId, ro.Key))

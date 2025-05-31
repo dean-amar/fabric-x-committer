@@ -67,8 +67,8 @@ generate:
 # For adapters that use concurrent submitters, we cannot enforce exact limits.
 # The sidecar and coordinator adapters are sequential, so they don't have these issues.
 limit:
-  blocks: 10_000
-  transactions: 0
+  blocks: 0
+  transactions: 5_000
 
 logging:
   enabled: true

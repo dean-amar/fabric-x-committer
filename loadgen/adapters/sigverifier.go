@@ -40,7 +40,7 @@ func NewSVAdapter(config *VerifierClientConfig, res *ClientResources) *SvAdapter
 }
 
 // RunWorkload applies load on the SV.
-func (c *SvAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
+func (c *SvAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
 	updateMsg, err := createUpdate(c.res.Profile.Transaction.Policy)
 	if err != nil {
 		return errors.Wrap(err, "failed creating verification policy")
@@ -74,9 +74,7 @@ func (c *SvAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
 
 	for _, stream := range streams {
 		g.Go(func() error {
-			return c.sendBlocks(gCtx, txStream, func(block *protocoordinatorservice.Block) error {
-				return stream.Send(mapVSBatch(block))
-			})
+			return sendBlocks(gCtx, &c.commonAdapter, txStream, mapVSBatch, stream.Send)
 		})
 		g.Go(func() error {
 			defer dCancel() // We stop sending if we can't track the received items.
@@ -145,7 +143,7 @@ func (c *SvAdapter) receiveStatus(
 	return nil
 }
 
-func mapVSBatch(b *protocoordinatorservice.Block) *protosigverifierservice.RequestBatch {
+func mapVSBatch(b *protocoordinatorservice.Block) (*protosigverifierservice.RequestBatch, error) {
 	reqs := make([]*protosigverifierservice.Request, len(b.Txs))
 	for i, tx := range b.Txs {
 		reqs[i] = &protosigverifierservice.Request{
@@ -154,5 +152,5 @@ func mapVSBatch(b *protocoordinatorservice.Block) *protosigverifierservice.Reque
 			Tx:       tx,
 		}
 	}
-	return &protosigverifierservice.RequestBatch{Requests: reqs}
+	return &protosigverifierservice.RequestBatch{Requests: reqs}, nil
 }

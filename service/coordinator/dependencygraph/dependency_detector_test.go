@@ -7,38 +7,25 @@ SPDX-License-Identifier: Apache-2.0
 package dependencygraph
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
 func TestDependencyDetector(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	t.Cleanup(cancel)
 
 	keys := makeTestKeys(t, 6)
 
 	dd := newDependencyDetector()
-	test.RunServiceForTest(ctx, t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(dd.workers.run(ctx))
-	}, nil)
 
 	tx1Node := createTxNode(t, [][]byte{keys[0], keys[1]}, [][]byte{keys[2], keys[3]}, [][]byte{keys[4], keys[5]})
 	dependsOnTx := dd.getDependenciesOf(tx1Node)
 	require.Empty(t, dependsOnTx)
 
 	depDetect := newDependencyDetector()
-	test.RunServiceForTest(ctx, t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(depDetect.workers.run(ctx))
-	}, nil)
 	depDetect.addWaitingTx(tx1Node)
-	dd.mergeWaitingTx(ctx, depDetect)
+	dd.mergeWaitingTx(depDetect)
 
 	// tx2Node depends on tx1Node as tx2 writes k1 while tx1 reads k1 -- rw dependency.
 	tx2Node := createTxNode(t, nil, [][]byte{keys[0]}, nil)
@@ -55,7 +42,7 @@ func TestDependencyDetector(t *testing.T) {
 
 	depDetect = newDependencyDetector()
 	depDetect.addWaitingTx(tx3Node)
-	dd.mergeWaitingTx(ctx, depDetect)
+	dd.mergeWaitingTx(depDetect)
 
 	// tx4Node depends on tx1Node as tx4 writes k5 and k6 while tx1 writes k5 and k6 -- ww dependency.
 	tx4Node := createTxNode(t, nil, nil, [][]byte{keys[4], keys[5]})
@@ -90,7 +77,7 @@ func TestDependencyDetector(t *testing.T) {
 
 	depDetect = newDependencyDetector()
 	depDetect.addWaitingTx(tx7Node)
-	dd.mergeWaitingTx(ctx, depDetect)
+	dd.mergeWaitingTx(depDetect)
 
 	// tx8Node depends on all previous transactions.
 	tx8Node := createTxNode(t, [][]byte{keys[3]}, [][]byte{keys[0], keys[2]}, [][]byte{keys[5]})
@@ -110,10 +97,10 @@ func TestDependencyDetector(t *testing.T) {
 	dd.addWaitingTx(tx8Node)
 
 	// remove 4 transactions from the dependency detector.
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx1Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx2Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx3Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx4Node})
+	dd.removeWaitingTx(TxNodeBatch{tx1Node})
+	dd.removeWaitingTx(TxNodeBatch{tx2Node})
+	dd.removeWaitingTx(TxNodeBatch{tx3Node})
+	dd.removeWaitingTx(TxNodeBatch{tx4Node})
 
 	// tx9Node would have been dependent on all previous transactions if they were not removed.
 	// As we have removed tx1 to tx4, tx9Node should only be dependent on tx5, tx6, tx7, and tx8.
@@ -125,11 +112,11 @@ func TestDependencyDetector(t *testing.T) {
 	dd.addWaitingTx(tx9Node)
 
 	// remove all remaining transactions from the dependency detector.
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx5Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx6Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx7Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx8Node})
-	dd.removeWaitingTx(ctx, TxNodeBatch{tx9Node})
+	dd.removeWaitingTx(TxNodeBatch{tx5Node})
+	dd.removeWaitingTx(TxNodeBatch{tx6Node})
+	dd.removeWaitingTx(TxNodeBatch{tx7Node})
+	dd.removeWaitingTx(TxNodeBatch{tx8Node})
+	dd.removeWaitingTx(TxNodeBatch{tx9Node})
 
 	// tx10Node would have been dependent on all previous transactions if they were not removed.
 	// As we have removed tx1 to tx9, tx9Node should not be dependent on any transaction.

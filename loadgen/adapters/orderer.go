@@ -12,6 +12,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 
+	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
 )
 
@@ -32,7 +33,7 @@ func NewOrdererAdapter(config *OrdererClientConfig, res *ClientResources) *Order
 }
 
 // RunWorkload applies load on the sidecar.
-func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream TxStream) error {
+func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
 	broadcastSubmitter, err := broadcastdeliver.New(&c.config.Orderer)
 	if err != nil {
 		return errors.Wrap(err, "failed to create orderer clients")
@@ -83,11 +84,11 @@ func (*OrdererAdapter) Supports() Phases {
 }
 
 func (c *OrdererAdapter) sendTransactions(
-	ctx context.Context, txStream TxStream, stream *broadcastdeliver.EnvelopedStream,
+	ctx context.Context, txStream *workload.StreamWithSetup, stream *broadcastdeliver.EnvelopedStream,
 ) error {
 	txGen := txStream.MakeTxGenerator()
 	for ctx.Err() == nil {
-		tx := txGen.Next()
+		tx := txGen.Next(ctx)
 		if tx == nil {
 			// If the context ended, the generator returns nil.
 			return nil

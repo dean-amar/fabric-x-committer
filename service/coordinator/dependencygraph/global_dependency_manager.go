@@ -111,11 +111,6 @@ func (dm *globalDependencyManager) run(ctx context.Context) {
 	g, gCtx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		logger.Debug("Starting dependencyDetector workers")
-		return dm.dependencyDetector.workers.run(gCtx)
-	})
-
-	g.Go(func() error {
 		dm.constructDependencyGraph(gCtx)
 		return nil
 	})
@@ -184,7 +179,7 @@ func (dm *globalDependencyManager) constructDependencyGraph(ctx context.Context)
 		//         already has the reads and writes in required format, we are just
 		// 	       merging it with the global dependency detector.
 		start = time.Now()
-		dm.dependencyDetector.mergeWaitingTx(ctx, txsNodeBatch.localDepDetector)
+		dm.dependencyDetector.mergeWaitingTx(txsNodeBatch.localDepDetector)
 		promutil.Observe(m.gdgUpdateDependencyDetectorSeconds, time.Since(start))
 
 		dm.mu.Unlock()
@@ -224,7 +219,7 @@ func (dm *globalDependencyManager) processValidatedTransactions(ctx context.Cont
 		for _, txNode := range txsNode {
 			fullyFreedDependents = append(fullyFreedDependents, txNode.freeDependents()...)
 		}
-		dm.dependencyDetector.removeWaitingTx(ctx, txsNode)
+		dm.dependencyDetector.removeWaitingTx(txsNode)
 		promutil.Observe(m.gdgRemoveDependentsOfValidatedTxSeconds, time.Since(start))
 		dm.mu.Unlock()
 

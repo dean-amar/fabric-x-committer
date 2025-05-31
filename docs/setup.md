@@ -1,20 +1,25 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
 # Prerequisites
 
-### Golang 1.20
+### Golang 1.24.3
 
 #### Mac:
 
 ```shell
-brew install go@1.20
+brew install go@1.24.3
 ```
 
 #### Ubuntu:
 
 ```shell
 apt-get update
-wget https://go.dev/dl/go1.20.3.linux-amd64.tar.gz
-tar xvf ./go1.20.3.linux-amd64.tar.gz
-rm ./go1.20.3.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.24.3.linux-amd64.tar.gz
+tar xvf ./go1.24.3.linux-amd64.tar.gz
+rm ./go1.24.3.linux-amd64.tar.gz
 mv ./go/ /usr/local/
 ```
 
@@ -99,15 +104,15 @@ To execute the tests, use:
 make test
 ```
 
-## Golang Linter Check Installation
+## Golang Development Dependencies Installation
 
 ```shell
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.4
+scripts/install-dev-dependencies.sh
 ```
 
 #### Note on YugabyteDB
 
-In some tests, YugabyteDB is required.
+In some tests, a DB is required (YugabyteDB or PostgreSQL).
 The test harness will either create a YugabyteDB Docker instance or reuse an existing instance.
 Therefore, the test harness will not shut down the DB container between tests.
 Once you no longer intend to run tests, you can stop the container using `make kill-test-docker`.
@@ -131,13 +136,4 @@ docker run --name sc_yugabyte_unit_tests \
   --ui=false \
   --tserver_flags=ysql_max_connections=5000 \
   --insecure
-```
-
-# Run local binaries
-
-```shell
-bin/sigservice --config config/config-sigservice.yaml
-bin/shardsservice --config config/config-shardsservice.yaml
-bin/coordinator --config config/config-coordinator.yaml
-bin/loadgen stream --config config/config-loadgen.yaml
 ```

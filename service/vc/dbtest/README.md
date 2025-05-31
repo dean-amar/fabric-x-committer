@@ -1,3 +1,8 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
 # Postgres Support
 
 You can use VCService with a local Postgres instance as an alternative to Yugabyte.  
@@ -18,7 +23,7 @@ docker run --name sc_postgres_unit_tests \
   -e POSTGRES_PASSWORD=yugabyte \
   -e POSTGRES_USER=yugabyte \
   -p 5433:5432 \
-  -d postgres:16.1
+  -d postgres:16.9-alpine3.21
 ```
 
 You can kill the instance by running:
@@ -28,9 +33,8 @@ docker ps -aq -f name=sc_postgres_unit_tests | xargs docker rm -f
 
 ## Testing
 
-Once Postgres is up and running you can run the tests of VCService.
-(Note that command below assumes we are in `scalable-committer/vcservice/yuga`)
+Once Postgres is up and running you can run the tests of VC service.
 ```bash
-DB_DEPLOYMENT=local go test ..
+DB_DEPLOYMENT=local go test ./service/vc/dbtest/...
 ```
 
