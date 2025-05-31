@@ -42,7 +42,7 @@ type (
 		DB        DatabaseConfig
 
 		// Per service configurations.
-		ClientsConfig     ClientsTLSConfig        // coordinator, sidecar
+		ClientsCreds      ClientsTLSConfig        // coordinator, sidecar
 		BlockSize         uint64                  // orderer, loadgen
 		BlockTimeout      time.Duration           // orderer
 		ConfigBlockPath   string                  // orderer, sidecar, loadgen

@@ -186,11 +186,11 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.TLSManager = tlsgen.NewSecureCommunicationManager(t)
 
 	t.Log("create clients certificates per service")
-	s.ClientsConfig.Vc = c.createClientCerts(t, "validator-committer")
-	s.ClientsConfig.Verifier = c.createClientCerts(t, "verifier")
-	s.ClientsConfig.Coordinator = c.createClientCerts(t, "coordinator")
-	s.ClientsConfig.Query = c.createClientCerts(t, "query-service")
-	s.ClientsConfig.Sidecar = c.createClientCerts(t, "sidecar")
+	s.ClientsCreds.Vc = c.createClientCerts(t, "validator-committer")
+	s.ClientsCreds.Verifier = c.createClientCerts(t, "verifier")
+	s.ClientsCreds.Coordinator = c.createClientCerts(t, "coordinator")
+	s.ClientsCreds.Query = c.createClientCerts(t, "query-service")
+	s.ClientsCreds.Sidecar = c.createClientCerts(t, "sidecar")
 
 	t.Log("Create processes")
 	c.MockOrderer = newProcess(t, mockordererCMD, config.TemplateMockOrderer, s)
@@ -227,14 +227,14 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
 		clientConnWithCreds(t,
 			s.Endpoints.Coordinator.Server,
-			c.SystemConfig.ClientsConfig.Coordinator,
+			c.SystemConfig.ClientsCreds.Coordinator,
 		),
 	)
 
 	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
 		clientConnWithCreds(t,
 			s.Endpoints.Query.Server,
-			c.SystemConfig.ClientsConfig.Query,
+			c.SystemConfig.ClientsCreds.Query,
 		),
 	)
 
@@ -253,8 +253,8 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
 		ChannelID: s.ChannelID,
-		SidecarClient: test.MakeClientConfigWithCreds(
-			&c.SystemConfig.ClientsConfig.Sidecar,
+		ClientConfig: test.MakeClientConfigWithCreds(
+			&c.SystemConfig.ClientsCreds.Sidecar,
 			s.Endpoints.Sidecar.Server,
 		),
 	})
