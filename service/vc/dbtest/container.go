@@ -38,7 +38,7 @@ var YugabyteCMD = []string{
 	"--background", "false",
 	"--ui", "false",
 	"--tserver_flags", "ysql_max_connections=5000",
-	"--insecure",
+	//"--insecure",
 }
 
 // DatabaseContainer manages the execution of an instance of a dockerized DB for tests.
@@ -52,15 +52,22 @@ type DatabaseContainer struct {
 	Role         string
 	Cmd          []string
 	Env          []string
+	Binds        []string
 	HostPort     int
 	DbPort       docker.Port
 	PortMap      docker.Port
 	PortBinds    map[docker.Port][]docker.PortBinding
 	NetToIP      map[string]*docker.EndpointConfig
 	AutoRm       bool
+	Creds        *ContainerCreds
 
 	client      *docker.Client
 	containerID string
+}
+
+type ContainerCreds struct {
+	CredsPath  string
+	CACertPath string
 }
 
 // StartContainer runs a DB container, if no specific container details provided, default values will be set.
@@ -79,6 +86,27 @@ func (dc *DatabaseContainer) StartContainer(ctx context.Context, t *testing.T) {
 	}
 	require.NoError(t, err)
 
+	var stdout, stderr bytes.Buffer
+
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container:    dc.containerID,
+		Cmd:          []string{"ls", "-l", "/creds"},
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	require.NoError(t, err)
+
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
+		Detach:       false,
+		Tty:          false,
+		OutputStream: &stdout,
+		ErrorStream:  &stderr,
+	})
+	require.NoError(t, err)
+
+	t.Logf("STDOUT:\n%s", stdout.String())
+	//t.Logf("STDERR:\n%s", stderr.String())
+
 	// Stream logs to stdout/stderr
 	go dc.streamLogs(t)
 }
@@ -96,10 +124,30 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 			dc.Cmd = YugabyteCMD
 		}
 
+		if dc.Creds != nil {
+			t.Logf("creds-path: %v", dc.Creds.CredsPath)
+			dc.Binds = append(dc.Binds, dc.Creds.CredsPath+":/creds")
+			dc.Cmd = append(dc.Cmd, "--secure", "--certs_dir", "/creds")
+		} else {
+			dc.Cmd = append(dc.Cmd, "--insecure")
+		}
+
+		t.Logf("cmd: %v", dc.Cmd)
+
 		if dc.DbPort == "" {
 			dc.DbPort = docker.Port(fmt.Sprintf("%s/tcp", yugaDBPort))
 		}
 	case PostgresDBType:
+		if dc.Creds != nil {
+			dc.Binds = append(dc.Binds, dc.Creds.CredsPath+":/creds")
+			dc.Cmd = []string{
+				"postgres",
+				"-c", "ssl=on",
+				"-c", "ssl_cert_file=/certs/server.crt",
+				"-c", "ssl_key_file=/certs/server.key",
+			}
+		}
+
 		if dc.Image == "" {
 			dc.Image = defaultPostgresImage
 		}
@@ -108,6 +156,7 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 			dc.Env = []string{
 				"POSTGRES_PASSWORD=yugabyte",
 				"POSTGRES_USER=yugabyte",
+				"POSTGRES_INITDB_SKIP=true",
 			}
 		}
 
@@ -120,6 +169,9 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 
 	if dc.Name == "" {
 		dc.Name = fmt.Sprintf(defaultDBDeploymentTemplateName, dc.DatabaseType)
+		if dc.Creds != nil {
+			dc.Name += "_with_tls"
+		}
 	}
 
 	if dc.HostIP == "" {
@@ -175,6 +227,7 @@ func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) 
 				AutoRemove:   dc.AutoRm,
 				PortBindings: dc.PortBinds,
 				NetworkMode:  dc.Network,
+				Binds:        dc.Binds,
 			},
 		},
 	)
@@ -224,7 +277,11 @@ func (dc *DatabaseContainer) getConnectionOptions(ctx context.Context, t *testin
 		endpoints = append(endpoints, connection.CreateEndpointHP(p.HostIP, p.HostPort))
 	}
 
-	return NewConnection(endpoints...)
+	dbConnection := NewConnection(endpoints...)
+	if dc.Creds != nil {
+		dbConnection.Creds.CAPaths = []string{dc.Creds.CACertPath}
+	}
+	return dbConnection
 }
 
 // GetContainerConnectionDetails inspect the container and fetches its connection to an endpoint.

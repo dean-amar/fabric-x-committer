@@ -32,7 +32,31 @@ type (
 
 	// TLSMode defines the desired level of TLS security.
 	TLSMode string
+
+	DatabaseCreds struct {
+		CAPaths []string `mapstructure:"ca-cert-paths"`
+	}
 )
+
+func (dc *DatabaseCreds) UseCreds() bool {
+	return len(dc.CAPaths) > 0
+}
+
+func (dc *DatabaseCreds) BuildDatabaseCreds() (*tls.Config, error) {
+	if !dc.UseCreds() {
+		return nil, nil
+	}
+	certPool, err := BuildCertPool(dc.CAPaths)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Config{
+		RootCAs:    certPool,
+		MinVersion: tls.VersionTLS12,
+		ServerName: "database",
+	}, nil
+}
 
 const (
 	//nolint:revive // usage: TLS configuration modes.
@@ -102,7 +126,7 @@ func (c *ConfigTLS) buildServerCreds() (credentials.TransportCredentials, error)
 		}
 
 		if c.Mode == TLSMutual {
-			certPool, err := buildCertPool(c.CACertPaths)
+			certPool, err := BuildCertPool(c.CACertPaths)
 			if err != nil {
 				return nil, err
 			}
@@ -123,7 +147,7 @@ func (c *ConfigTLS) buildClientCreds() (*tls.Config, credentials.TransportCreden
 		return nil, insecure.NewCredentials(), nil
 
 	case TLSServer, TLSMutual:
-		certPool, err := buildCertPool(c.CACertPaths)
+		certPool, err := BuildCertPool(c.CACertPaths)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -152,7 +176,7 @@ func (c *ConfigTLS) buildClientCreds() (*tls.Config, credentials.TransportCreden
 	}
 }
 
-func buildCertPool(paths []string) (*x509.CertPool, error) {
+func BuildCertPool(paths []string) (*x509.CertPool, error) {
 	if len(paths) == 0 {
 		return nil, errors.New("no CA certificates provided")
 	}

@@ -93,6 +93,10 @@ func NewDatabasePool(ctx context.Context, config *DatabaseConfig) (*pgxpool.Pool
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed parsing datasource")
 	}
+	poolConfig.ConnConfig.TLSConfig, err = config.Creds.BuildDatabaseCreds()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed creating database creds")
+	}
 
 	poolConfig.MaxConns = config.MaxConnections
 	poolConfig.MinConns = config.MinConnections

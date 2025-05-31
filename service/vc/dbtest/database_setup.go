@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"fmt"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"os"
 	"strings"
 	"testing"
@@ -40,6 +41,8 @@ const (
 
 	deploymentTypeEnv = "DB_DEPLOYMENT"
 	databaseTypeEnv   = "DB_TYPE"
+
+	DatabaseUseTLS = "DB_TLS"
 )
 
 // randDbName generates random DB name.
@@ -77,6 +80,15 @@ func getDBTypeFromEnv() string {
 	return YugaDBType
 }
 
+// GetTlsFromEnv get the tls option for the database from environment variable.
+func GetTlsFromEnv() bool {
+	val, found := os.LookupEnv(DatabaseUseTLS)
+	if found {
+		return strings.ToLower(val) == "true"
+	}
+	return false
+}
+
 // PrepareTestEnv initializes a test environment for an existing or uncontrollable db instance.
 func PrepareTestEnv(t *testing.T) *Connection {
 	t.Helper()
@@ -90,6 +102,7 @@ func PrepareTestEnvWithConnection(t *testing.T, conn *Connection) *Connection {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), defaultStartTimeout)
 	t.Cleanup(cancel)
+	t.Log("requiring true")
 	require.True(t, conn.waitForReady(ctx), errors.Wrapf(ctx.Err(), "database is not ready"))
 	t.Logf("connection nodes details: %s", conn.endpointsString())
 
@@ -114,6 +127,7 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 	t.Helper()
 	dbDeployment := getDBDeploymentFromEnv()
 
+	t.Logf("starting and connecting: %v", GetTlsFromEnv())
 	var connOptions *Connection
 	switch dbDeployment {
 	case deploymentContainer:
@@ -124,6 +138,14 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 		connOptions = container.getConnectionOptions(ctx, t)
 	case deploymentLocal:
 		connOptions = NewConnection(connection.CreateEndpointHP("localhost", defaultLocalDBPort))
+
+		if GetTlsFromEnv() {
+			connOptions.Creds.CAPaths = []string{
+				"/Users/deanamar/Work/ssh-scalable-committer/scalable-committer/test-certs/ca.crt",
+			}
+		}
+		t.Logf("conn details: %v, with db: %v", utils.LazyJSON{O: *connOptions}, connOptions.Database)
+
 	default:
 		t.Logf("unknown db deployment type: %s", dbDeployment)
 		return nil

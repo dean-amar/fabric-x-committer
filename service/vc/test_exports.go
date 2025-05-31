@@ -152,6 +152,7 @@ func NewDatabaseTestEnvWithCluster(t *testing.T, dbConnections *dbtest.Connectio
 
 func newDatabaseTestEnv(t *testing.T, cs *dbtest.Connection, loadBalance bool) *DatabaseTestEnv {
 	t.Helper()
+
 	config := &DatabaseConfig{
 		Endpoints:      cs.Endpoints,
 		Username:       cs.User,
@@ -160,6 +161,7 @@ func newDatabaseTestEnv(t *testing.T, cs *dbtest.Connection, loadBalance bool) *
 		MaxConnections: 10,
 		MinConnections: 1,
 		LoadBalance:    loadBalance,
+		Creds:          cs.Creds,
 		Retry: &connection.RetryProfile{
 			MaxElapsedTime:  5 * time.Minute,
 			InitialInterval: time.Duration(rand.Intn(900)+100) * time.Millisecond,

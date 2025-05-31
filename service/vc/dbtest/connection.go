@@ -8,8 +8,10 @@ package dbtest
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -44,6 +46,7 @@ type Connection struct {
 	Password    string
 	Database    string
 	LoadBalance bool
+	Creds       connection.DatabaseCreds
 }
 
 // NewConnection returns a connection parameters with the specified host:port, and the default values
@@ -58,8 +61,32 @@ func NewConnection(endpoints ...*connection.Endpoint) *Connection {
 
 // dataSourceName returns the dataSourceName to be used by the database/sql package.
 func (c *Connection) dataSourceName() string {
-	return fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
+	ret := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
 		c.User, c.Password, c.endpointsString(), c.Database)
+
+	if c.Creds.UseCreds() {
+		ret = strings.Replace(ret, "sslmode=disable", "sslmode=verify-ca", 1)
+	}
+
+	fmt.Println("data-source: ", ret)
+
+	return ret
+}
+
+func (c *Connection) BuildDatabaseCreds() (*tls.Config, error) {
+	if !c.Creds.UseCreds() {
+		return nil, nil
+	}
+	certPool, err := connection.BuildCertPool(c.Creds.CAPaths)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Config{
+		RootCAs:    certPool,
+		MinVersion: tls.VersionTLS12,
+		ServerName: "database",
+	}, nil
 }
 
 // endpointsString returns the address:port as a string with comma as a separator between endpoints.
@@ -69,9 +96,14 @@ func (c *Connection) endpointsString() string {
 
 // open opens a connection pool to the database.
 func (c *Connection) open(ctx context.Context) (*pgxpool.Pool, error) {
+	fmt.Println("trying-to-open-conn - ", c.Database)
 	poolConfig, err := pgxpool.ParseConfig(c.dataSourceName())
 	if err != nil {
 		return nil, errors.Wrapf(err, "error parsing datasource: %s", c.endpointsString())
+	}
+	poolConfig.ConnConfig.TLSConfig, err = c.Creds.BuildDatabaseCreds()
+	if err != nil {
+		return nil, errors.Wrapf(err, "error bulding db creds")
 	}
 
 	poolConfig.MaxConns = 1
