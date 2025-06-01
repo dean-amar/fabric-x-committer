@@ -9,7 +9,7 @@ set -e
 
 export POSTGRES_PASSWORD=yugabyte
 export POSTGRES_USER=yugabyte
-docker-entrypoint.sh postgres &
+docker-entrypoint.sh postgres -p 5433 &
 
 "$BINS_PATH/signatureverifier" start --config "$CONFIGS_PATH/sigservice.yaml" &
 "$BINS_PATH/queryexecutor" start --config "$CONFIGS_PATH/queryservice.yaml" &

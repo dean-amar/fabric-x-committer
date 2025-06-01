@@ -410,7 +410,7 @@ func defaultDBConfig() *vc.DatabaseConfig {
 
 func defaultSampleDBConfig() *vc.DatabaseConfig {
 	return &vc.DatabaseConfig{
-		Endpoints:      []*connection.Endpoint{makeEndpoint("db", 5432)},
+		Endpoints:      []*connection.Endpoint{makeEndpoint("db", 5433)},
 		Username:       "yugabyte",
 		Password:       "yugabyte",
 		Database:       "yugabyte",
