@@ -13,7 +13,7 @@ monitoring:
 
 database:
   endpoints:
-    - db:5432
+    - db:5433
   username: "yugabyte" # The username for the database
   # TODO: pass password via environment variable
   password: "yugabyte" # The password for the database
