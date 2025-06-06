@@ -10,12 +10,12 @@ orderer-client:
     endpoints:
       - {{ .Endpoints.Sidecar.Server }}
     client-creds:
-      tls-mode: {{ .ClientsConfig.Sidecar.Mode }}
-      server-name: {{ .ClientsConfig.Sidecar.ServerName }}
-      cert-path: {{ .ClientsConfig.Sidecar.CertPath }}
-      key-path: {{ .ClientsConfig.Sidecar.KeyPath }}
+      tls-mode: {{ .ClientsCreds.Sidecar.Mode }}
+      server-name: {{ .ClientsCreds.Sidecar.ServerName }}
+      cert-path: {{ .ClientsCreds.Sidecar.CertPath }}
+      key-path: {{ .ClientsCreds.Sidecar.KeyPath }}
       ca-cert-paths:
-        {{- range .ClientsConfig.Sidecar.CACertPaths }}
+        {{- range .ClientsCreds.Sidecar.CACertPaths }}
         - {{ . }}
         {{- end }}
   orderer:

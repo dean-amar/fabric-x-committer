@@ -138,7 +138,7 @@ func (c *OrdererConnectionManager) Update(config *ConnectionConfig) error {
 }
 
 func openConnections(config *ConnectionConfig) (*tls.Config, []*OrdererConnection, error) {
-	tlsConfig, creds, err := config.ConnectionTLS.ClientOptionWithConfig()
+	tlsConfig, creds, err := config.Creds.ClientOptionWithConfig()
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to get client tls options")
 	}

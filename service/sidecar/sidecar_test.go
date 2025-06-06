@@ -220,8 +220,8 @@ func (env *sidecarTestEnv) startSidecarClient(
 ) {
 	t.Helper()
 	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
-		ChannelID:     env.config.Orderer.ChannelID,
-		SidecarClient: test.MakeClientConfigWithCreds(sidecarClientCreds, &env.config.Server.Endpoint),
+		ChannelID:    env.config.Orderer.ChannelID,
+		ClientConfig: test.MakeClientConfigWithCreds(sidecarClientCreds, &env.config.Server.Endpoint),
 	}, startBlkNum)
 }
 

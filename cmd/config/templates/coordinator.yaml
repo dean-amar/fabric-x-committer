@@ -24,12 +24,12 @@ verifier:
     - {{ .Server }}
     {{- end }}
   client-creds:
-    tls-mode: {{ .ClientsConfig.Verifier.Mode }}
-    server-name: {{ .ClientsConfig.Verifier.ServerName }}
-    key-path: {{ .ClientsConfig.Verifier.KeyPath }}
-    cert-path: {{ .ClientsConfig.Verifier.CertPath }}
+    tls-mode: {{ .ClientsCreds.Verifier.Mode }}
+    server-name: {{ .ClientsCreds.Verifier.ServerName }}
+    key-path: {{ .ClientsCreds.Verifier.KeyPath }}
+    cert-path: {{ .ClientsCreds.Verifier.CertPath }}
     ca-cert-paths:
-      {{- range .ClientsConfig.Verifier.CACertPaths }}
+      {{- range .ClientsCreds.Verifier.CACertPaths }}
       - {{ . }}
       {{- end }}
 
@@ -39,12 +39,12 @@ validator-committer:
     - {{ .Server }}
     {{- end }}
   client-creds:
-    tls-mode: {{ .ClientsConfig.Vc.Mode }}
-    server-name: {{ .ClientsConfig.Vc.ServerName }}
-    key-path: {{ .ClientsConfig.Vc.KeyPath }}
-    cert-path: {{ .ClientsConfig.Vc.CertPath }}
+    tls-mode: {{ .ClientsCreds.Vc.Mode }}
+    server-name: {{ .ClientsCreds.Vc.ServerName }}
+    key-path: {{ .ClientsCreds.Vc.KeyPath }}
+    cert-path: {{ .ClientsCreds.Vc.CertPath }}
     ca-cert-paths:
-      {{- range .ClientsConfig.Vc.CACertPaths }}
+      {{- range .ClientsCreds.Vc.CACertPaths }}
       - {{ . }}
       {{- end }}
 

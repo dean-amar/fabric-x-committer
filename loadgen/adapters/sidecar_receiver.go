@@ -35,8 +35,8 @@ const committedBlocksQueueSize = 1024
 // runReceiver start receiving blocks from the sidecar.
 func runReceiver(ctx context.Context, config *receiverConfig) error {
 	ledgerReceiver, err := sidecarclient.New(&sidecarclient.Config{
-		ChannelID:     config.ChannelID,
-		SidecarClient: config.SidecarConfig,
+		ChannelID:    config.ChannelID,
+		ClientConfig: config.SidecarConfig,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to create ledger receiver")

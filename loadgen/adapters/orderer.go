@@ -48,7 +48,7 @@ func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 		return runReceiver(gCtx, &receiverConfig{
 			ChannelID:     c.config.Orderer.ChannelID,
 			Res:           c.res,
-			SidecarConfig: &c.config.SidecarClientConfiguration,
+			SidecarConfig: c.config.SidecarConfig,
 		})
 	})
 
