@@ -7,9 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package vc
 
 import (
-	"crypto/tls"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
@@ -39,11 +37,13 @@ type DatabaseConfig struct {
 
 // DataSourceName returns the data source name of the database.
 func (d *DatabaseConfig) DataSourceName() string {
-	ret := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
+	ret := fmt.Sprintf("postgres://%s:%s@%s/%s?",
 		d.Username, d.Password, d.EndpointsString(), d.Database)
 
 	if d.Creds.UseCreds() {
-		ret = strings.Replace(ret, "sslmode=disable", "sslmode=verify-ca", 1)
+		ret += "sslmode=verify-full"
+	} else {
+		ret += "sslmode=disable"
 	}
 	// The load balancing flag is only available when the server supports it (having multiple nodes).
 	// Thus, we only add it when explicitly required. Otherwise, an error will occur.
@@ -51,22 +51,6 @@ func (d *DatabaseConfig) DataSourceName() string {
 		ret += "&load_balance=true"
 	}
 	return ret
-}
-
-func (d *DatabaseConfig) BuildDatabaseCreds() (*tls.Config, error) {
-	if !d.Creds.UseCreds() {
-		return nil, nil
-	}
-	certPool, err := connection.BuildCertPool(d.Creds.CAPaths)
-	if err != nil {
-		return nil, err
-	}
-
-	return &tls.Config{
-		RootCAs:    certPool,
-		MinVersion: tls.VersionTLS12,
-		ServerName: "database",
-	}, nil
 }
 
 // EndpointsString returns the address:port as a string with comma as a separator between endpoints.
