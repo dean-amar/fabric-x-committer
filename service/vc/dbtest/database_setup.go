@@ -12,7 +12,6 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"fmt"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"os"
 	"strings"
 	"testing"
@@ -39,10 +38,9 @@ const (
 
 	defaultLocalDBPort = "5433"
 
-	deploymentTypeEnv = "DB_DEPLOYMENT"
-	databaseTypeEnv   = "DB_TYPE"
-
-	DatabaseUseTLS = "DB_TLS"
+	DeploymentTypeEnv = "DB_DEPLOYMENT"
+	DatabaseTypeEnv   = "DB_TYPE"
+	DatabaseUseTLS    = "DB_TLS"
 )
 
 // randDbName generates random DB name.
@@ -63,7 +61,7 @@ func randDbName(t *testing.T) string {
 
 // getDBDeploymentFromEnv get the desired DB deployment type from the environment variable.
 func getDBDeploymentFromEnv() string {
-	val, found := os.LookupEnv(deploymentTypeEnv)
+	val, found := os.LookupEnv(DeploymentTypeEnv)
 	if found {
 		return strings.ToLower(val)
 	}
@@ -73,15 +71,15 @@ func getDBDeploymentFromEnv() string {
 
 // getDBTypeFromEnv get the desired DB type from the environment variable.
 func getDBTypeFromEnv() string {
-	val, found := os.LookupEnv(databaseTypeEnv)
+	val, found := os.LookupEnv(DatabaseTypeEnv)
 	if found {
 		return strings.ToLower(val)
 	}
 	return YugaDBType
 }
 
-// GetTlsFromEnv get the tls option for the database from environment variable.
-func GetTlsFromEnv() bool {
+// getTLSFromEnv get the tls option for the database from environment variable.
+func getTLSFromEnv() bool {
 	val, found := os.LookupEnv(DatabaseUseTLS)
 	if found {
 		return strings.ToLower(val) == "true"
@@ -127,29 +125,22 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 	t.Helper()
 	dbDeployment := getDBDeploymentFromEnv()
 
-	t.Logf("starting and connecting: %v", GetTlsFromEnv())
 	var connOptions *Connection
 	switch dbDeployment {
 	case deploymentContainer:
 		container := DatabaseContainer{
 			DatabaseType: getDBTypeFromEnv(),
+			UseTLS:       getTLSFromEnv(),
 		}
 		container.StartContainer(ctx, t)
 		connOptions = container.getConnectionOptions(ctx, t)
 	case deploymentLocal:
 		connOptions = NewConnection(connection.CreateEndpointHP("localhost", defaultLocalDBPort))
-
-		if GetTlsFromEnv() {
-			connOptions.Creds.CAPaths = []string{
-				"/Users/deanamar/Work/ssh-scalable-committer/scalable-committer/test-certs/ca.crt",
-			}
-		}
-		t.Logf("conn details: %v, with db: %v", utils.LazyJSON{O: *connOptions}, connOptions.Database)
-
 	default:
 		t.Logf("unknown db deployment type: %s", dbDeployment)
 		return nil
 	}
+
 	t.Logf("connection endpoints: %+v", connOptions.Endpoints)
 	return connOptions
 }

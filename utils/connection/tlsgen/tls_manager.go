@@ -55,16 +55,6 @@ func (scm *SecureCommunicationManager) CreateClientCertificate(t *testing.T) map
 	return createCertificatesPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()))
 }
 
-func (scm *SecureCommunicationManager) CreateServerDATA(
-	t *testing.T,
-	serverNameIndicator string,
-) map[string][]byte {
-	t.Helper()
-	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(serverNameIndicator)
-	require.NoError(t, err)
-	return createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes())
-}
-
 func (scm *SecureCommunicationManager) CreateDatabaseCreds(
 	t *testing.T,
 	serverNameIndicator string,
@@ -75,12 +65,53 @@ func (scm *SecureCommunicationManager) CreateDatabaseCreds(
 	return CreateCertificatesPath(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
 }
 
+func (scm *SecureCommunicationManager) CreateDatabaseCredsForYugabyte(
+	t *testing.T,
+	serverNameIndicator string,
+) (string, map[string]string) {
+	t.Helper()
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(serverNameIndicator)
+	require.NoError(t, err)
+	return CreateCertificatesPathForYugabyte(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()), serverNameIndicator)
+}
+
+func CreateCertificatesPathForYugabyte(t *testing.T, data map[string][]byte, serverName string) (string, map[string]string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	dir, err := os.MkdirTemp(tmpDir, serverName)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		require.NoError(t, os.RemoveAll(dir))
+	})
+
+	nodeName := fmt.Sprintf(".%s", serverName)
+	paths := make(map[string]string)
+	var name string
+	for key, value := range data {
+		switch key {
+		case "private-key":
+			name = "node" + nodeName + ".key"
+		case "public-key":
+			name = "node" + nodeName + ".crt"
+		case "ca-certificate":
+			name = "ca.crt"
+		default:
+			t.Errorf("wrong key")
+		}
+		dataPath, err := saveBytesToFile(dir, name, value)
+		require.NoError(t, err)
+		//t.Logf("key: %v, path: %v", key, dataPath)
+		paths[key] = dataPath
+	}
+
+	return dir, paths
+}
+
 func CreateCertificatesPath(t *testing.T, data map[string][]byte) (string, map[string]string) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	//t.Cleanup(func() {
-	//	require.NoError(t, os.RemoveAll(tmpDir))
-	//})
 
 	paths := make(map[string]string)
 	var name string
@@ -97,32 +128,10 @@ func CreateCertificatesPath(t *testing.T, data map[string][]byte) (string, map[s
 		}
 		dataPath, err := saveBytesToFile(tmpDir, name, value)
 		require.NoError(t, err)
-		t.Logf("key: %v, path: %v", key, dataPath)
 		paths[key] = dataPath
 	}
 
-	t.Logf("dir path: %v", tmpDir)
-	listDirectoryContents(tmpDir)
-
 	return tmpDir, paths
-}
-
-func listDirectoryContents(path string) error {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return fmt.Errorf("failed to read directory %s: %w", path, err)
-	}
-
-	fmt.Printf("Contents of %s:\n", path)
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			return fmt.Errorf("error reading entry info: %w", err)
-		}
-		fmt.Printf("- %s (size: %d bytes)\n", entry.Name(), info.Size())
-	}
-
-	return nil
 }
 
 func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]string {
@@ -152,5 +161,5 @@ func createDataFromKeyPair(keyPair *tlsgen.CertKeyPair, caCertificate []byte) ma
 
 func saveBytesToFile(dir, filename string, data []byte) (string, error) {
 	filePath := filepath.Join(dir, filename)
-	return filePath, os.WriteFile(filePath, data, 0644)
+	return filePath, os.WriteFile(filePath, data, 0600)
 }

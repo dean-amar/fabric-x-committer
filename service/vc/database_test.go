@@ -7,11 +7,12 @@ SPDX-License-Identifier: Apache-2.0
 package vc
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 )
 
 const (
@@ -30,6 +31,21 @@ func newDatabaseTestEnvWithTablesSetup(t *testing.T) *DatabaseTestEnv {
 	ctx, _ := createContext(t)
 	require.NoError(t, env.DB.setupSystemTablesAndNamespaces(ctx))
 	return env
+}
+
+func TestSecureDatabaseConnectionWithTablesSetup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Container IP access not supported on non-linux Docker")
+	}
+	for _, tc := range []string{"postgres", "yugabyte"} {
+		testCase := tc
+		t.Run(testCase, func(t *testing.T) {
+			t.Setenv(dbtest.DeploymentTypeEnv, "container")
+			t.Setenv(dbtest.DatabaseUseTLS, "true")
+			t.Setenv(dbtest.DatabaseTypeEnv, testCase)
+			newDatabaseTestEnvWithTablesSetup(t)
+		})
+	}
 }
 
 func TestValidateNamespaceReads(t *testing.T) {

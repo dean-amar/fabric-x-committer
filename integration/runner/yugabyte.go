@@ -83,7 +83,7 @@ func (cc *YugaClusterController) AddNode(ctx context.Context, t *testing.T) *dbt
 	cc.nodes = append(cc.nodes, node)
 
 	node.StartContainer(ctx, t)
-	waitForNodeReadiness(t, node, "Data placement constraint successfully verified")
+	node.WaitForNodeReadiness(t, dbtest.YugabyteReadinessOutput)
 
 	return node
 }

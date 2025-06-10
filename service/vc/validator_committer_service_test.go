@@ -9,7 +9,6 @@ package vc
 import (
 	"context"
 	"fmt"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 	"testing"
 	"time"
 
@@ -55,16 +54,6 @@ func TestVCSecureConnection(t *testing.T) {
 			Parallel: true,
 		},
 	)
-}
-
-func TestDatabaseSecureConnection(t *testing.T) {
-	//t.Parallel()
-	t.Setenv(dbtest.DatabaseUseTLS, "true")
-	//t.Setenv("DB_TYPE", "postgres")
-
-	NewValidatorAndCommitServiceTestEnv(t, 1)
-
-	time.Sleep(5 * time.Second)
 }
 
 func newValidatorAndCommitServiceTestEnvWithClient(

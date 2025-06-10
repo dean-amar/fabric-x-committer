@@ -28,8 +28,8 @@ func TestContainerStartAndQuery(t *testing.T) {
 	for _, tc := range []string{"postgres", "yugabyte"} {
 		testCase := tc
 		t.Run(testCase, func(t *testing.T) {
-			t.Setenv(deploymentTypeEnv, "container")
-			t.Setenv(databaseTypeEnv, testCase)
+			t.Setenv(DeploymentTypeEnv, "container")
+			t.Setenv(DatabaseTypeEnv, testCase)
 			StartAndQuery(t)
 		})
 	}

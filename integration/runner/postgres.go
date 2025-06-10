@@ -136,7 +136,7 @@ func (cc *PostgresClusterController) createAndStartNode(
 
 	cc.nodes = append(cc.nodes, node)
 	node.StartContainer(ctx, t)
-	waitForNodeReadiness(t, node, nodeCreationOpts.requiredOutput)
+	node.WaitForNodeReadiness(t, nodeCreationOpts.requiredOutput)
 
 	return node
 }

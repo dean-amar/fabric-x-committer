@@ -33,30 +33,12 @@ type (
 	// TLSMode defines the desired level of TLS security.
 	TLSMode string
 
+	// DatabaseCreds holds the database connection credentials.
 	DatabaseCreds struct {
-		CAPaths []string `mapstructure:"ca-cert-paths"`
+		CAPaths    []string `mapstructure:"ca-cert-paths"`
+		ServerName string   `mapstructure:"server-name"`
 	}
 )
-
-func (dc *DatabaseCreds) UseCreds() bool {
-	return len(dc.CAPaths) > 0
-}
-
-func (dc *DatabaseCreds) BuildDatabaseCreds() (*tls.Config, error) {
-	if !dc.UseCreds() {
-		return nil, nil
-	}
-	certPool, err := BuildCertPool(dc.CAPaths)
-	if err != nil {
-		return nil, err
-	}
-
-	return &tls.Config{
-		RootCAs:    certPool,
-		MinVersion: tls.VersionTLS12,
-		ServerName: "database",
-	}, nil
-}
 
 const (
 	//nolint:revive // usage: TLS configuration modes.
@@ -65,6 +47,28 @@ const (
 	TLSServer TLSMode = "tls"
 	TLSMutual TLSMode = "mtls"
 )
+
+// UseCreds sets the option of using TLS configuration for database connection.
+func (dc *DatabaseCreds) UseCreds() bool {
+	return len(dc.CAPaths) > 0
+}
+
+// BuildDatabaseCreds creates the database's TLS configuration for client connection.
+func (dc *DatabaseCreds) BuildDatabaseCreds() (*tls.Config, error) {
+	if !dc.UseCreds() {
+		return nil, nil
+	}
+	certPool, err := buildCertPool(dc.CAPaths)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Config{
+		RootCAs:    certPool,
+		MinVersion: tls.VersionTLS12,
+		ServerName: dc.ServerName,
+	}, nil
+}
 
 // ServerOption returns the appropriate gRPC server option based on the TLS configuration.
 // If TLS is enabled, it returns a server option with TLS credentials; otherwise,
@@ -126,7 +130,7 @@ func (c *ConfigTLS) buildServerCreds() (credentials.TransportCredentials, error)
 		}
 
 		if c.Mode == TLSMutual {
-			certPool, err := BuildCertPool(c.CACertPaths)
+			certPool, err := buildCertPool(c.CACertPaths)
 			if err != nil {
 				return nil, err
 			}
@@ -147,7 +151,7 @@ func (c *ConfigTLS) buildClientCreds() (*tls.Config, credentials.TransportCreden
 		return nil, insecure.NewCredentials(), nil
 
 	case TLSServer, TLSMutual:
-		certPool, err := BuildCertPool(c.CACertPaths)
+		certPool, err := buildCertPool(c.CACertPaths)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -176,7 +180,7 @@ func (c *ConfigTLS) buildClientCreds() (*tls.Config, credentials.TransportCreden
 	}
 }
 
-func BuildCertPool(paths []string) (*x509.CertPool, error) {
+func buildCertPool(paths []string) (*x509.CertPool, error) {
 	if len(paths) == 0 {
 		return nil, errors.New("no CA certificates provided")
 	}

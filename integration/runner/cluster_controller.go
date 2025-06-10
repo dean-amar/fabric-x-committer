@@ -9,13 +9,11 @@ package runner
 import (
 	"context"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // DBClusterController is a class that facilitates the manipulation of a DB cluster,
@@ -92,13 +90,4 @@ func (cc *DBClusterController) stopAndRemoveCluster(t *testing.T) {
 		node.StopAndRemoveContainer(t)
 	}
 	cc.nodes = nil
-}
-
-// waitForNodeReadiness checks the container's readiness by monitoring its logs.
-func waitForNodeReadiness(t *testing.T, node *dbtest.DatabaseContainer, requiredOutput string) {
-	t.Helper()
-	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		output := node.GetContainerLogs(t)
-		require.Contains(ct, output, requiredOutput)
-	}, 90*time.Second, 250*time.Millisecond, "Node %s readiness check failed", node.Name)
 }

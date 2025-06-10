@@ -25,9 +25,14 @@ database:
     {{- end }}
   username: "yugabyte"
   # TODO: pass password via environment variable
-  password: "yugabyte"
+  password: {{ .DB.Password }}
   database: {{ .DB.Name }}
   load-balance: {{ .DB.LoadBalance }}
+  ca-cert-paths:
+    {{- range .DB.Creds.CAPaths }}
+    - {{ . }}
+    {{- end }}
+  server-name: {{ .DB.Creds.ServerName }}
   max-connections: 10
   min-connections: 5
   retry:

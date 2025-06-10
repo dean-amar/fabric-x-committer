@@ -154,8 +154,10 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	s := &c.SystemConfig
 	s.DB.Name = c.dbEnv.DBConf.Database
+	s.DB.Password = c.dbEnv.DBConf.Password
 	s.DB.LoadBalance = c.dbEnv.DBConf.LoadBalance
 	s.DB.Endpoints = c.dbEnv.DBConf.Endpoints
+	s.DB.Creds = c.dbEnv.DBConf.Creds
 	s.LedgerPath = t.TempDir()
 
 	t.Log("Allocating ports")
