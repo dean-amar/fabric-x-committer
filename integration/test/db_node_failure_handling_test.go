@@ -82,7 +82,7 @@ func registerAndCreateRuntime(t *testing.T, clusterConnection *dbtest.Connection
 		NumVCService: 2,
 		BlockTimeout: 2 * time.Second,
 		BlockSize:    500,
-		DBCluster:    clusterConnection,
+		DBConnection: clusterConnection,
 	})
 	c.Start(t, runner.FullTxPathWithLoadGen)
 

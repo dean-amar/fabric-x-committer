@@ -32,12 +32,12 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature/sigtest"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tlsgen"
 )
 
 type (
@@ -94,8 +94,8 @@ type (
 		BlockTimeout      time.Duration
 		LoadgenBlockLimit uint64
 
-		// DBCluster configures the cluster to operate in DB cluster mode.
-		DBCluster *dbtest.Connection
+		// DBConnection configures the runtime to operate with a custom database connection.
+		DBConnection *dbtest.Connection
 		// TLS configures the secure level between the components: none | tls | mtls
 		TLS connection.TLSMode
 	}
@@ -119,6 +119,8 @@ const (
 	FullTxPath            = Orderer | CommitterTxPath
 	FullTxPathWithLoadGen = FullTxPath | LoadGenForOrderer
 	FullTxPathWithQuery   = FullTxPath | QueryService
+
+	FullTxPathWithLoadGenAndQuery = FullTxPathWithLoadGen | QueryService
 
 	CommitterTxPathWithLoadGen = CommitterTxPath | LoadGenForCommitter
 
@@ -146,10 +148,10 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	}
 
 	t.Log("Making DB env")
-	if conf.DBCluster == nil {
+	if conf.DBConnection == nil {
 		c.dbEnv = vc.NewDatabaseTestEnv(t)
 	} else {
-		c.dbEnv = vc.NewDatabaseTestEnvWithCluster(t, conf.DBCluster)
+		c.dbEnv = vc.NewDatabaseTestEnvWithCustomConnection(t, conf.DBConnection)
 	}
 
 	s := &c.SystemConfig

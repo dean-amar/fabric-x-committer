@@ -40,7 +40,6 @@ const (
 
 	DeploymentTypeEnv = "DB_DEPLOYMENT"
 	DatabaseTypeEnv   = "DB_TYPE"
-	DatabaseUseTLS    = "DB_TLS"
 )
 
 // randDbName generates random DB name.
@@ -78,15 +77,6 @@ func getDBTypeFromEnv() string {
 	return YugaDBType
 }
 
-// getTLSFromEnv get the tls option for the database from environment variable.
-func getTLSFromEnv() bool {
-	val, found := os.LookupEnv(DatabaseUseTLS)
-	if found {
-		return strings.ToLower(val) == "true"
-	}
-	return false
-}
-
 // PrepareTestEnv initializes a test environment for an existing or uncontrollable db instance.
 func PrepareTestEnv(t *testing.T) *Connection {
 	t.Helper()
@@ -100,7 +90,7 @@ func PrepareTestEnvWithConnection(t *testing.T, conn *Connection) *Connection {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), defaultStartTimeout)
 	t.Cleanup(cancel)
-	t.Log("requiring true")
+
 	require.True(t, conn.waitForReady(ctx), errors.Wrapf(ctx.Err(), "database is not ready"))
 	t.Logf("connection nodes details: %s", conn.endpointsString())
 
@@ -130,7 +120,6 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 	case deploymentContainer:
 		container := DatabaseContainer{
 			DatabaseType: getDBTypeFromEnv(),
-			UseTLS:       getTLSFromEnv(),
 		}
 		container.StartContainer(ctx, t)
 		connOptions = container.getConnectionOptions(ctx, t)
@@ -143,4 +132,44 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 
 	t.Logf("connection endpoints: %+v", connOptions.Endpoints)
 	return connOptions
+}
+
+// CreateAndStartSecuredDatabaseNode creates a containerized Yugabyte or PostgreSQL database instance in a secure mode.
+// This function shouldn't be number of times in parallel
+// due to the need of Yugabyte's secure node credentials path convention.
+func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType string) *Connection {
+	t.Helper()
+
+	node := &DatabaseContainer{
+		DatabaseType: dbType,
+		UseTLS:       true,
+	}
+
+	node.StartContainer(ctx, t)
+	conn := node.getConnectionOptions(ctx, t)
+
+	if node.UseTLS {
+		conn.Creds = connection.DatabaseCreds{
+			CAPaths:    []string{node.Creds.CACertPath},
+			ServerName: node.Creds.ServerName,
+		}
+		switch node.DatabaseType {
+		case YugaDBType:
+			node.WaitForNodeReadiness(t, YugabyteReadinessOutput)
+			conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
+		case PostgresDBType:
+			node.WaitForNodeReadiness(t, PostgresReadinessOutput)
+			node.ExecuteCommand(t, enforcePostgresSSLScript)
+			node.ExecuteCommand(t, reloadPostgresConfigScript)
+		default:
+			t.Fatalf("Unsupported database type: %s", node.DatabaseType)
+		}
+	}
+
+	t.Cleanup(
+		func() {
+			node.StopAndRemoveContainer(t)
+		})
+
+	return conn
 }

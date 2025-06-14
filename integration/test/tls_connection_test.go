@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package test
 
 import (
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,6 +16,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
@@ -61,26 +62,31 @@ func TestOneSidedTLSConnection(t *testing.T) {
 	require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 }
 
-func TestFullTLSConnections(t *testing.T) {
-	t.Setenv(dbtest.DeploymentTypeEnv, "container")
-	t.Setenv(dbtest.DatabaseUseTLS, "true")
-	t.Setenv(dbtest.DatabaseTypeEnv, "yugabyte")
+func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
+	t.Parallel()
+	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType} {
+		databaseType := dbType
+		t.Run(fmt.Sprintf("%s_tls", databaseType), func(t *testing.T) {
+			t.Parallel()
+			conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, databaseType)
+			gomega.RegisterTestingT(t)
+			c := runner.NewRuntime(t, &runner.Config{
+				NumVerifiers: 2,
+				NumVCService: 2,
+				BlockTimeout: 2 * time.Second,
+				BlockSize:    500,
+				TLS:          connection.TLSMutual,
+				DBConnection: conn,
+			})
 
-	gomega.RegisterTestingT(t)
-	c := runner.NewRuntime(t, &runner.Config{
-		NumVerifiers: 2,
-		NumVCService: 2,
-		BlockTimeout: 2 * time.Second,
-		BlockSize:    500,
-		TLS:          connection.TLSMutual,
-	})
+			c.Start(t, runner.FullTxPathWithLoadGenAndQuery)
 
-	c.Start(t, runner.FullTxPathWithLoadGen)
-
-	require.Eventually(t, func() bool {
-		count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
-		t.Logf("count %d", count)
-		return count > 1_000
-	}, 90*time.Second, 500*time.Millisecond)
-	require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
+			require.Eventually(t, func() bool {
+				count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
+				t.Logf("count %d", count)
+				return count > 1_000
+			}, 90*time.Second, 500*time.Millisecond)
+			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
+		})
+	}
 }

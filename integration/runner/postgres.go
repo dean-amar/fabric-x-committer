@@ -86,7 +86,7 @@ func (cc *PostgresClusterController) addPrimaryNode(ctx context.Context, t *test
 		ctx, t,
 		postgresNodeCreationBundle{
 			name:           fmt.Sprintf("postgres-primary-%s", uuid.New()),
-			requiredOutput: "database system is ready to accept connections",
+			requiredOutput: dbtest.PostgresReadinessOutput,
 			role:           LeaderNode,
 			additionalEnvs: []string{
 				"POSTGRESQL_REPLICATION_MODE=master",

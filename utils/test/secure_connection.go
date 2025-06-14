@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tlsgen"
 )
 
 type (
@@ -122,10 +122,12 @@ func CreateTLSConfigFromPaths(
 	serverName string,
 ) connection.ConfigTLS {
 	return connection.ConfigTLS{
-		Mode:        connectionMode,
-		ServerName:  serverName,
-		KeyPath:     paths["private-key"],
-		CertPath:    paths["public-key"],
-		CACertPaths: []string{paths["ca-certificate"]},
+		Mode:       connectionMode,
+		ServerName: serverName,
+		KeyPath:    paths[tlsgen.KeyPrivate],
+		CertPath:   paths[tlsgen.KeyPublic],
+		CACertPaths: []string{
+			paths[tlsgen.KeyCACert],
+		},
 	}
 }

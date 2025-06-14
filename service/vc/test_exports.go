@@ -143,8 +143,8 @@ func NewDatabaseTestEnv(t *testing.T) *DatabaseTestEnv {
 	return newDatabaseTestEnv(t, dbtest.PrepareTestEnv(t), false)
 }
 
-// NewDatabaseTestEnvWithCluster creates a new db cluster test environment.
-func NewDatabaseTestEnvWithCluster(t *testing.T, dbConnections *dbtest.Connection) *DatabaseTestEnv {
+// NewDatabaseTestEnvWithCustomConnection creates a new db cluster test environment.
+func NewDatabaseTestEnvWithCustomConnection(t *testing.T, dbConnections *dbtest.Connection) *DatabaseTestEnv {
 	t.Helper()
 	require.NotNil(t, dbConnections)
 	return newDatabaseTestEnv(t, dbtest.PrepareTestEnvWithConnection(t, dbConnections), dbConnections.LoadBalance)

@@ -19,12 +19,13 @@ import (
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tlsgen"
 )
 
 const (
@@ -35,20 +36,22 @@ const (
 	defaultHostIP  = "127.0.0.1"
 	defaultPortMap = "7000/tcp"
 
-	// defaultPathForYugabytePassword holds the path to the database credentials.
-	// This work-around needed due to the fact yugabyte has a bug that doesn't allow the usage
-	// of default passwords when running it in secure mode.
-	// Instead, they create a random password.
-	// Therefore, the password has to be manually extracted for later usage.
-	defaultPathForYugabytePassword = "/root/var/data/yugabyted_credentials.txt"
+	// ContainerPathForYugabytePassword holds the path to the database credentials.
+	// This work-around is needed due to a Yugabyte bug that prevents using default passwords in secure mode.
+	// Instead, Yugabyte generates a random password, and this path points to the output file containing it.
+	ContainerPathForYugabytePassword = "/root/var/data/yugabyted_credentials.txt" //nolint:gosec
 
 	defaultSubnet                 = "172.28.0.0/16"
 	defaultGateway                = "172.28.0.1"
 	defaultYugabyteTLSContainerIP = "172.28.0.100"
 	defaultNetworkName            = "yugabyte_with_tls_network"
 
+	defaultPostgresServerName = "database"
+
 	// YugabyteReadinessOutput is the output indicating that a Yugabyte node is ready.
 	YugabyteReadinessOutput = "Data placement constraint successfully verified"
+	// PostgresReadinessOutput is the output indicating that a Postgres node is ready.
+	PostgresReadinessOutput = "database system is ready to accept connections"
 )
 
 var (
@@ -62,11 +65,14 @@ var (
 		"--insecure",
 	}
 
+	// This script enforces SSL-only client connections to a PostgreSQL instance by updating pg_hba.conf.
 	enforcePostgresSSLScript = []string{
 		"sh", "-c",
-		`sed -i 's/^host all all all scram-sha-256$/hostssl all all 0.0.0.0\/0 scram-sha-256/' /var/lib/postgresql/data/pg_hba.conf`,
+		`sed -i 's/^host all all all scram-sha-256$/hostssl all all 0.0.0.0\/0 scram-sha-256/' ` +
+			`/var/lib/postgresql/data/pg_hba.conf`,
 	}
 
+	// This script reloads the PostgreSQL server configuration without restarting the instance.
 	reloadPostgresConfigScript = []string{
 		"psql", "-U", "yugabyte", "-c", "SELECT pg_reload_conf();",
 	}
@@ -90,7 +96,7 @@ type DatabaseContainer struct {
 	PortBinds    map[docker.Port][]docker.PortBinding
 	NetToIP      map[string]*docker.EndpointConfig
 	AutoRm       bool
-	Creds        *containerCreds
+	Creds        containerCreds
 	UseTLS       bool
 
 	client           *docker.Client
@@ -146,7 +152,6 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 			dc.Env = []string{
 				"POSTGRES_PASSWORD=yugabyte",
 				"POSTGRES_USER=yugabyte",
-				//"POSTGRES_INITDB_SKIP=true",
 			}
 		}
 
@@ -182,82 +187,88 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 		dc.client = GetDockerClient(t)
 	}
 
+	// Apply TLS configuration and credential binding if enabled.
+	// This is done after all other defaults are set up.
 	dc.setTLSPropertiesForDatabase(t)
 }
 
 func (dc *DatabaseContainer) setTLSPropertiesForDatabase(t *testing.T) {
 	t.Helper()
-	if dc.UseTLS {
-		t.Logf("using TLS: %v", dc.UseTLS)
-		var credsPathDir, serverName string
-		var paths map[string]string
-
-		tlsManager := tlsgen.NewSecureCommunicationManager(t)
-
-		switch dc.DatabaseType {
-		case PostgresDBType:
-			{
-				serverName = "database"
-				credsPathDir, paths = tlsManager.CreateDatabaseCreds(t, serverName)
-
-				dc.Cmd = []string{
-					"-c", "ssl=on",
-					"-c", "ssl_cert_file=/creds/server.crt",
-					"-c", "ssl_key_file=/creds/server.key",
-				}
-			}
-		case YugaDBType:
-			{
-				CreateDockerNetwork(t, defaultNetworkName)
-				t.Cleanup(func() {
-					RemoveDockerNetwork(t, defaultNetworkName)
-				})
-
-				serverName = defaultYugabyteTLSContainerIP
-				dc.Network = defaultNetworkName
-
-				stopContainerByIP(t, serverName)
-
-				credsPathDir, paths = tlsManager.CreateDatabaseCredsForYugabyte(t, serverName)
-
-				dc.Cmd = append(
-					utils.ReplacePattern(
-						dc.Cmd, func(s string) bool { return s == "--insecure" }, "--secure"),
-					"--certs_dir=/creds",
-				)
-
-				dc.networkingConfig = &docker.NetworkingConfig{
-					EndpointsConfig: map[string]*docker.EndpointConfig{
-						defaultNetworkName: {
-							IPAMConfig: &docker.EndpointIPAMConfig{
-								IPv4Address: defaultYugabyteTLSContainerIP,
-							},
-						},
-					},
-				}
-			}
-		default:
-			t.Fatalf("Unsupported database type: %s", dc.DatabaseType)
-		}
-
-		// We can't re-use the container because of the certificates being created on runtime.
-		// If we want to use docker secrets, we need to run the code in the same container, which we don't.
-		// Therefore, we need to remove the container and start a new one.
-		dc.Creds = &containerCreds{
-			CredsPath:  credsPathDir,
-			CACertPath: paths["ca-certificate"],
-			ServerName: serverName,
-		}
-
-		dc.Binds = append(dc.Binds, dc.Creds.CredsPath+":/creds")
-		dc.Name += "_with_tls"
-
-		t.Cleanup(
-			func() {
-				dc.StopAndRemoveContainer(t)
-			},
-		)
+	if !dc.UseTLS {
+		return
 	}
+
+	tlsManager := tlsgen.NewSecureCommunicationManager(t)
+
+	var (
+		credsPathDir, serverName string
+		paths                    map[string]string
+	)
+
+	switch dc.DatabaseType {
+	case PostgresDBType:
+		serverName = defaultPostgresServerName
+		credsPathDir, paths = dc.configurePostgresTLS(t, tlsManager)
+	case YugaDBType:
+		serverName = defaultYugabyteTLSContainerIP
+		credsPathDir, paths = dc.configureYugabyteTLS(t, tlsManager)
+
+	default:
+		t.Fatalf("Unsupported database type: %s", dc.DatabaseType)
+	}
+
+	dc.Creds = containerCreds{
+		CredsPath:  credsPathDir,
+		CACertPath: paths[tlsgen.KeyCACert],
+		ServerName: serverName,
+	}
+	dc.Binds = append(dc.Binds, credsPathDir+":/creds")
+	dc.Name += fmt.Sprintf("_with_tls_%s", uuid.New())
+}
+
+func (dc *DatabaseContainer) configurePostgresTLS(
+	t *testing.T,
+	tlsManager *tlsgen.SecureCommunicationManager,
+) (string, map[string]string) {
+	t.Helper()
+
+	dc.Cmd = []string{
+		"-c", "ssl=on",
+		"-c", "ssl_cert_file=/creds/server.crt",
+		"-c", "ssl_key_file=/creds/server.key",
+	}
+
+	return tlsManager.CreateServerCreds(t, defaultPostgresServerName, tlsgen.CertStylePostgres)
+}
+
+func (dc *DatabaseContainer) configureYugabyteTLS(
+	t *testing.T,
+	tlsManager *tlsgen.SecureCommunicationManager,
+) (string, map[string]string) {
+	t.Helper()
+	dc.Network = CreateDockerNetwork(t, defaultNetworkName, defaultSubnet, defaultGateway).Name
+	t.Cleanup(func() {
+		RemoveDockerNetwork(t, defaultNetworkName)
+	})
+
+	stopContainerByIP(t, defaultYugabyteTLSContainerIP)
+
+	dc.Cmd = append(
+		utils.ReplacePattern(dc.Cmd, func(s string) bool { return s == "--insecure" }, "--secure"),
+		"--certs_dir=/creds",
+	)
+
+	dc.networkingConfig = &docker.NetworkingConfig{
+		EndpointsConfig: map[string]*docker.EndpointConfig{
+			defaultNetworkName: {
+				IPAMConfig: &docker.EndpointIPAMConfig{
+					IPv4Address: defaultYugabyteTLSContainerIP,
+				},
+			},
+		},
+	}
+
+	return tlsManager.CreateServerCreds(t, defaultYugabyteTLSContainerIP, tlsgen.CertStyleYugabyte)
 }
 
 // createContainer attempts to create a container instance, or attach to an existing one.
@@ -346,22 +357,6 @@ func (dc *DatabaseContainer) getConnectionOptions(ctx context.Context, t *testin
 
 	dbConnection := NewConnection(endpoints...)
 
-	if dc.UseTLS {
-		dbConnection.Creds = connection.DatabaseCreds{
-			CAPaths:    []string{dc.Creds.CACertPath},
-			ServerName: dc.Creds.ServerName,
-		}
-		switch dc.DatabaseType {
-		case YugaDBType:
-			dc.WaitForNodeReadiness(t, YugabyteReadinessOutput)
-			dbConnection.Password = dc.readPasswordFromContainer(t, defaultPathForYugabytePassword)
-		case PostgresDBType:
-			dc.enforceSSLForPostgres(t)
-		default:
-			t.Fatalf("Unsupported database type: %s", dc.DatabaseType)
-		}
-	}
-
 	return dbConnection
 }
 
@@ -435,10 +430,42 @@ func (dc *DatabaseContainer) ContainerID() string {
 	return dc.containerID
 }
 
-// readPasswordFromContainer reads a password from a file in the container.
-// This function is required for the extraction of the random password
-// created by YugabyteDB in secure mode.
-// Default passwords cannot be used.
+// ExecuteCommand execute a given command in the container.
+func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	t.Logf("executing %s", strings.Join(cmd, " "))
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container:    dc.containerID,
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          false,
+	})
+	require.NoError(t, err, "failed to create exec for command")
+
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
+		OutputStream: &stdout,
+	})
+	require.NoError(t, err, "failed to start exec for command")
+
+	return stdout.String()
+}
+
+// WaitForNodeReadiness checks the container's readiness by monitoring its logs.
+func (dc *DatabaseContainer) WaitForNodeReadiness(t *testing.T, requiredOutput string) {
+	t.Helper()
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		output := dc.GetContainerLogs(t)
+		require.Contains(ct, output, requiredOutput)
+	}, 90*time.Second, 250*time.Millisecond, "Node %s readiness check failed", dc.Name)
+}
+
+// readPasswordFromContainer extracts the randomly generated password from a file inside the container.
+// This is required because YugabyteDB, when running in secure mode, doesn't allow default passwords
+// and instead generates a random one at startup.
+// If no password is found, the default one will be returned.
 func (dc *DatabaseContainer) readPasswordFromContainer(t *testing.T, filePath string) string {
 	t.Helper()
 	output := dc.ExecuteCommand(t, []string{"cat", filePath})
@@ -459,46 +486,6 @@ func (dc *DatabaseContainer) readPasswordFromContainer(t *testing.T, filePath st
 	return defaultPassword
 }
 
-// ExecuteCommand execute a given command in the container.
-func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
-	t.Helper()
-
-	var stdout bytes.Buffer
-	t.Logf("executing %s", strings.Join(cmd, " "))
-	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
-		Container:    dc.containerID,
-		Cmd:          cmd,
-		AttachStdout: true,
-		AttachStderr: true,
-		Tty:          false,
-	})
-	require.NoError(t, err, "failed to create exec for command: %v", cmd)
-
-	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
-		OutputStream: &stdout,
-		RawTerminal:  false,
-	})
-	require.NoError(t, err, "failed to start exec for command: %v", cmd)
-
-	return stdout.String()
-}
-
-// WaitForNodeReadiness checks the container's readiness by monitoring its logs.
-func (dc *DatabaseContainer) WaitForNodeReadiness(t *testing.T, requiredOutput string) {
-	t.Helper()
-	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		output := dc.GetContainerLogs(t)
-		require.Contains(ct, output, requiredOutput)
-	}, 90*time.Second, 250*time.Millisecond, "Node %s readiness check failed", dc.Name)
-}
-
-func (dc *DatabaseContainer) enforceSSLForPostgres(t *testing.T) {
-	t.Helper()
-	dc.WaitForNodeReadiness(t, "database system is ready to accept connections")
-	dc.ExecuteCommand(t, enforcePostgresSSLScript)
-	dc.ExecuteCommand(t, reloadPostgresConfigScript)
-}
-
 func stopContainerByIP(t *testing.T, targetIP string) {
 	t.Helper()
 	client := GetDockerClient(t)
@@ -506,20 +493,17 @@ func stopContainerByIP(t *testing.T, targetIP string) {
 	require.NoError(t, err)
 
 	for _, container := range containers {
-		info, err := client.InspectContainerWithOptions(docker.InspectContainerOptions{
+		cont, err := client.InspectContainerWithOptions(docker.InspectContainerOptions{
 			ID: container.ID,
 		})
-		if err != nil {
-			t.Logf("Failed to inspect container %s: %v", container.ID, err)
-			continue
-		}
+		require.NoError(t, err)
 
-		for netName, netSettings := range info.NetworkSettings.Networks {
+		for netName, netSettings := range cont.NetworkSettings.Networks {
 			if netSettings.IPAddress == targetIP {
 				t.Logf("Stopping container %s on network %s with ip %s",
-					info.Name, netName, targetIP)
-				cont := DatabaseContainer{containerID: info.ID, client: GetDockerClient(t)}
-				cont.StopAndRemoveContainer(t)
+					cont.Name, netName, targetIP)
+				contToRemove := DatabaseContainer{containerID: cont.ID, client: GetDockerClient(t)}
+				contToRemove.StopAndRemoveContainer(t)
 			}
 		}
 	}
@@ -527,28 +511,28 @@ func stopContainerByIP(t *testing.T, targetIP string) {
 }
 
 // CreateDockerNetwork creates a network if it doesn't exist.
-func CreateDockerNetwork(t *testing.T, name string) {
+func CreateDockerNetwork(t *testing.T, name, subnet, gateway string) *docker.Network {
 	t.Helper()
 	client := GetDockerClient(t)
-	_, err := client.NetworkInfo(name)
+	network, err := client.NetworkInfo(name)
 	if err == nil {
-		t.Logf("network '%s' already exists", name)
-		return
+		t.Logf("network %s already exists", name)
+		return network
 	}
 
-	opts := docker.CreateNetworkOptions{
+	network, err = client.CreateNetwork(docker.CreateNetworkOptions{
 		Name:   name,
 		Driver: "bridge",
 		IPAM: &docker.IPAMOptions{
 			Config: []docker.IPAMConfig{
-				{Subnet: defaultSubnet, Gateway: defaultGateway},
+				{Subnet: subnet, Gateway: gateway},
 			},
 		},
-	}
-	_, err = client.CreateNetwork(opts)
-	require.NoError(t, err, "failed to create network '%s'", name)
+	})
+	require.NoError(t, err, "failed to create network")
 
-	t.Logf("Docker network %s created", name)
+	t.Logf("network %s created", network.Name)
+	return network
 }
 
 // RemoveDockerNetwork removes a Docker network by name.
@@ -556,10 +540,10 @@ func RemoveDockerNetwork(t *testing.T, name string) {
 	t.Helper()
 	client := GetDockerClient(t)
 	network, err := client.NetworkInfo(name)
-	require.NoError(t, err, "failed to inspect network %s", name)
+	require.NoError(t, err)
 
 	err = client.RemoveNetwork(network.ID)
-	require.NoError(t, err, "failed to remove network %s", name)
+	require.NoError(t, err)
 
 	t.Logf("network %s removed successfully", name)
 }
