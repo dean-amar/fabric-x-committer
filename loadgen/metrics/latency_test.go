@@ -8,7 +8,6 @@ package metrics
 
 import (
 	"fmt"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"math"
 	"math/rand"
 	"sync"
@@ -19,6 +18,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
 
 //nolint:gocognit // cognitive complexity 24 > 15
