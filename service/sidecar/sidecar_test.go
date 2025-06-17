@@ -345,6 +345,7 @@ func TestSidecarRecovery(t *testing.T) {
 	env.sidecar.ledgerService, err = newLedgerService(
 		env.config.Orderer.ChannelID,
 		env.config.Ledger.Path,
+		newPerformanceMetrics(),
 	)
 	require.NoError(t, err)
 	ensureAtLeastHeight(t, env.sidecar.ledgerService, 1) // back to block 0

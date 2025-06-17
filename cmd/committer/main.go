@@ -16,8 +16,7 @@ import (
 )
 
 func main() {
-	cmd := queryServiceCmd()
-
+	cmd := committerCMD()
 	// On failure, Cobra prints the usage message and error string, so we only
 	// need to exit with a non-0 status
 	if cmd.Execute() != nil {
@@ -25,12 +24,16 @@ func main() {
 	}
 }
 
-func queryServiceCmd() *cobra.Command {
+func committerCMD() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   config.QueryName,
-		Short: fmt.Sprintf("%v is a service to query the state.", config.QueryName),
+		Use:   config.CommitterName,
+		Short: fmt.Sprintf("Fabric-X %s.", config.CommitterName),
 	}
 	cmd.AddCommand(config.VersionCmd())
-	cmd.AddCommand(config.QueryCMD("start"))
+	cmd.AddCommand(config.SidecarCMD("start-sidecar"))
+	cmd.AddCommand(config.CoordinatorCMD("start-coordinator"))
+	cmd.AddCommand(config.VcCMD("start-vc"))
+	cmd.AddCommand(config.VerifierCMD("start-verifier"))
+	cmd.AddCommand(config.QueryCMD("start-query"))
 	return cmd
 }

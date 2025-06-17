@@ -19,8 +19,8 @@ ENV SC_SIDECAR_COMMITTER_ENDPOINT=localhost:9001
 ENV SC_QUERY_DATABASE_ENDPOINTS=localhost:5433
 ENV SC_VC_DATABASE_ENDPOINTS=localhost:5433
 
-COPY ${ARCHBIN_PATH}/${TARGETOS}-${TARGETARCH} ${BINS_PATH}
-RUN rm ${BINS_PATH}/mock*
+COPY ${ARCHBIN_PATH}/${TARGETOS}-${TARGETARCH}/committer ${BINS_PATH}/
+COPY ${ARCHBIN_PATH}/${TARGETOS}-${TARGETARCH}/loadgen ${BINS_PATH}/
 COPY ./cmd/config/samples $CONFIGS_PATH
 COPY ./docker/images/test_node/scripts/. /root/
 RUN chmod a+x /root/*.sh

@@ -7,13 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 package workload
 
 import (
-	"context"
 	"math/rand"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 )
 
 type (
@@ -107,34 +104,6 @@ func multiKeyGenerator(rnd *rand.Rand, keyGen Generator[Key], keyCount *Distribu
 
 func valueGenerator(rnd *rand.Rand, valueSize uint32) *ByteArrayGenerator {
 	return &ByteArrayGenerator{Size: valueSize, Rnd: rnd}
-}
-
-// BlockGenerator generates new blocks given a TX generator.
-// It does not set the block number. It is to be set by the receiver.
-type BlockGenerator struct {
-	TxGenerator *RateLimiterGenerator[*protoblocktx.Tx]
-	BlockSize   uint64
-	txNums      []uint32
-}
-
-// Next generate a new block.
-func (g *BlockGenerator) Next(ctx context.Context) *protocoordinatorservice.Block {
-	txs := g.TxGenerator.NextN(ctx, int(g.BlockSize)) //nolint:gosec // integer overflow conversion uint64 -> int
-	// Generators return nil when their stream is done.
-	// This indicates that the block generator should also be done.
-	if len(txs) == 0 || txs[len(txs)-1] == nil {
-		return nil
-	}
-
-	// Lazy initialization of the tx numbers.
-	if len(g.txNums) < len(txs) {
-		g.txNums = utils.Range(0, uint32(len(txs))) //nolint:gosec // integer overflow conversion int -> uint32
-	}
-
-	return &protocoordinatorservice.Block{
-		Txs:    txs,
-		TxsNum: g.txNums[:len(txs)],
-	}
 }
 
 // newTxModifierTxDecorator wraps a TX generator and apply one or more modification methods.

@@ -406,7 +406,7 @@ func createTablesAndFunctionsForNamespaces(ctx context.Context, tx pgx.Tx, newNs
 }
 
 func (db *database) beginTx(ctx context.Context) (pgx.Tx, func(), error) {
-	tx, err := db.pool.Begin(ctx)
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to being a database transaction")
 	}

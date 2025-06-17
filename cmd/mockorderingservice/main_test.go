@@ -24,14 +24,14 @@ func TestMockOrderingService(t *testing.T) {
 			Name:              "start",
 			Args:              []string{"start"},
 			CmdLoggerOutputs:  []string{"Serving", s.ServiceEndpoints.Server.String()},
-			CmdStdOutput:      fmt.Sprintf("Starting %v service", serviceName),
+			CmdStdOutput:      fmt.Sprintf("Starting %v", serviceName),
 			UseConfigTemplate: config.TemplateMockOrderer,
 			System:            s,
 		},
 		{
 			Name:         "print version",
 			Args:         []string{"version"},
-			CmdStdOutput: fmt.Sprintf("%v %v", serviceName, serviceVersion),
+			CmdStdOutput: config.FullCommitterVersion(),
 		},
 		{
 			Name: "trailing flag args for version",

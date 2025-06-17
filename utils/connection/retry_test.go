@@ -135,24 +135,28 @@ func TestGrpcRetryJSON(t *testing.T) {
 	  "methodConfig": [{
 		"name": [{}],
 		"retryPolicy": {
-		  "maxAttempts": 1024,
+		  "maxAttempts": %d,
 		  "backoffMultiplier": 1.5,
 		  "initialBackoff": "0.5s",
 		  "maxBackoff": "10.0s",
 		  "retryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"]
-		},
-		"timeout": "%d.0s"
+		}
 	  }]
 	}`
-	profile := RetryProfile{}
-	jsonRaw := profile.MakeGrpcRetryPolicyJSON()
-	require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, 900), jsonRaw)
-
-	profile = RetryProfile{
-		MaxElapsedTime: 15 * time.Second,
+	for _, tt := range []struct {
+		maxElapsedTime   time.Duration
+		expectedAttempts int
+	}{
+		{maxElapsedTime: 0, expectedAttempts: 96},
+		{maxElapsedTime: 15 * time.Second, expectedAttempts: 7},
+	} {
+		t.Run(fmt.Sprintf("maxElapsed=%s", tt.maxElapsedTime), func(t *testing.T) {
+			t.Parallel()
+			profile := RetryProfile{MaxElapsedTime: tt.maxElapsedTime}
+			jsonRaw := profile.MakeGrpcRetryPolicyJSON()
+			require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, tt.expectedAttempts), jsonRaw)
+		})
 	}
-	jsonRaw = profile.MakeGrpcRetryPolicyJSON()
-	require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, 15), jsonRaw)
 }
 
 // makeOp returns an operation and a pointer to a call counter.
@@ -168,4 +172,26 @@ func makeOp(failUntil int) (func() error, *int) {
 		return nil
 	}
 	return op, &callCount
+}
+
+func TestCalcMaxAttempts(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		i, a, m, t float64
+		n          int
+	}{
+		{i: 1, a: 3, m: 2, t: 3, n: 3},  // 0 + 1 + 2         = 3
+		{i: 1, a: 3, m: 2, t: 6, n: 4},  // 0 + 1 + 2 + 3     = 6
+		{i: 1, a: 3, m: 2, t: 9, n: 5},  // 0 + 1 + 2 + 3 + 3 = 9
+		{i: 1, a: 16, m: 2, t: 7, n: 4}, // 0 + 1 + 2 + 4     = 7
+	} {
+		for _, e := range []float64{0, 1} {
+			tc := tc
+			tc.t += e
+			t.Run(fmt.Sprintf("%+v", tc), func(t *testing.T) {
+				t.Parallel()
+				require.Equal(t, tc.n, calcMaxAttempts(tc.i, tc.a, tc.m, tc.t))
+			})
+		}
+	}
 }

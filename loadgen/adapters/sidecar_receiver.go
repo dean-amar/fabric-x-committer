@@ -62,33 +62,48 @@ func receiveCommittedBlock(
 	blockQueue <-chan *common.Block,
 	res *ClientResources,
 ) {
-	committedBlock := channel.NewReader(ctx, blockQueue)
-	for ctx.Err() == nil {
-		block, ok := committedBlock.Read()
+	pCtx, pCancel := context.WithCancel(ctx)
+	defer pCancel()
+	committedBlock := channel.NewReader(pCtx, blockQueue)
+	processedBlocks := channel.Make[[]metrics.TxStatus](pCtx, cap(blockQueue))
+
+	// Pipeline the de-serialization process.
+	go func() {
+		for pCtx.Err() == nil {
+			block, ok := committedBlock.Read()
+			if !ok {
+				return
+			}
+
+			statusCodes := block.Metadata.Metadata[common.BlockMetadataIndex_TRANSACTIONS_FILTER]
+			logger.Infof("Received block #%d with %d TXs and %d statuses [%s]",
+				block.Header.Number, len(block.Data.Data), len(statusCodes), recapStatusCodes(statusCodes),
+			)
+
+			statusBatch := make([]metrics.TxStatus, 0, len(block.Data.Data))
+			for i, data := range block.Data.Data {
+				_, channelHeader, err := serialization.UnwrapEnvelope(data)
+				if err != nil {
+					logger.Warnf("Failed to unmarshal envelope: %v", err)
+					continue
+				}
+				if common.HeaderType(channelHeader.Type) == common.HeaderType_CONFIG {
+					// We can ignore config transactions as we only count data transactions.
+					continue
+				}
+				statusBatch = append(statusBatch, metrics.TxStatus{
+					TxID:   channelHeader.TxId,
+					Status: protoblocktx.Status(statusCodes[i]),
+				})
+			}
+			processedBlocks.Write(statusBatch)
+		}
+	}()
+
+	for pCtx.Err() == nil {
+		statusBatch, ok := processedBlocks.Read()
 		if !ok {
 			return
-		}
-
-		statusCodes := block.Metadata.Metadata[common.BlockMetadataIndex_TRANSACTIONS_FILTER]
-		logger.Infof("Received block #%d with %d TXs and %d statuses [%s]",
-			block.Header.Number, len(block.Data.Data), len(statusCodes), recapStatusCodes(statusCodes),
-		)
-
-		statusBatch := make([]metrics.TxStatus, 0, len(block.Data.Data))
-		for i, data := range block.Data.Data {
-			_, channelHeader, err := serialization.UnwrapEnvelope(data)
-			if err != nil {
-				logger.Warnf("Failed to unmarshal envelope: %v", err)
-				continue
-			}
-			if common.HeaderType(channelHeader.Type) == common.HeaderType_CONFIG {
-				// We can ignore config transactions as we only count data transactions.
-				continue
-			}
-			statusBatch = append(statusBatch, metrics.TxStatus{
-				TxID:   channelHeader.TxId,
-				Status: protoblocktx.Status(statusCodes[i]),
-			})
 		}
 		res.Metrics.OnReceiveBatch(statusBatch)
 		if res.isReceiveLimit() {

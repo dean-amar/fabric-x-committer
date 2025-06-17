@@ -7,8 +7,7 @@ monitoring:
     endpoint: :2110
   latency:
     sampler:
-      type: timer
-      sampling-interval: 10s
+      portion: 0.01
     buckets:
       distribution: uniform
       max-latency: 5s

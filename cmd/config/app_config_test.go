@@ -317,8 +317,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				Config: makeMonitoring("", 2110),
 				Latency: metrics.LatencyConfig{
 					SamplerConfig: metrics.SamplerConfig{
-						Type:             "timer",
-						SamplingInterval: 10 * time.Second,
+						Portion: 0.01,
 					},
 					BucketConfig: metrics.BucketConfig{
 						Distribution: "uniform",

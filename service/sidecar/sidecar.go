@@ -64,7 +64,7 @@ func New(c *Config) (*Service, error) {
 
 	// 3. Deliver the block with status to client.
 	logger.Infof("Create ledger service for channel %s", c.Orderer.ChannelID)
-	ledgerService, err := newLedgerService(c.Orderer.ChannelID, c.Ledger.Path)
+	ledgerService, err := newLedgerService(c.Orderer.ChannelID, c.Ledger.Path, metrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ledger: %w", err)
 	}

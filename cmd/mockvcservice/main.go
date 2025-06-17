@@ -21,8 +21,7 @@ import (
 )
 
 const (
-	serviceName    = "mockvcservice"
-	serviceVersion = "0.0.1"
+	serviceName = "mockvcservice"
 )
 
 func main() {
@@ -41,7 +40,7 @@ func mockvcserviceCmd() *cobra.Command {
 		Short: fmt.Sprintf("%v is a mock validator and committer service.", serviceName),
 	}
 
-	cmd.AddCommand(config.VersionCmd(serviceName, serviceVersion))
+	cmd.AddCommand(config.VersionCmd())
 	cmd.AddCommand(startCmd())
 	return cmd
 }
@@ -51,7 +50,7 @@ func startCmd() *cobra.Command {
 	var configPath string
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: fmt.Sprintf("Starts a %v.", serviceName),
+		Short: fmt.Sprintf("Starts %v.", serviceName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := config.ReadVCYamlAndSetupLogging(v, configPath)
@@ -59,7 +58,8 @@ func startCmd() *cobra.Command {
 				return err
 			}
 			cmd.SilenceUsage = true
-			cmd.Printf("Starting %v service\n", serviceName)
+			cmd.Printf("Starting %v\n", serviceName)
+			defer cmd.Printf("%v ended\n", serviceName)
 
 			vcs := mock.NewMockVcService()
 			return connection.RunGrpcServerMainWithError(cmd.Context(), conf.Server, func(server *grpc.Server) {

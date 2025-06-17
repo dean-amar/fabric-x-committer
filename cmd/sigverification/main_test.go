@@ -23,7 +23,7 @@ func TestVerifierCmd(t *testing.T) {
 			Name:              "start with endpoint",
 			Args:              []string{"start", "--endpoint", "localhost:8001"},
 			CmdLoggerOutputs:  []string{"Serving", "localhost:8001"},
-			CmdStdOutput:      fmt.Sprintf("Starting %v service", serviceName),
+			CmdStdOutput:      fmt.Sprintf("Starting %v", config.VerifierName),
 			UseConfigTemplate: config.TemplateVerifier,
 			System:            s,
 		},
@@ -31,14 +31,14 @@ func TestVerifierCmd(t *testing.T) {
 			Name:              "start",
 			Args:              []string{"start"},
 			CmdLoggerOutputs:  []string{"Serving", s.ServiceEndpoints.Server.String()},
-			CmdStdOutput:      fmt.Sprintf("Starting %v service", serviceName),
+			CmdStdOutput:      fmt.Sprintf("Starting %v", config.VerifierName),
 			UseConfigTemplate: config.TemplateVerifier,
 			System:            s,
 		},
 		{
 			Name:         "print version",
 			Args:         []string{"version"},
-			CmdStdOutput: fmt.Sprintf("%v %v", serviceName, serviceVersion),
+			CmdStdOutput: config.FullCommitterVersion(),
 		},
 		{
 			Name: "trailing flag args for version",
@@ -48,7 +48,7 @@ func TestVerifierCmd(t *testing.T) {
 		{
 			Name: "trailing command args for version",
 			Args: []string{"version", "test"},
-			Err:  fmt.Errorf(`unknown command "test" for "%v version"`, serviceName),
+			Err:  fmt.Errorf(`unknown command "test" for "%v version"`, config.VerifierName),
 		},
 	}
 

@@ -53,6 +53,7 @@ multiplatform  ?= false
 env            ?= env GOOS=$(os) GOARCH=$(arch)
 build_flags    ?= -buildvcs=false -o
 go_build       ?= $(env) $(go_cmd) build $(build_flags)
+go_test        ?= $(go_cmd) test -json -v -timeout 30m
 
 arch_output_dir_rel = $(arch_output_dir:${project_dir}/%=%)
 
@@ -82,39 +83,47 @@ CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query)
 REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(service/coordinator|loadgen|cmd)
 HEAVY_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(docker|integration)
 
+NON_HEAVY_PACKAGES=$(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")
+COR_DB_PACKAGES=$(shell $(go_cmd) list ./... | grep -E "$(CORE_DB_PACKAGES_REGEXP)")
+REQUIRES_DB_PACKAGES=$(shell $(go_cmd) list ./... | grep -E "$(REQUIRES_DB_PACKAGES_REGEXP)")
+NO_DB_PACKAGES=$(shell $(go_cmd) list ./... | grep -vE "$(CORE_DB_PACKAGES_REGEXP)|$(REQUIRES_DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
+
+GO_TEST_FMT_FLAGS := -hide empty-packages $(if $(TRAVIS),-template-dir .gotestfmt/travisci,)
+
+
 # Excludes integration and container tests.
 # Use `test-integration`, `test-integration-db-resiliency`, and `test-container`.
 test: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")
+	@$(go_test) ${NON_HEAVY_PACKAGES} | gotestfmt ${GO_TEST_FMT_FLAGS}
+
+# Test a specific package.
+test-package-%: build
+	@$(go_test) ./$*/... | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Integration tests excluding DB resiliency tests.
 # Use `test-integration-db-resiliency`.
 test-integration: build
-	$(go_cmd) test -timeout 30m -v ./integration/... -skip "DBResiliency.*"
+	@$(go_test) ./integration/... -skip "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # DB resiliency integration tests.
 test-integration-db-resiliency: build
-	$(go_cmd) test -timeout 30m -v ./integration/... -run "DBResiliency.*"
+	@$(go_test) ./integration/... -run "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests the all-in-one docker image.
 test-container: build-test-node-image build-mock-orderer-image
-	$(go_cmd) test -v ./docker/...
-
-# Test a specific package.
-test-package-%: build
-	$(go_cmd) test -timeout 30m -v ./$*/...
+	@$(go_test) ./docker/... | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests for components that directly talk to the DB, where different DBs might affect behaviour.
 test-core-db: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(CORE_DB_PACKAGES_REGEXP)")
+	@$(go_test)  ${COR_DB_PACKAGES} | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests for components that depend on the DB layer, but are agnostic to the specific DB used.
 test-requires-db: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -E "$(REQUIRES_DB_PACKAGES_REGEXP)")
+	@$(go_test) ${REQUIRES_DB_PACKAGES} | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests that require no DB at all, e.g., pure logic, utilities
 test-no-db: build
-	@$(go_cmd) test -timeout 30m -v $(shell $(go_cmd) list ./... | grep -vE "$(CORE_DB_PACKAGES_REGEXP)|$(REQUIRES_DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
+	@$(go_test) ${NO_DB_PACKAGES} | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 test-cover: build
 	$(go_cmd) test -v -coverprofile=coverage.profile ./...
@@ -136,8 +145,17 @@ kill-test-docker: FORCE
 	$(docker_cmd) ps -aq -f name=sc_yugabyte_unit_tests | xargs $(docker_cmd) rm -f
 	$(docker_cmd) ps -aq -f name=sc_postgres_unit_tests | xargs $(docker_cmd) rm -f
 
+# Run a load generation benchmarks with added TX/sec column.
 bench-loadgen: FORCE
-	$(go_cmd) test ./loadgen/workload/... -bench "BenchmarkGen.*" -run=^$
+	$(go_cmd) test ./loadgen/... -bench "Benchmark.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
+
+# Run dependency detector benchmarks with added op/sec column.
+bench-dep: FORCE
+	$(go_cmd) test ./service/coordinator/dependencygraph/... -bench "BenchmarkDependencyGraph.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
+
+# Run dependency detector benchmarks with added op/sec column.
+bench-preparer: FORCE
+	$(go_cmd) test ./service/vc/... -bench "BenchmarkPrepare.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
 
 #########################
 # Generate protos
@@ -168,7 +186,7 @@ $(cache_dir) $(mod_cache_dir):
 	# Use the host local gocache and gomodcache folder to avoid rebuilding and re-downloading every time
 	mkdir -p "$(cache_dir)" "$(mod_cache_dir)"
 
-BUILD_TARGETS=coordinator signatureverifier validatorpersister sidecar queryexecutor loadgen \
+BUILD_TARGETS=committer sidecar coordinator validatorpersister signatureverifier queryexecutor loadgen \
 			  mockvcservice mocksigservice mockorderingservice
 
 build: $(output_dir) $(BUILD_TARGETS)
@@ -182,6 +200,9 @@ build-arch-%: FORCE
 		output_dir=$(arch_output_dir)/$* \
 		build_flags="-ldflags '-w -s' $(build_flags)" \
 		build
+
+committer: FORCE $(output_dir)
+	$(go_build) "$(output_dir)/committer" ./cmd/committer
 
 coordinator: FORCE $(output_dir)
 	$(go_build) "$(output_dir)/coordinator" ./cmd/coordinatorservice

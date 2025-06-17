@@ -37,6 +37,11 @@ func SetGauge(queue prometheus.Gauge, n int) {
 	queue.Set(float64(n))
 }
 
+// SetUint64Gauge sets a uint64 value to a prometheus gauge.
+func SetUint64Gauge(queue prometheus.Gauge, n uint64) {
+	queue.Set(float64(n))
+}
+
 // Observe observes a prometheus histogram.
 func Observe(h prometheus.Observer, d time.Duration) {
 	h.Observe(d.Seconds())

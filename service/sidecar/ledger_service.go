@@ -9,6 +9,7 @@ package sidecar
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/metrics/disabled"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
 )
 
@@ -31,6 +33,7 @@ type (
 		ledgerProvider               blockledger.Factory
 		channelID                    string
 		nextToBeCommittedBlockNumber uint64
+		metrics                      *perfMetrics
 	}
 
 	// ledgerRunConfig holds the configuration needed to run the ledger service.
@@ -40,7 +43,7 @@ type (
 )
 
 // newLedgerService creates a new ledger service.
-func newLedgerService(channelID, ledgerDir string) (*LedgerService, error) {
+func newLedgerService(channelID, ledgerDir string, metrics *perfMetrics) (*LedgerService, error) {
 	logger.Infof("Create ledger files for channel %s under %s", channelID, ledgerDir)
 	factory, err := fileledger.New(ledgerDir, &disabled.Provider{})
 	if err != nil {
@@ -57,6 +60,7 @@ func newLedgerService(channelID, ledgerDir string) (*LedgerService, error) {
 		ledgerProvider:               factory,
 		channelID:                    channelID,
 		nextToBeCommittedBlockNumber: ledger.Height(),
+		metrics:                      metrics,
 	}, nil
 }
 
@@ -85,9 +89,12 @@ func (s *LedgerService) run(ctx context.Context, config *ledgerRunConfig) error 
 		s.nextToBeCommittedBlockNumber++
 
 		logger.Debugf("Appending block %d to ledger.\n", block.Header.Number)
+		start := time.Now()
 		if err := s.ledger.Append(block); err != nil {
 			return err
 		}
+		promutil.Observe(s.metrics.appendBlockToLedgerSeconds, time.Since(start))
+		promutil.SetUint64Gauge(s.metrics.blockHeight, block.Header.Number+1)
 		logger.Debugf("Appended block %d to ledger.\n", block.Header.Number)
 	}
 }

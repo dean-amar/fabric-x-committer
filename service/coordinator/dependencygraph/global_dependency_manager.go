@@ -136,6 +136,7 @@ func (dm *globalDependencyManager) constructDependencyGraph(ctx context.Context)
 	m := dm.metrics
 	var txsNode TxNodeBatch
 	incomingTransactionsNode := channel.NewReader(ctx, dm.incomingTransactionsNode)
+	outgoingDepFreeTransactionsNode := channel.NewWriter(ctx, dm.outgoingDepFreeTransactionsNode)
 	for {
 		txsNodeBatch, ok := incomingTransactionsNode.Read()
 		if !ok {
@@ -187,7 +188,7 @@ func (dm *globalDependencyManager) constructDependencyGraph(ctx context.Context)
 		// Step 3: Send the transactions that are free of dependencies to the
 		// 	       output channel.
 		if len(depFreeTxs) > 0 {
-			dm.outgoingDepFreeTransactionsNode <- depFreeTxs
+			outgoingDepFreeTransactionsNode.Write(depFreeTxs)
 		}
 		promutil.AddToCounter(m.gdgTxProcessedTotal, len(txsNode))
 		promutil.Observe(m.gdgConstructionSeconds, time.Since(constructionStart))

@@ -11,6 +11,7 @@ protoc_bin_version="29.3"
 protoc_gen_go_version="v1.33"
 protoc_gen_go_grpc_version="v1.3"
 goimports_version="v0.33.0"
+gotestfmt_version="v2.5.0"
 golang_ci_version="v2.0.2"
 sqlfluff_version="3.4.0"
 
@@ -31,10 +32,13 @@ go install "google.golang.org/grpc/cmd/protoc-gen-go-grpc@${protoc_gen_go_grpc_v
 echo
 echo "Installing goimports"
 go install "golang.org/x/tools/cmd/goimports@${goimports_version}"
+echo
+echo "Installing gotestfmt"
+go install "github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@${gotestfmt_version}"
 
 echo
 echo "Installing golangci-lint"
-curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"| sh -s -- -b $(go env GOPATH)/bin "${golang_ci_version}"
+curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh" | sh -s -- -b "$(go env GOPATH)/bin" "${golang_ci_version}"
 
 echo
 echo "Installing sqlfluff"

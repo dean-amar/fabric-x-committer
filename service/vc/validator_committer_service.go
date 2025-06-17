@@ -305,6 +305,7 @@ func (vc *ValidatorCommitterService) batchReceivedTransactionsAndForwardForProce
 	toPrepareTxs := channel.NewWriter(ctx, vc.toPrepareTxs)
 
 	sendLargeBatch := func() {
+		defer timer.Reset(vc.timeoutForMinTxBatchSize)
 		if len(largerBatch.Transactions) == 0 {
 			return
 		}
@@ -312,7 +313,6 @@ func (vc *ValidatorCommitterService) batchReceivedTransactionsAndForwardForProce
 			return
 		}
 		largerBatch = &protovcservice.TransactionBatch{}
-		timer.Reset(vc.timeoutForMinTxBatchSize)
 	}
 
 	for {

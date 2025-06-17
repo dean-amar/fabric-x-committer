@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	serviceName    = "loadgen"
-	serviceVersion = "0.0.2"
+	serviceName = "loadgen"
 )
 
 func main() {
@@ -37,10 +36,10 @@ func main() {
 func loadgenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   serviceName,
-		Short: fmt.Sprintf("%v is a load generator for FabricX committer services.", serviceName),
+		Short: fmt.Sprintf("%v is a load generator for Fabric-X committer.", serviceName),
 	}
 
-	cmd.AddCommand(config.VersionCmd(serviceName, serviceVersion))
+	cmd.AddCommand(config.VersionCmd())
 	cmd.AddCommand(startCmd())
 	return cmd
 }
@@ -52,7 +51,7 @@ func startCmd() *cobra.Command {
 	var onlyWorkload bool
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: fmt.Sprintf("Starts a %v", serviceName),
+		Short: fmt.Sprintf("Starts %v.", serviceName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := config.ReadLoadGenYamlAndSetupLogging(v, configPath)
@@ -60,7 +59,8 @@ func startCmd() *cobra.Command {
 				return err
 			}
 			cmd.SilenceUsage = true
-			cmd.Printf("Starting %v service\n", serviceName)
+			cmd.Printf("Starting %v\n", serviceName)
+			defer cmd.Printf("%v ended\n", serviceName)
 
 			if onlyNamespace {
 				conf.Generate = adapters.Phases{Namespaces: true}

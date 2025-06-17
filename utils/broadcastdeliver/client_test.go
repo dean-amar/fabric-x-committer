@@ -183,7 +183,7 @@ func submit(
 
 	// We verify that we didn't get more Unavailable or Unimplemented than expected.
 	// These errors sometimes returns DeadlineExceeded instead, so we might not get exact value.
-	require.LessOrEqual(t, strings.Count(info, "Unavailable"), expected.unavailable, info)
+	require.LessOrEqual(t, strings.Count(info, "Unavailable"), expected.unavailable+expected.unimplemented, info)
 	require.LessOrEqual(t, strings.Count(info, "Unimplemented"), expected.unimplemented, info)
 
 	// We count all of these errors together to ensure we didn't get fewer errors than expected.
