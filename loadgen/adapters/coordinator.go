@@ -8,13 +8,16 @@ package adapters
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 
+	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
@@ -22,7 +25,8 @@ type (
 	// CoordinatorAdapter applies load on the coordinator.
 	CoordinatorAdapter struct {
 		commonAdapter
-		config *CoordinatorClientConfig
+		config     *CoordinatorClientConfig
+		txNumCache atomic.Pointer[[]uint32]
 	}
 )
 
@@ -61,7 +65,7 @@ func (c *CoordinatorAdapter) RunWorkload(ctx context.Context, txStream *workload
 	defer dCancel()
 	g, gCtx := errgroup.WithContext(dCtx)
 	g.Go(func() error {
-		return sendBlocks(gCtx, &c.commonAdapter, txStream, identityMapper, stream.Send)
+		return sendBlocks(gCtx, &c.commonAdapter, txStream, c.mapToBlock, stream.Send)
 	})
 	g.Go(func() error {
 		defer dCancel() // We stop sending if we can't track the received items.
@@ -70,8 +74,20 @@ func (c *CoordinatorAdapter) RunWorkload(ctx context.Context, txStream *workload
 	return errors.Wrap(g.Wait(), "workload done")
 }
 
-func identityMapper(block *protocoordinatorservice.Block) (*protocoordinatorservice.Block, error) {
-	return block, nil
+// mapToBlock creates a Coordinator block. It uses the protoblocktx.Tx.Id to track the TXs latency.
+func (c *CoordinatorAdapter) mapToBlock(txs []*protoblocktx.Tx) (*protocoordinatorservice.Block, []string, error) {
+	txNums := c.txNumCache.Load()
+	if txNums == nil || len(*txNums) < len(txs) {
+		// Lazy initialization of the tx numbers.
+		newNums := utils.Range(0, uint32(len(txs))) //nolint:gosec //int -> uint32.
+		txNums = &newNums
+		c.txNumCache.Store(txNums)
+	}
+	return &protocoordinatorservice.Block{
+		Number: c.NextBlockNum(),
+		Txs:    txs,
+		TxsNum: (*txNums)[:len(txs)],
+	}, getTXsIDs(txs), nil
 }
 
 // Progress a submitted block indicates progress for the coordinator as it guaranteed to preserve the order.

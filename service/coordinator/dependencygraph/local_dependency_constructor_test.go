@@ -105,6 +105,7 @@ func TestLocalDependencyConstructorWithDependencies(t *testing.T) { //nolint:goc
 		}
 
 		test.EventuallyIntMetric(t, 5, env.metrics.ldgTxProcessedTotal, 2*time.Second, 200*time.Millisecond)
+		test.RequireIntMetricValue(t, 0, env.metrics.dependentTransactionsQueueSize)
 	})
 
 	t.Run("linear dependency i and i+1 transaction", func(t *testing.T) {
@@ -146,6 +147,7 @@ func TestLocalDependencyConstructorWithDependencies(t *testing.T) { //nolint:goc
 				require.True(t, exist)
 			}
 		}
+		test.RequireIntMetricValue(t, 3, env.metrics.dependentTransactionsQueueSize)
 	})
 
 	t.Run("all txs depends on the metaNamespace tx", func(t *testing.T) {
@@ -179,6 +181,7 @@ func TestLocalDependencyConstructorWithDependencies(t *testing.T) { //nolint:goc
 				require.Equal(t, TxNodeBatch{txsNode[0]}, txNode.dependsOnTxs)
 			}
 		}
+		test.RequireIntMetricValue(t, 3, env.metrics.dependentTransactionsQueueSize)
 	})
 
 	t.Run("metaNamespace tx depends on all other txs", func(t *testing.T) {
@@ -213,6 +216,7 @@ func TestLocalDependencyConstructorWithDependencies(t *testing.T) { //nolint:goc
 				require.Empty(t, txNode.dependsOnTxs)
 			}
 		}
+		test.RequireIntMetricValue(t, 1, env.metrics.dependentTransactionsQueueSize)
 	})
 }
 

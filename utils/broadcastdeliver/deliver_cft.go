@@ -13,10 +13,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/orderer"
+	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/protoutil"
 	"google.golang.org/grpc"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
 )
 
@@ -41,55 +43,102 @@ type (
 	DeliverStream interface {
 		Send(*common.Envelope) error
 		RecvBlockOrStatus() (*common.Block, *common.Status, error)
+		Context() context.Context
 	}
 )
 
 // MaxBlockNum is used for endless deliver.
 const MaxBlockNum uint64 = math.MaxUint64
 
+var defaultRetryProfile = connection.RetryProfile{}
+
 // Deliver start receiving blocks starting from config.StartBlkNum to config.OutputBlock.
 // The value of config.StartBlkNum is updated with the latest block number.
 func (c *DeliverCftClient) Deliver(ctx context.Context, config *DeliverConfig) error {
-	resiliencyManager := c.ConnectionManager.GetResiliencyManager(WithAPI(Deliver))
 	for ctx.Err() == nil {
 		if config.StartBlkNum > 0 && uint64(config.StartBlkNum) > config.EndBlkNum {
-			logger.Debugf("Deliver finished successfully")
+			logger.Infof("Deliver finished successfully")
 			return nil
 		}
-		logger.Debugf("Deliver is waiting for connection")
-		if c.ConnectionManager.IsStale(resiliencyManager) {
-			resiliencyManager = c.ConnectionManager.GetResiliencyManager(WithAPI(Deliver))
-		}
-		curConn, err := resiliencyManager.GetNextConnection(ctx)
-		if err != nil {
-			logger.Debugf("Deliver failed to get next connection: %s", err)
-			// We stop delivering if we fail to get an alive connection.
-			return errors.Wrap(err, "failed to get next connection")
-		}
-		curConn.LastError = c.receiveFromBlockDeliverer(ctx, curConn, config)
-		logger.Debugf("Error receiving blocks: %v", curConn.LastError)
+		err := c.receiveFromBlockDeliverer(ctx, config)
+		logger.Warnf("Error receiving blocks: %v", err)
 	}
 	logger.Debugf("Deliver context ended: %v", ctx.Err())
 	return errors.Wrap(ctx.Err(), "context ended")
 }
 
-func (c *DeliverCftClient) receiveFromBlockDeliverer(
-	ctx context.Context, conn *OrdererConnection, config *DeliverConfig,
-) error {
-	logger.Infof("Connecting to %s", conn.Target())
-	stream, err := c.StreamCreator(ctx, conn)
-	if err != nil {
-		logger.Infof("failed connecting to %s: %s", conn.Target(), err)
-		return errors.Wrap(err, "failed to create stream")
+func (c *DeliverCftClient) receiveFromBlockDeliverer(ctx context.Context, config *DeliverConfig) error {
+	logger.Debugf("Deliver is waiting for connection")
+	conn, connErr := c.getConnection(ctx)
+	if connErr != nil {
+		return connErr
 	}
 
+	// We create a new context per stream to ensure it cancels on error.
+	sCtx, sCancel := context.WithCancel(ctx)
+	defer sCancel()
+	logger.Debugf("Connecting to %s", conn.Target())
+	stream, streamErr := c.StreamCreator(sCtx, conn)
+	if streamErr != nil {
+		return errors.Wrap(streamErr, "failed to create stream")
+	}
+
+	//nolint:contextcheck // false positive (stream's context is inherited from sCtx).
+	addr := util.ExtractRemoteAddress(stream.Context())
+	logger.Infof("Deliver connected to %s", addr)
+
+	deliverRetry := defaultRetryProfile.NewBackoff()
+	for sCtx.Err() == nil {
+		status, err := c.deliverRelay(sCtx, stream, config)
+		if err != nil {
+			return err
+		}
+		if status == common.Status_SUCCESS {
+			// Indication that the seek range is fully delivered.
+			return nil
+		}
+
+		logger.Infof("Deliver failed with status: %s", status.String())
+		// This is a workaround for the case when the start block is not yet available.
+		backoffErr := connection.WaitForNextBackOffDuration(sCtx, deliverRetry)
+		if errors.Is(backoffErr, connection.ErrRetryTimeout) {
+			return backoffErr
+		}
+	}
+	return nil
+}
+
+// getConnection returns a connection to a delivery service.
+// We always ask the connection manager for the connection as this is not done often.
+// If the endpoints haven't changed, the manager will return the exact same connection.
+// If no connection available, we wait and try again.
+func (c *DeliverCftClient) getConnection(ctx context.Context) (*grpc.ClientConn, error) {
+	getConnRetry := defaultRetryProfile.NewBackoff()
+	for ctx.Err() == nil {
+		conn, _ := c.ConnectionManager.GetConnection(WithAPI(Deliver))
+		if conn != nil {
+			return conn, nil
+		}
+		logger.Infof("No available connection to deliver block")
+		backoffErr := connection.WaitForNextBackOffDuration(ctx, getConnRetry)
+		if errors.Is(backoffErr, connection.ErrRetryTimeout) {
+			return nil, errors.Join(ErrNoConnections, backoffErr)
+		}
+	}
+	return nil, errors.Join(ErrNoConnections, ctx.Err())
+}
+
+// deliverRelay initiate a new seek request and relays the delivered blocks to the output channel.
+func (c *DeliverCftClient) deliverRelay(
+	ctx context.Context, stream DeliverStream, config *DeliverConfig,
+) (common.Status, error) {
 	logger.Infof("Sending seek request from block %d on channel %s.", config.StartBlkNum, c.ChannelID)
-	seekEnv, err := seekSince(config.StartBlkNum, config.EndBlkNum, c.ChannelID, c.Signer)
-	if err != nil {
-		return errors.Wrap(err, "failed to create seek request")
+	seekEnv, seekErr := seekSince(config.StartBlkNum, config.EndBlkNum, c.ChannelID, c.Signer)
+	if seekErr != nil {
+		return 0, errors.Wrap(seekErr, "failed to create seek request")
 	}
 	if err := stream.Send(seekEnv); err != nil {
-		return errors.Wrap(err, "failed to send seek request")
+		return 0, errors.Wrap(err, "failed to send seek request")
 	}
 	logger.Info("Seek request sent.")
 
@@ -97,22 +146,18 @@ func (c *DeliverCftClient) receiveFromBlockDeliverer(
 	for ctx.Err() == nil {
 		block, status, err := stream.RecvBlockOrStatus()
 		if err != nil {
-			return errors.Wrap(err, "failed to receive block")
+			return 0, errors.Wrap(err, "failed to receive block")
 		}
 		if status != nil {
-			return errors.Newf("disconnecting deliver service with status %s", status)
+			return *status, nil
 		}
 
 		//nolint:gosec // integer overflow conversion uint64 -> int64
 		config.StartBlkNum = int64(block.Header.Number) + 1
 		logger.Debugf("next expected block number is %d", config.StartBlkNum)
 		outputBlock.Write(block)
-
-		// If we managed to receive one block, we can reset the connection's backoff.
-		conn.ResetBackoff()
 	}
-
-	return nil
+	return 0, errors.Wrap(ctx.Err(), "context ended")
 }
 
 // TODO: We have seek info only for the orderer but not for the ledger service. It needs

@@ -21,7 +21,7 @@ import (
 
 func TestLoadGen(t *testing.T) {
 	t.Parallel()
-	testCases := []struct {
+	for _, tc := range []struct {
 		name         string
 		serviceFlags int
 	}{
@@ -45,9 +45,12 @@ func TestLoadGen(t *testing.T) {
 			name:         "verifier",
 			serviceFlags: runner.LoadGenForVerifier | runner.Verifier,
 		},
-	}
-
-	for _, tc := range testCases {
+		{
+			name:         "verifier with distributed",
+			serviceFlags: runner.LoadGenForVerifier | runner.LoadGenForDistributedLoadGen | runner.Verifier,
+		},
+	} {
+		serviceFlags := tc.serviceFlags
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			gomega.RegisterTestingT(t)
@@ -57,7 +60,7 @@ func TestLoadGen(t *testing.T) {
 				BlockTimeout: 2 * time.Second,
 				BlockSize:    500,
 			})
-			c.Start(t, tc.serviceFlags)
+			c.Start(t, serviceFlags)
 
 			metricsURL, err := monitoring.MakeMetricsURL(c.SystemConfig.Endpoints.LoadGen.Metrics.Address())
 			require.NoError(t, err)

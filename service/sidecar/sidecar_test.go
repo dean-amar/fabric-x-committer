@@ -48,7 +48,6 @@ type sidecarTestEnv struct {
 	ordererEnv        *mock.OrdererTestEnv
 
 	sidecar        *Service
-	gServer        *grpc.Server
 	committedBlock chan *common.Block
 	configBlock    *common.Block
 }
@@ -168,6 +167,7 @@ func newSidecarTestEnvWithCreds(
 			Path: t.TempDir(),
 		},
 		LastCommittedBlockSetInterval: 100 * time.Millisecond,
+		WaitingTxsLimit:               1000,
 		Monitoring: monitoring.Config{
 			Server: connection.NewLocalHostServer(),
 		},
@@ -207,7 +207,7 @@ func (env *sidecarTestEnv) startWithSidecarClientCreds(
 
 func (env *sidecarTestEnv) startSidecarService(ctx context.Context, t *testing.T) {
 	t.Helper()
-	env.gServer = test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server, func(server *grpc.Server) {
+	test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server, func(server *grpc.Server) {
 		peer.RegisterDeliverServer(server, env.sidecar.GetLedgerService())
 	})
 }
@@ -409,6 +409,7 @@ func TestSidecarRecovery(t *testing.T) {
 	env.sidecar.ledgerService, err = newLedgerService(
 		env.config.Orderer.ChannelID,
 		env.config.Ledger.Path,
+		newPerformanceMetrics(),
 	)
 	require.NoError(t, err)
 	ensureAtLeastHeight(t, env.sidecar.ledgerService, 1) // back to block 0

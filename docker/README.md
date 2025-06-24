@@ -45,22 +45,25 @@ docker push docker-eu.artifactory.swg-devops.com/res-decentralized-trust-team-sc
 ```
 
 ## Run Image
-The image contains the binaries, default config files, and a script that runs all services (including the DB). To run it, we need to:
-* map the sidecar port
-* mount the endorser key on `/root/pubkey/sc_pubkey.pem`
-* mount the crypto material (preferably on `/root/config/crypto/`, as this is used in the default configs)
-* optionally override config properties using environment variables.
-
-For example:
+The image contains the binaries, default config files, and default genesis block.
+By default, the test node image will run a full system: DB, mock-orderer, committer, and a simple generated load.
 ```shell
-docker run \
-    -p 5050:5050 \
-    -v config/sidecar-machine/fabric.mytopos/crypto/peerOrganizations/defaultpeerorg.example.com/peers/endorser-1.defaultpeerorg.example.com/tss/endorser/msp/signcerts/endorser-cert.pem:/root/pubkey/sc_pubkey.pem \
-    -v config/sidecar-machine/fabric.mytopos/crypto/:/root/config/crypto/ \
-    -e SC_SIDECAR_ORDERER_ORDERER_CONNECTION_PROFILE_MSP_DIR="/root/config/crypto/peerOrganizations/defaultpeerorg.example.com/peers/peerservice-machine1.defaultpeerorg.example.com/msp" \
-    -e SC_SIDECAR_ORDERER_ORDERER_CONNECTION_PROFILE_ROOT_CA_PATHS="/root/config/crypto/ca-certs.pem" \
-    -e SC_SIDECAR_ORDERER_CHANNEL_ID="mychannel" \
-    -e SC_SIDECAR_ORDERER_ENDPOINT=":7050" \
-    -e METANS_SIG_SCHEME="ECDSA" \
-    sc_runner:latest
+docker run -it --rm icr.io/cbdc/committer-test-node:0.0.2
 ```
+
+To control which parts of the system will run, you can use the `run` script as follows:
+```shell
+docker run -it --rm icr.io/cbdc/committer-test-node:0.0.2 run [db] [orderer] [committer] [loadgen]
+```
+
+For example, to run it with an existing orderer node:
+```shell
+docker run -it --rm \
+    -v my-crypto/:/root/config/crypto/ \
+    -e SC_SIDECAR_ORDERER_IDENTITY_MSP_DIR="/root/config/crypto/peerOrganizations/defaultpeerorg.example.com/peers/peerservice-machine1.defaultpeerorg.example.com/msp" \
+    -e SC_SIDECAR_ORDERER_IDENTITY_ROOT_CA_PATHS="/root/config/crypto/ca-certs.pem" \
+    -e SC_SIDECAR_ORDERER_CHANNEL_ID="real-channel" \
+    -e SC_SIDECAR_ORDERER_ENDPOINT="real-orderer.com:7050" \
+    icr.io/cbdc/committer-test-node:0.0.2 run db committer
+```
+This mounts the MSP folder and root CA, and override teh config to use a real orderer address.

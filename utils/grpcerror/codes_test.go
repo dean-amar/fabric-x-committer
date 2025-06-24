@@ -94,7 +94,7 @@ func TestHasCodeWithGRPCService(t *testing.T) {
 	test.CheckServerStopped(t, vcGrpc.Configs[0].Endpoint.Address())
 
 	_, err = client.GetLastCommittedBlockNumber(ctx, nil)
-	require.Truef(t, HasCode(err, codes.DeadlineExceeded), "code: %s", GetCode(err))
+	require.Truef(t, HasCode(err, codes.Unavailable), "code: %s", GetCode(err))
 	require.NoError(t, FilterUnavailableErrorCode(err))
 }
 

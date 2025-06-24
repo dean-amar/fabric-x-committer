@@ -51,6 +51,10 @@ type (
 		dependentTxs utils.SyncMap[*TransactionNode, any]
 		rwKeys       *readWriteKeys
 		Signatures   [][]byte
+
+		// Used by the simple dependency graph.
+		waitForKeysCount uint64
+		waitingKeys      []*waiting
 	}
 
 	// TxNodeBatch is a batch of transaction nodes.
@@ -190,6 +194,10 @@ func readAndWriteKeys(txNamespaces []*protoblocktx.TxNamespace) *readWriteKeys {
 		writesOnly:     writeOnlyKeys,
 		readsAndWrites: readAndWriteKeys,
 	}
+}
+
+func (rw *readWriteKeys) size() int {
+	return len(rw.readsOnly) + len(rw.readsAndWrites) + len(rw.writesOnly)
 }
 
 func constructCompositeKey(ns string, key []byte) string {

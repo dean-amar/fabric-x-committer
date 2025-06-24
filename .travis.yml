@@ -31,12 +31,12 @@ before_install:
   - pyenv global 3.12
   - export PYTHON_CMD="python3.12"
 
+install:
+  - scripts/install-dev-dependencies.sh
+
 jobs:
   include:
     - stage: lint
-      install:
-        # Install development dependencies
-        - scripts/install-dev-dependencies.sh
       before_script:
         # Fetch main to only detect issues from changes to main
         - git fetch origin main:main
@@ -55,15 +55,15 @@ jobs:
       script: make test-no-db
     - stage: test
       name: Requires and Core DB Tests (postgres)
-      install: scripts/get-and-start-postgres.sh
+      before_script: scripts/get-and-start-postgres.sh
       script: make test-requires-db test-core-db
     - stage: test
       name: Core DB Tests (yugabyte)
-      install: scripts/get-and-start-yuga.sh
+      before_script: scripts/get-and-start-yuga.sh
       script: make test-core-db
     - stage: test
       name: Integration Tests (yugabyte)
-      install: scripts/get-and-start-yuga.sh
+      before_script: scripts/get-and-start-yuga.sh
       script: travis_wait 30 make test-integration
     - stage: test
       name: Integration DB Resiliency (container)

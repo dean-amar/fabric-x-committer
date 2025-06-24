@@ -8,6 +8,7 @@ package vc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,9 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
@@ -710,5 +714,61 @@ func requireEqualMapOfLists[K comparable, V any](t *testing.T, expected, actual 
 		actualV, ok := actual[k]
 		require.True(t, ok, k)
 		require.ElementsMatch(t, expectedV, actualV, k)
+	}
+}
+
+//nolint:gocognit // single method for simplicity.
+func BenchmarkPrepare(b *testing.B) {
+	logging.SetupWithConfig(&logging.Config{Enabled: false})
+
+	// Parameters
+	batchSize := 1024
+
+	// The generator.
+	g := workload.StartGenerator(b, workload.DefaultProfile(8))
+
+	for _, w := range []int{1, 2, 4, 8} {
+		w := w
+		b.Run(fmt.Sprintf("w=%d", w), func(b *testing.B) {
+			txBatch := make(chan *protovcservice.TransactionBatch, 8)
+			preparedTxs := make(chan *preparedTransactions, 8)
+			metrics := newVCServiceMetrics()
+			p := newPreparer(txBatch, preparedTxs, metrics)
+			test.RunServiceForTest(b.Context(), b, func(ctx context.Context) error {
+				return p.run(ctx, w)
+			}, nil)
+
+			inCtx := channel.NewWriter(b.Context(), txBatch)
+			outCtx := channel.NewReader(b.Context(), preparedTxs)
+			b.ResetTimer()
+			// Generates the load to the preparer's queue.
+			go func() {
+				var i uint64
+				for b.Context().Err() == nil {
+					txs := g.NextN(b.Context(), batchSize)
+					protoTXs := make([]*protovcservice.Transaction, len(txs))
+					for txIdx, tx := range txs {
+						protoTXs[txIdx] = &protovcservice.Transaction{
+							ID:          tx.Id,
+							Namespaces:  tx.Namespaces,
+							BlockNumber: i,
+							TxNum:       uint32(txIdx), //nolint:gosec // int -> uint32.
+						}
+					}
+					inCtx.Write(&protovcservice.TransactionBatch{Transactions: protoTXs})
+					i++
+				}
+			}()
+			// Reads the output of preparer.
+			var total int
+			for total < b.N {
+				batch, ok := outCtx.Read()
+				if !ok {
+					return
+				}
+				total += len(batch.txIDToHeight)
+			}
+			b.StopTimer()
+		})
 	}
 }

@@ -41,6 +41,8 @@ type perfMetrics struct {
 
 	// performance of outputFreedExistingTransactions()
 	gdgOutputFreedTxSeconds prometheus.Histogram
+
+	dependentTransactionsQueueSize prometheus.Gauge
 }
 
 func newPerformanceMetrics(p *monitoring.Provider) *perfMetrics {
@@ -151,6 +153,12 @@ func newPerformanceMetrics(p *monitoring.Provider) *perfMetrics {
 			Name:      "output_freed_tx_batch_seconds",
 			Help:      "Time spent outputting a freed transaction batch in the global dependency graph manager",
 			Buckets:   bucket,
+		}),
+		dependentTransactionsQueueSize: p.NewGauge(prometheus.GaugeOpts{
+			Namespace: "coordinator",
+			Subsystem: "dependency_graph",
+			Name:      "dependent_transactions_queue_size",
+			Help:      "The number of transactions currently waiting on dependencies.",
 		}),
 	}
 }

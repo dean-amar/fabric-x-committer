@@ -32,6 +32,7 @@ type (
 		blkNumToBlkWithStatus         utils.SyncMap[uint64, *blockWithStatus]
 		txIDToBlkNum                  utils.SyncMap[string, uint64]
 		lastCommittedBlockSetInterval time.Duration
+		waitingTxsSlots               *utils.Slots
 		metrics                       *perfMetrics
 	}
 
@@ -48,6 +49,7 @@ type (
 		configUpdater                  func(*common.Block)
 		incomingBlockToBeCommitted     <-chan *common.Block
 		outgoingCommittedBlock         chan<- *common.Block
+		waitingTxsLimit                int
 	}
 )
 
@@ -74,6 +76,7 @@ func (r *relay) run(ctx context.Context, config *relayRunConfig) error { //nolin
 	r.outgoingCommittedBlock = config.outgoingCommittedBlock
 	r.blkNumToBlkWithStatus.Clear()
 	r.txIDToBlkNum.Clear()
+	r.waitingTxsSlots = utils.NewSlots(int64(config.waitingTxsLimit))
 
 	rCtx, rCancel := context.WithCancel(ctx)
 	defer rCancel()
@@ -113,66 +116,93 @@ func (r *relay) preProcessBlockAndSendToCoordinator( //nolint:gocognit
 	stream protocoordinatorservice.Coordinator_BlockProcessingClient,
 	configUpdater func(*common.Block),
 ) error {
-	incomingBlockToBeCommitted := channel.NewReader(ctx, r.incomingBlockToBeCommitted)
-	outgoingCommittedBlock := channel.NewWriter(ctx, r.outgoingCommittedBlock)
-	for {
-		block, ok := incomingBlockToBeCommitted.Read()
-		if !ok {
-			return errors.Wrap(ctx.Err(), "context ended")
-		}
-		if block.Header == nil {
-			logger.Warn("Received a block without header")
-			continue
-		}
+	g, gCtx := errgroup.WithContext(ctx)
 
-		startTime := time.Now()
-		blockNum := block.Header.Number
-		logger.Debugf("Block %d arrived in the relay", blockNum)
+	incomingBlockToBeCommitted := channel.NewReader(gCtx, r.incomingBlockToBeCommitted)
+	mappedBlockQueue := channel.Make[*scBlockWithStatus](gCtx, len(r.incomingBlockToBeCommitted))
+	outgoingCommittedBlock := channel.NewWriter(gCtx, r.outgoingCommittedBlock)
 
-		mappedBlock := mapBlock(block)
-		if mappedBlock.isConfig {
-			configUpdater(block)
-		}
+	done := context.AfterFunc(gCtx, r.waitingTxsSlots.Broadcast)
+	defer done()
 
-		r.blkNumToBlkWithStatus.Store(blockNum, mappedBlock.withStatus)
-
-		dupIdx := make([]int, 0, len(mappedBlock.block.Txs))
-		for txIndex, tx := range mappedBlock.block.Txs {
-			if _, loaded := r.txIDToBlkNum.LoadOrStore(tx.Id, blockNum); !loaded {
-				logger.Debugf("Adding txID [%s] to in progress list", tx.GetId())
-				mappedBlock.withStatus.txIDToTxIndex[tx.Id] = txIndex
+	g.Go(func() error {
+		for {
+			block, ok := incomingBlockToBeCommitted.Read()
+			if !ok {
+				return errors.Wrap(gCtx.Err(), "context ended")
+			}
+			if block.Header == nil {
+				logger.Warn("Received a block without header")
 				continue
 			}
-			logger.Debugf("txID [%s] is duplicate", tx.GetId())
-			promutil.AddToCounterVec(r.metrics.transactionsStatusReceivedTotal, []string{
-				protoblocktx.Status_ABORTED_DUPLICATE_TXID.String(),
-			}, 1)
-			mappedBlock.withStatus.pendingCount--
-			mappedBlock.withStatus.txStatus[txIndex] = validationCode(protoblocktx.Status_ABORTED_DUPLICATE_TXID)
-			dupIdx = append(dupIdx, txIndex)
-		}
 
-		// Iterate over the indices in reverse order. Note that the dupIdx is sorted by default.
-		for _, index := range slices.Backward(dupIdx) {
-			mappedBlock.block.Txs = slices.Delete(mappedBlock.block.Txs, index, index+1)
-			mappedBlock.block.TxsNum = slices.Delete(mappedBlock.block.TxsNum, index, index+1)
-		}
+			logger.Debugf("Block %d arrived in the relay", block.Header.Number)
 
-		r.activeBlocksCount.Add(1)
+			start := time.Now()
+			mappedBlock := mapBlock(block)
+			promutil.Observe(r.metrics.blockMappingInRelaySeconds, time.Since(start))
+			if mappedBlock.isConfig {
+				configUpdater(block)
+			}
 
-		txsCount := len(mappedBlock.block.Txs)
-		if txsCount == 0 && mappedBlock.withStatus.pendingCount == 0 {
-			r.processCommittedBlocksInOrder(ctx, outgoingCommittedBlock)
+			txsCount := len(mappedBlock.block.Txs)
+			r.waitingTxsSlots.Acquire(gCtx, int64(txsCount))
+			promutil.AddToGauge(r.metrics.waitingTransactionsQueueSize, txsCount)
+			mappedBlockQueue.Write(mappedBlock)
 		}
+	})
 
-		if err := stream.Send(mappedBlock.block); err != nil {
-			return errors.Wrap(err, "failed to send a block to the coordinator")
+	g.Go(func() error {
+		for {
+			mappedBlock, ok := mappedBlockQueue.Read()
+			if !ok {
+				return errors.Wrap(gCtx.Err(), "context ended")
+			}
+
+			startTime := time.Now()
+			blockNum := mappedBlock.block.Number
+			r.blkNumToBlkWithStatus.Store(blockNum, mappedBlock.withStatus)
+
+			dupIdx := make([]int, 0, len(mappedBlock.block.Txs))
+			for txIndex, tx := range mappedBlock.block.Txs {
+				if _, loaded := r.txIDToBlkNum.LoadOrStore(tx.Id, blockNum); !loaded {
+					logger.Debugf("Adding txID [%s] to in progress list", tx.GetId())
+					mappedBlock.withStatus.txIDToTxIndex[tx.Id] = txIndex
+					continue
+				}
+				logger.Debugf("txID [%s] is duplicate", tx.GetId())
+				promutil.AddToCounterVec(r.metrics.transactionsStatusReceivedTotal, []string{
+					protoblocktx.Status_ABORTED_DUPLICATE_TXID.String(),
+				}, 1)
+				mappedBlock.withStatus.pendingCount--
+				mappedBlock.withStatus.txStatus[txIndex] = validationCode(protoblocktx.Status_ABORTED_DUPLICATE_TXID)
+				dupIdx = append(dupIdx, txIndex)
+			}
+
+			// Iterate over the indices in reverse order. Note that the dupIdx is sorted by default.
+			for _, index := range slices.Backward(dupIdx) {
+				mappedBlock.block.Txs = slices.Delete(mappedBlock.block.Txs, index, index+1)
+				mappedBlock.block.TxsNum = slices.Delete(mappedBlock.block.TxsNum, index, index+1)
+			}
+
+			r.activeBlocksCount.Add(1)
+
+			txsCount := len(mappedBlock.block.Txs)
+			if txsCount == 0 && mappedBlock.withStatus.pendingCount == 0 {
+				r.processCommittedBlocksInOrder(gCtx, outgoingCommittedBlock)
+			}
+
+			if err := stream.Send(mappedBlock.block); err != nil {
+				return errors.Wrap(err, "failed to send a block to the coordinator")
+			}
+			promutil.AddToCounter(r.metrics.transactionsSentTotal, txsCount)
+			logger.Debugf("Sent SC block %d with %d transactions to Coordinator",
+				mappedBlock.block.Number, txsCount)
+			promutil.Observe(r.metrics.mappedBlockProcessingInRelaySeconds, time.Since(startTime))
 		}
-		promutil.AddToCounter(r.metrics.transactionsSentTotal, txsCount)
-		logger.Debugf("Sent SC block %d with %d transactions to Coordinator",
-			mappedBlock.block.Number, txsCount)
-		promutil.Observe(r.metrics.blockProcessingInRelaySeconds, time.Since(startTime))
-	}
+	})
+
+	return utils.ProcessErr(g.Wait(), "pre-processing of blocks and sending to coordinator operation has ended")
 }
 
 func receiveStatusFromCoordinator(
@@ -204,6 +234,7 @@ func (r *relay) processStatusBatch(
 			return errors.Wrap(ctx.Err(), "context ended")
 		}
 
+		txStatusProcessedCount := int64(0)
 		startTime := time.Now()
 		for txID, txStatus := range tStatus.GetStatus() {
 			if blockNum, ok := r.txIDToBlkNum.Load(txID); !ok || txStatus.BlockNumber != blockNum {
@@ -249,8 +280,11 @@ func (r *relay) processStatusBatch(
 
 			r.txIDToBlkNum.Delete(txID)
 			blkWithStatus.pendingCount--
+			txStatusProcessedCount++
 		}
 
+		r.waitingTxsSlots.Release(txStatusProcessedCount)
+		promutil.AddToGauge(r.metrics.waitingTransactionsQueueSize, -int(txStatusProcessedCount))
 		r.processCommittedBlocksInOrder(ctx, outgoingCommittedBlock)
 		promutil.Observe(r.metrics.transactionStatusesProcessingInRelaySeconds, time.Since(startTime))
 	}

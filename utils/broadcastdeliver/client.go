@@ -10,7 +10,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-protos-go-apiv2/orderer"
+	ab "github.com/hyperledger/fabric-protos-go-apiv2/orderer"
 	"github.com/hyperledger/fabric/protoutil"
 	"google.golang.org/grpc"
 )
@@ -63,15 +63,17 @@ func (s *Client) Broadcast(ctx context.Context) (*EnvelopedStream, error) {
 		channelID: s.config.ChannelID,
 		signer:    s.signer,
 	}
-	common := broadcastCommon{
-		ctx:               ctx,
-		connectionManager: s.connectionManager,
-	}
 	switch s.config.ConsensusType {
 	case Cft:
-		ret.BroadcastStream = &broadcastCft{broadcastCommon: common}
+		ret.BroadcastStream = &broadcastCft{
+			ctx:               ctx,
+			connectionManager: s.connectionManager,
+		}
 	case Bft:
-		ret.BroadcastStream = &broadcastBft{broadcastCommon: common}
+		ret.BroadcastStream = &broadcastBft{
+			ctx:               ctx,
+			connectionManager: s.connectionManager,
+		}
 	default:
 		return nil, errors.Newf("invalid consensus type: '%s'", s.config.ConsensusType)
 	}
@@ -92,7 +94,7 @@ func (s *Client) Deliver(ctx context.Context, deliverConfig *DeliverConfig) erro
 			Signer:            s.signer,
 			ChannelID:         s.config.ChannelID,
 			StreamCreator: func(ctx context.Context, conn grpc.ClientConnInterface) (DeliverStream, error) {
-				client, err := orderer.NewAtomicBroadcastClient(conn).Deliver(ctx)
+				client, err := ab.NewAtomicBroadcastClient(conn).Deliver(ctx)
 				if err != nil {
 					return nil, err
 				}

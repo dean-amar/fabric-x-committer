@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
@@ -78,7 +78,7 @@ func (c *VcAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWi
 	g, gCtx := errgroup.WithContext(dCtx)
 	for _, stream := range streams {
 		g.Go(func() error {
-			return sendBlocks(ctx, &c.commonAdapter, txStream, mapVCBatch, stream.Send)
+			return sendBlocks(ctx, &c.commonAdapter, txStream, c.mapToBatch, stream.Send)
 		})
 		g.Go(func() error {
 			defer dCancel() // We stop sending if we can't track the received items.
@@ -111,15 +111,16 @@ func (c *VcAdapter) receiveStatus(
 	return nil
 }
 
-func mapVCBatch(block *protocoordinatorservice.Block) (*protovcservice.TransactionBatch, error) {
-	txs := make([]*protovcservice.Transaction, len(block.Txs))
-	for i, tx := range block.Txs {
-		txs[i] = &protovcservice.Transaction{
+// mapToBatch creates a VC batch. It uses the protoblocktx.Tx.Id to track the TXs latency.
+func (c *VcAdapter) mapToBatch(txs []*protoblocktx.Tx) (*protovcservice.TransactionBatch, []string, error) {
+	batchTxs := make([]*protovcservice.Transaction, len(txs))
+	for i, tx := range txs {
+		batchTxs[i] = &protovcservice.Transaction{
 			ID:          tx.Id,
 			Namespaces:  tx.Namespaces,
-			BlockNumber: block.Number,
-			TxNum:       block.TxsNum[i],
+			BlockNumber: c.NextBlockNum(),
+			TxNum:       uint32(i), //nolint:gosec // int -> uint32.
 		}
 	}
-	return &protovcservice.TransactionBatch{Transactions: txs}, nil
+	return &protovcservice.TransactionBatch{Transactions: batchTxs}, getTXsIDs(txs), nil
 }

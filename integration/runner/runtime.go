@@ -8,6 +8,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -114,6 +115,7 @@ const (
 	LoadGenForCoordinator
 	LoadGenForVerifier
 	LoadGenForVCService
+	LoadGenForDistributedLoadGen
 
 	CommitterTxPath       = Sidecar | Coordinator | Verifier | VC
 	FullTxPath            = Orderer | CommitterTxPath
@@ -138,6 +140,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			BlockSize:         conf.BlockSize,
 			BlockTimeout:      conf.BlockTimeout,
 			LoadGenBlockLimit: conf.LoadgenBlockLimit,
+			LoadGenWorkers:    1,
 			Logging:           &logging.DefaultConfig,
 		},
 		nsToCrypto:       make(map[string]*Crypto),
@@ -193,33 +196,34 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	s.ClientsCreds.Sidecar = c.createClientCerts(t, "sidecar")
 
 	t.Log("Create processes")
-	c.MockOrderer = newProcess(t, mockordererCMD, config.TemplateMockOrderer, s)
+	c.MockOrderer = newProcess(t, cmdOrderer, s)
 
-	for _, e := range s.Endpoints.Verifier {
+	for i, e := range s.Endpoints.Verifier {
+		p := cmdVerifier
+		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
 		c.Verifier = append(c.Verifier, newProcess(
-			t, verifierCMD, config.TemplateVerifier, c.createServerCerts(t, e, "verifier")))
+			t, p, c.createServerCerts(t, e, "verifier")))
 	}
 
-	for _, e := range s.Endpoints.VCService {
+	for i, e := range s.Endpoints.VCService {
+		p := cmdVC
+		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
 		c.VcService = append(c.VcService, newProcess(
-			t, vcCMD, config.TemplateVC, c.createServerCerts(t, e, "validator-committer")))
+			t, p, c.createServerCerts(t, e, "validator-committer")))
 	}
 
 	c.Coordinator = newProcess(t,
-		coordinatorCMD,
-		config.TemplateCoordinator,
+		cmdCoordinator,
 		c.createServerCerts(t, s.Endpoints.Coordinator, "coordinator"),
 	)
 
 	c.QueryService = newProcess(t,
-		queryexecutorCMD,
-		config.TemplateQueryService,
+		cmdQuery,
 		c.createServerCerts(t, s.Endpoints.Query, "query-service"),
 	)
 
 	c.Sidecar = newProcess(t,
-		sidecarCMD,
-		config.TemplateSidecar,
+		cmdSidecar,
 		c.createServerCerts(t, s.Endpoints.Sidecar, "sidecar"),
 	)
 
@@ -311,18 +315,18 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	t.Helper()
 	loadGenFlag := loadGenMatcher & serviceFlags
 	require.Falsef(t, isMoreThanOneBitSet(loadGenFlag), "only one load generator may be set")
-	var template string
+	loadGenParams := cmdLoadGen
 	switch loadGenFlag {
 	case LoadGenForCommitter:
-		template = config.TemplateLoadGenCommitter
+		loadGenParams.Template = config.TemplateLoadGenCommitter
 	case LoadGenForOrderer:
-		template = config.TemplateLoadGenOrderer
+		loadGenParams.Template = config.TemplateLoadGenOrderer
 	case LoadGenForCoordinator:
-		template = config.TemplateLoadGenCoordinator
+		loadGenParams.Template = config.TemplateLoadGenCoordinator
 	case LoadGenForVCService:
-		template = config.TemplateLoadGenVC
+		loadGenParams.Template = config.TemplateLoadGenVC
 	case LoadGenForVerifier:
-		template = config.TemplateLoadGenVerifier
+		loadGenParams.Template = config.TemplateLoadGenVerifier
 	default:
 		return
 	}
@@ -331,11 +335,22 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 		NamespacePolicies: make(map[string]*workload.Policy),
 	}
 	// We create the crypto profile for the generated namespace to ensure consistency.
-	c.CreateCryptoForNs(t, workload.GeneratedNamespaceID, signature.Ecdsa)
+	c.GerOrCreateCryptoForNs(t, workload.GeneratedNamespaceID, signature.Ecdsa)
 	for _, cr := range c.GetAllCrypto() {
 		s.Policy.NamespacePolicies[cr.Namespace] = cr.Profile
 	}
-	newProcess(t, loadgenCMD, template, s.WithEndpoint(s.Endpoints.LoadGen)).Restart(t)
+
+	isDist := serviceFlags&LoadGenForDistributedLoadGen != 0
+	if isDist {
+		s.LoadGenWorkers = 0
+	}
+	newProcess(t, loadGenParams, s.WithEndpoint(s.Endpoints.LoadGen)).Restart(t)
+	if isDist {
+		s.LoadGenWorkers = 1
+		loadGenParams.Name = "dist-loadgen"
+		loadGenParams.Template = config.TemplateLoadGenDistributedLoadGenClient
+		newProcess(t, loadGenParams, s.WithEndpoint(config.ServiceEndpoints{})).Restart(t)
+	}
 }
 
 func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
@@ -433,9 +448,8 @@ func (c *CommitterRuntime) AddSignatures(t *testing.T, tx *protoblocktx.Tx) {
 func (c *CommitterRuntime) SendTransactionsToOrderer(t *testing.T, txs []*protoblocktx.Tx) {
 	t.Helper()
 	for _, tx := range txs {
-		_, resp, err := c.ordererStream.SubmitWithEnv(tx)
+		_, err := c.ordererStream.SendWithEnv(tx)
 		require.NoError(t, err)
-		require.Equal(t, common.Status_SUCCESS, resp.Status)
 	}
 }
 
@@ -447,6 +461,22 @@ func (c *CommitterRuntime) CreateCryptoForNs(t *testing.T, nsID string, schema s
 	c.nsToCryptoLock.Lock()
 	defer c.nsToCryptoLock.Unlock()
 	require.Nil(t, c.nsToCrypto[nsID])
+	c.nsToCrypto[nsID] = cr
+	return cr
+}
+
+// GerOrCreateCryptoForNs creates Crypto materials for a namespace and stores it locally.
+// It will get existing material if it already exists.
+func (c *CommitterRuntime) GerOrCreateCryptoForNs(t *testing.T, nsID string, schema signature.Scheme) *Crypto {
+	t.Helper()
+	c.nsToCryptoLock.Lock()
+	defer c.nsToCryptoLock.Unlock()
+	cr, ok := c.nsToCrypto[nsID]
+	if ok {
+		return cr
+	}
+	cr = c.createCrypto(t, nsID, schema)
+	require.NotNil(t, cr)
 	c.nsToCrypto[nsID] = cr
 	return cr
 }

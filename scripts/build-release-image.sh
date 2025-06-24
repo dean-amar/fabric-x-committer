@@ -13,17 +13,16 @@ namespace=$3
 dockerfile_release_dir=$4
 multiplatform=$5
 arch_bin_dir=$6
-image_prefix=committer-
 
 function build_image() {
-  local service_name=$1
-  local image_name=$2
+  local image_name=$1
+  local bin=$2
   local service_ports=$3
-  local manifest_name=${namespace}/${image_prefix}${image_name}:${version}
+  local manifest_name=${namespace}/${image_name}:${version}
   local cmd=(
     "${docker_cmd}" build
     -f "${dockerfile_release_dir}/Dockerfile"
-    --build-arg SERVICE_NAME="${service_name}"
+    --build-arg BIN="${bin}"
     --build-arg PORTS="${service_ports}"
     --build-arg ARCHBIN_PATH="${arch_bin_dir}"
   )
@@ -45,11 +44,6 @@ function build_image() {
 # make GOOS=linux GOARCH=s390x build
 
 # build container images
-build_image sidecar sidecar "4001 2114"
-build_image coordinator coordinator "9001 2119"
-build_image signatureverifier signature-verifier "5001 2115"
-build_image validatorpersister validator-persister "6001 2116"
-build_image loadgen loadgen "2110"
-build_image queryexecutor query-executor "7001 2117"
-
-${docker_cmd} images | grep ${image_prefix}
+build_image committer committer "4001 2114 9001 2119 5001 2115 6001 2116 7001 2117"
+build_image loadgen loadgen "8001 2118"
+${docker_cmd} images | grep -E "committer|loadgen"

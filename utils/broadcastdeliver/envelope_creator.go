@@ -9,7 +9,6 @@ package broadcastdeliver
 import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	ab "github.com/hyperledger/fabric-protos-go-apiv2/orderer"
 	"github.com/hyperledger/fabric/protoutil"
 	"google.golang.org/protobuf/proto"
 
@@ -26,16 +25,16 @@ type (
 
 	// BroadcastStream can be either CFT or BFT broadcast.
 	BroadcastStream interface {
-		Submit(*common.Envelope) (*ab.BroadcastResponse, error)
+		Send(*common.Envelope) error
 	}
 )
 
-// SubmitWithEnv wraps a payload with an envelope, signs it and submit it to the stream.
-func (s *EnvelopedStream) SubmitWithEnv(dataMsg proto.Message) (string, *ab.BroadcastResponse, error) {
+// SendWithEnv wraps a payload with an envelope, signs it and send it to the stream.
+func (s *EnvelopedStream) SendWithEnv(dataMsg proto.Message) (string, error) {
 	env, txID, err := serialization.CreateEnvelope(s.channelID, s.signer, dataMsg)
 	if err != nil {
-		return txID, nil, errors.Wrap(err, "error serializing envelope")
+		return txID, errors.Wrap(err, "error serializing envelope")
 	}
-	resp, err := s.Submit(env)
-	return txID, resp, errors.Wrap(err, "error submitting envelope")
+	err = s.Send(env)
+	return txID, errors.Wrap(err, "error submitting envelope")
 }

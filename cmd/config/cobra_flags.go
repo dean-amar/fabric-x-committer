@@ -7,8 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package config
 
 import (
-	"fmt"
-
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -23,7 +21,7 @@ type CobraFlag struct {
 
 // SetDefaultFlags setting useful Cobra flags for the cmd parameter.
 func SetDefaultFlags(v *viper.Viper, cmd *cobra.Command, configPath *string) error {
-	cmd.PersistentFlags().StringVar(configPath, "config", "", "set the config file path")
+	cmd.PersistentFlags().StringVarP(configPath, "config", "c", "", "set the config file path")
 	err := make([]error, 3)
 	err[0] = CobraString(v, cmd, CobraFlag{
 		Name:  "endpoint",
@@ -69,18 +67,4 @@ func CobraDuration(v *viper.Viper, cmd *cobra.Command, c CobraFlag) error {
 
 func bindFlag(v *viper.Viper, cmd *cobra.Command, c CobraFlag) error {
 	return errors.Wrap(v.BindPFlag(c.Key, cmd.PersistentFlags().Lookup(c.Name)), "failed to bind flag")
-}
-
-// VersionCmd creates a version command.
-func VersionCmd(serviceName, serviceVersion string) *cobra.Command {
-	return &cobra.Command{
-		Use:          "version",
-		Short:        fmt.Sprintf("print the version of the %v service.", serviceName),
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cmd.Printf("%v %v\n", serviceName, serviceVersion)
-			return nil
-		},
-	}
 }

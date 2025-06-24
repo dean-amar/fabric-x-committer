@@ -32,6 +32,9 @@ import (
 type (
 	// OrdererConfig configuration for the mock orderer.
 	OrdererConfig struct {
+		// Server and ServerConfigs sets the used serving endpoints.
+		// We support both for compatibility with other services.
+		Server           *connection.ServerConfig   `mapstructure:"server"`
 		ServerConfigs    []*connection.ServerConfig `mapstructure:"servers"`
 		NumService       int                        `mapstructure:"num-services"`
 		BlockSize        int                        `mapstructure:"block-size"`

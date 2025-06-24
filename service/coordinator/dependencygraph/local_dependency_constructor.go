@@ -116,7 +116,10 @@ func (p *localDependencyConstructor) construct(ctx context.Context) {
 			// by this transaction can be considered to detect dependencies
 			// of the next transaction.
 			dependsOnTxs := depDetector.getDependenciesOf(txNode)
-			txNode.addDependenciesAndUpdateDependents(dependsOnTxs)
+			if len(dependsOnTxs) > 0 {
+				promutil.AddToGauge(p.metrics.dependentTransactionsQueueSize, 1)
+				txNode.addDependenciesAndUpdateDependents(dependsOnTxs)
+			}
 			depDetector.addWaitingTx(txNode)
 			txsNode[i] = txNode
 		}

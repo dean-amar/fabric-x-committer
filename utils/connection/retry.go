@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -112,8 +113,8 @@ func (p *RetryProfile) MakeGrpcRetryPolicyJSON() string {
 	// We put limits on the values to ensure correct values.
 	initialInterval := max(b.InitialInterval.Seconds(), time.Nanosecond.Seconds())
 	maxInterval := max(b.MaxInterval.Seconds(), initialInterval)
+	multiplier := max(b.Multiplier, 1.0001)
 	maxElapsedTime := max(b.MaxElapsedTime.Seconds(), maxInterval)
-	multiplier := max(b.Multiplier, 1.0)
 	ret := map[string]any{
 		"loadBalancingConfig": []map[string]any{{
 			"round_robin": make(map[string]any),
@@ -122,9 +123,9 @@ func (p *RetryProfile) MakeGrpcRetryPolicyJSON() string {
 			// Setting an empty name sets the default for all methods.
 			"name": []any{make(map[string]any)},
 			"retryPolicy": map[string]any{
-				"maxAttempts":       defaultGrpcMaxAttempts,
-				"initialBackoff":    fmt.Sprintf("%.1fs", initialInterval),
-				"maxBackoff":        fmt.Sprintf("%.1fs", maxInterval),
+				"maxAttempts":       calcMaxAttempts(initialInterval, maxInterval, multiplier, maxElapsedTime),
+				"initialBackoff":    formatSeconds(initialInterval),
+				"maxBackoff":        formatSeconds(maxInterval),
 				"backoffMultiplier": multiplier,
 				"retryableStatusCodes": []string{
 					"UNAVAILABLE",
@@ -132,7 +133,6 @@ func (p *RetryProfile) MakeGrpcRetryPolicyJSON() string {
 					"RESOURCE_EXHAUSTED",
 				},
 			},
-			"timeout": fmt.Sprintf("%.1fs", maxElapsedTime),
 		}},
 	}
 	jsonString, err := json.MarshalIndent(ret, "", "  ")
@@ -141,4 +141,24 @@ func (p *RetryProfile) MakeGrpcRetryPolicyJSON() string {
 		return "{}"
 	}
 	return string(jsonString)
+}
+
+func formatSeconds(sec float64) string {
+	return fmt.Sprintf("%ss", strconv.FormatFloat(sec, 'f', -1, 64))
+}
+
+// calcMaxAttempts calculates the number of attempts given the following parameters:
+// - initialInterval > 0
+// - maxInterval     >= i
+// - multiplier      > 1
+// - maxElapsedTime > i.
+func calcMaxAttempts(initialInterval, maxInterval, multiplier, maxElapsedTime float64) int {
+	nextBackoffInterval := initialInterval
+	var estimatedElapsedTime float64
+	var attempts int
+	for attempts = 0; estimatedElapsedTime <= maxElapsedTime; attempts++ {
+		estimatedElapsedTime += nextBackoffInterval
+		nextBackoffInterval = min(nextBackoffInterval*multiplier, maxInterval)
+	}
+	return attempts
 }
