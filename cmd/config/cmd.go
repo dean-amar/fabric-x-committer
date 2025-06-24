@@ -68,6 +68,7 @@ func SidecarCMD(use string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: fmt.Sprintf("Starts %v.", SidecarName),
+		Long:  fmt.Sprintf("%v links between the system services.", SidecarName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := ReadSidecarYamlAndSetupLogging(v, configPath)
@@ -115,6 +116,7 @@ func CoordinatorCMD(use string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: fmt.Sprintf("Starts %v.", CoordinatorName),
+		Long:  fmt.Sprintf("%v is a transaction flow coordinator.", CoordinatorName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := ReadCoordinatorYamlAndSetupLogging(v, configPath)
@@ -142,6 +144,7 @@ func VcCMD(use string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: fmt.Sprintf("Starts %v.", VcName),
+		Long:  fmt.Sprintf("%v is a validator and committer service.", VcName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := ReadVCYamlAndSetupLogging(v, configPath)
@@ -173,6 +176,7 @@ func VerifierCMD(use string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: fmt.Sprintf("Starts %v.", VerifierName),
+		Long:  fmt.Sprintf("%v verifies the transaction's form and signatures.", VerifierName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := ReadVerifierYamlAndSetupLogging(v, configPath)
@@ -220,6 +224,7 @@ func QueryCMD(use string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: fmt.Sprintf("Starts %v.", QueryName),
+		Long:  fmt.Sprintf("%v is a service to query the state.", QueryName),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			conf, err := ReadQueryYamlAndSetupLogging(v, configPath)

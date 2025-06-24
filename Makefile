@@ -110,7 +110,7 @@ test-integration-db-resiliency: build
 	@$(go_test) ./integration/... -run "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests the all-in-one docker image.
-test-container: build-test-node-image build-mock-orderer-image
+test-container: build-test-node-image
 	@$(go_test) ./docker/... | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests for components that directly talk to the DB, where different DBs might affect behaviour.
@@ -186,8 +186,7 @@ $(cache_dir) $(mod_cache_dir):
 	# Use the host local gocache and gomodcache folder to avoid rebuilding and re-downloading every time
 	mkdir -p "$(cache_dir)" "$(mod_cache_dir)"
 
-BUILD_TARGETS=committer sidecar coordinator validatorpersister signatureverifier queryexecutor loadgen \
-			  mockvcservice mocksigservice mockorderingservice
+BUILD_TARGETS=build-cli-committer build-cli-loadgen build-cli-mock
 
 build: $(output_dir) $(BUILD_TARGETS)
 
@@ -201,35 +200,8 @@ build-arch-%: FORCE
 		build_flags="-ldflags '-w -s' $(build_flags)" \
 		build
 
-committer: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/committer" ./cmd/committer
-
-coordinator: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/coordinator" ./cmd/coordinatorservice
-
-signatureverifier: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/signatureverifier" ./cmd/sigverification
-
-validatorpersister: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/validatorpersister" ./cmd/vcservice
-
-sidecar: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/sidecar" ./cmd/sidecar
-
-queryexecutor: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/queryexecutor" ./cmd/queryservice
-
-loadgen: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/loadgen" ./cmd/loadgen
-
-mockvcservice: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/mockvcservice" ./cmd/mockvcservice
-
-mocksigservice: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/mocksigservice" ./cmd/mocksigservice
-
-mockorderingservice: FORCE $(output_dir)
-	$(go_build) "$(output_dir)/mockorderingservice" ./cmd/mockorderingservice
+build-cli-%: FORCE $(output_dir)
+	$(go_build) "$(output_dir)/$*" "./cmd/$*"
 
 build-docker: FORCE $(cache_dir) $(mod_cache_dir)
 	$(docker_cmd) run --rm -it \
@@ -243,25 +215,19 @@ build-docker: FORCE $(cache_dir) $(mod_cache_dir)
     make build output_dir=$(output_dir) env="$(env)"
 	scripts/amend-permissions.sh "$(cache_dir)" "$(mod_cache_dir)"
 
-build-test-node-image: build-arch
+build-test-node-image: build-arch build-test-genesis-block
 	${docker_cmd} build $(docker_build_flags) \
 		-f $(dockerfile_test_node_dir)/Dockerfile \
 		-t ${image_namespace}/committer-test-node:${version} \
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		. $(docker_push_arg)
 
-build-release-images: build-arch
-	./scripts/build-release-images.sh \
+build-release-image: build-arch
+	./scripts/build-release-image.sh \
 		$(docker_cmd) $(version) $(image_namespace) $(dockerfile_release_dir) $(multiplatform) $(arch_output_dir_rel)
 
-build-mock-orderer-image: build-arch
-	${docker_cmd} build $(docker_build_flags) \
-		-f ${dockerfile_release_dir}/Dockerfile \
-		-t ${image_namespace}/mock-ordering-service:${version} \
-		--build-arg SERVICE_NAME=mockorderingservice \
-		--build-arg PORTS=7050 \
-		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
-		.
+build-test-genesis-block: $(output_dir) build-cli-loadgen
+	bin/loadgen make-genesis-block -c "$(project_dir)/cmd/config/samples/loadgen.yaml" > "$(output_dir)/sc-genesis-block.proto.bin"
 
 #########################
 # Linter

@@ -32,6 +32,7 @@ type (
 		Ledger                        LedgerConfig             `mapstructure:"ledger"`
 		Orderer                       broadcastdeliver.Config  `mapstructure:"orderer"`
 		LastCommittedBlockSetInterval time.Duration            `mapstructure:"last-committed-block-set-interval"`
+		WaitingTxsLimit               int                      `mapstructure:"waiting-txs-limit"`
 		Monitoring                    monitoring.Config        `mapstructure:"monitoring"`
 		Bootstrap                     Bootstrap                `mapstructure:"bootstrap"`
 	}

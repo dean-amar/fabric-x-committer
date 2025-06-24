@@ -25,6 +25,8 @@ type perfMetrics struct {
 	mappedBlockProcessingInRelaySeconds         prometheus.Histogram
 	transactionStatusesProcessingInRelaySeconds prometheus.Histogram
 
+	waitingTransactionsQueueSize prometheus.Gauge
+
 	// queue sizes
 	yetToBeCommittedBlocksQueueSize prometheus.Gauge
 	committedBlocksQueueSize        prometheus.Gauge
@@ -73,6 +75,12 @@ func newPerformanceMetrics() *perfMetrics {
 			Name:      "transaction_status_batch_processing_seconds",
 			Help:      "Time spent processing a received status batch from the coordinator.",
 			Buckets:   histoBuckets,
+		}),
+		waitingTransactionsQueueSize: p.NewGauge(prometheus.GaugeOpts{
+			Namespace: "sidecar",
+			Subsystem: "relay",
+			Name:      "waiting_transactions_queue_size",
+			Help:      "Total number of transactions waiting at the relay for statuses.",
 		}),
 		yetToBeCommittedBlocksQueueSize: p.NewGauge(prometheus.GaugeOpts{
 			Namespace: "sidecar",

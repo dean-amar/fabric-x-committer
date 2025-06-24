@@ -94,11 +94,11 @@ func (c *OrdererAdapter) sendTransactions(
 			// The context ended.
 			return nil
 		}
-		txID, resp, err := stream.SubmitWithEnv(tx[0])
+		txID, err := stream.SendWithEnv(tx[0])
 		if err != nil {
 			return errors.Wrap(err, "failed to submit transaction")
 		}
-		logger.Debugf("Sent TX %s, got ack: %s", txID, resp.Info)
+		logger.Debugf("Sent TX %s", txID)
 		c.res.Metrics.OnSendTransaction(txID)
 		if c.res.isTXSendLimit() {
 			return nil

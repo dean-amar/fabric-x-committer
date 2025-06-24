@@ -8,12 +8,16 @@ package loadgen
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoloadgen"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
@@ -25,6 +29,7 @@ import (
 type (
 	// Client for applying load on the services.
 	Client struct {
+		protoloadgen.UnimplementedLoadGenServiceServer
 		conf      *ClientConfig
 		txStream  *workload.TxStream
 		resources adapters.ClientResources
@@ -80,6 +85,8 @@ func getAdapter(conf *adapters.AdapterConfig, res *adapters.ClientResources) (Se
 		return adapters.NewSidecarAdapter(conf.SidecarClient, res), nil
 	case conf.VerifierClient != nil:
 		return adapters.NewSVAdapter(conf.VerifierClient, res), nil
+	case conf.LoadGenClient != nil:
+		return adapters.NewLoadGenAdapter(conf.LoadGenClient, res), nil
 	default:
 		return nil, adapters.ErrInvalidAdapterConfig
 	}
@@ -97,9 +104,11 @@ func (c *Client) Run(ctx context.Context) error {
 		return c.resources.Metrics.StartPrometheusServer(gCtx, c.conf.Monitoring.Server)
 	})
 	g.Go(func() error {
+		return c.runLimiterServer(ctx)
+	})
+	g.Go(func() error {
 		return c.txStream.Run(gCtx)
 	})
-	c.txStream.WaitForReady(gCtx)
 
 	workloadSetupTXs := make(chan *protoblocktx.Tx, 1)
 	cs := &workload.StreamWithSetup{
@@ -115,7 +124,7 @@ func (c *Client) Run(ctx context.Context) error {
 	})
 
 	if err := c.submitWorkloadSetupTXs(gCtx, workloadSetupTXs); err != nil {
-		logger.Errorf("Failed to process tx: %v", err)
+		logger.Errorf("Failed to process tx: %+v", err)
 		cancel()
 		if gErr := g.Wait(); gErr != nil {
 			return errors.Wrap(gErr, "failed to process TX")
@@ -127,6 +136,65 @@ func (c *Client) Run(ctx context.Context) error {
 		cancel()
 	}
 	return g.Wait()
+}
+
+// WaitForReady waits for the service resources to initialize, so it is ready to answers requests.
+// If the context ended before the service is ready, returns false.
+func (*Client) WaitForReady(context.Context) bool {
+	return true
+}
+
+// AppendBatch appends a batch to the stream.
+func (c *Client) AppendBatch(ctx context.Context, batch *protoloadgen.Batch) (*protoloadgen.Empty, error) {
+	c.txStream.AppendBatch(ctx, batch.Tx)
+	return nil, nil
+}
+
+// GetLimit reads the stream limit.
+func (c *Client) GetLimit(_ context.Context, _ *protoloadgen.Empty) (*protoloadgen.Limit, error) {
+	return &protoloadgen.Limit{Rate: float64(c.txStream.GetLimit())}, nil
+}
+
+// SetLimit sets the stream limit.
+func (c *Client) SetLimit(_ context.Context, limit *protoloadgen.Limit) (*protoloadgen.Empty, error) {
+	c.txStream.SetLimit(rate.Limit(limit.Rate))
+	return nil, nil
+}
+
+// runLimiterServer starts a simple HTTP server for setting the rate limit.
+func (c *Client) runLimiterServer(ctx context.Context) error {
+	endpoint := c.conf.Stream.RateLimit.Endpoint
+	if endpoint.Empty() {
+		return nil
+	}
+
+	// start remote-limiter controller.
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.Default()
+	router.POST("/setLimits", func(ginCtx *gin.Context) {
+		logger.Infof("Received limit request.")
+		var request struct {
+			Limit rate.Limit `json:"limit"`
+		}
+		if err := ginCtx.BindJSON(&request); err != nil {
+			logger.Errorf("error deserializing request: %v", err)
+			ginCtx.IndentedJSON(http.StatusBadRequest, request)
+			return
+		}
+		logger.Infof("Setting limit to %.2f", request.Limit)
+		c.txStream.SetLimit(request.Limit)
+		ginCtx.IndentedJSON(http.StatusOK, request)
+	})
+	logger.Infof("Start remote controller listener on %c", endpoint.Address())
+	g, gCtx := errgroup.WithContext(ctx)
+	logger.Infof("Serving...")
+	server := &http.Server{Addr: endpoint.Address(), Handler: router, ReadTimeout: time.Minute}
+	g.Go(func() error {
+		return server.ListenAndServe()
+	})
+	<-gCtx.Done()
+	_ = server.Close()
+	return errors.Wrap(g.Wait(), "remote controller ended")
 }
 
 // submitWorkloadSetupTXs writes the workload setup TXs to the channel, and waits for them to be committed.

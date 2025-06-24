@@ -20,7 +20,7 @@ orderer:
     endpoints:
       - broadcast,deliver,ordering-service:7050
   channel-id: mychannel
-  # orderer-connection-profile:
+  # identity:
   #   root-ca-paths:
   #     - /root/config/crypto/ca-certs.pem
   #   msp-dir: /root/config/crypto/peerOrganizations/defaultpeerorg.example.com/peers/peerservice-machine1.defaultpeerorg.example.com/msp
@@ -34,6 +34,9 @@ committer:
   endpoint: coordinator:9001
 ledger:
   path: /root/sc/ledger
+
+last-committed-block-set-interval: 5s
+waiting-txs-limit: 20_000_000
 
 logging:
   enabled: true

@@ -30,6 +30,7 @@ ledger:
   path: {{ .LedgerPath }}
 
 last-committed-block-set-interval: 5s
+waiting-txs-limit: 20_000_000
 
 bootstrap:
   genesis-block-file-path: {{ .ConfigBlockPath }}

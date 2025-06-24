@@ -23,7 +23,7 @@ func StartGenerator(tb testing.TB, p *Profile) *RateLimiterGenerator[*protoblock
 		BuffersSize: 1024,
 		GenBatch:    4096,
 	})
-	test.RunServiceForTest(tb.Context(), tb, s.Run, s.WaitForReady)
+	test.RunServiceForTest(tb.Context(), tb, s.Run, nil)
 
 	// Give the generator a head start.
 	time.Sleep(3 * time.Second)

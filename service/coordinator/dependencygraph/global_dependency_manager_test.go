@@ -198,7 +198,7 @@ func TestGlobalDependencyManagerWithLimit(t *testing.T) {
 	keys := makeTestKeys(t, 10)
 
 	t.Run("both local and global dependency with waiting due to limit", func(t *testing.T) {
-		env.dm.waitingTxsSlots.availableSlots.Store(2)
+		env.dm.waitingTxsSlots.Store(t, 2)
 		// t2 depends on t1
 		t1 := createTxNode(t, [][]byte{keys[0], keys[1]}, [][]byte{keys[2], keys[3]}, [][]byte{keys[4], keys[5]})
 		t2 := createTxNode(t, [][]byte{keys[4], keys[5]}, [][]byte{keys[2], keys[6]}, [][]byte{keys[3], keys[7]})

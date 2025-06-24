@@ -36,7 +36,7 @@ func TestAddToCounterVec(t *testing.T) {
 	RequireIntMetricValue(t, 3, c)
 }
 
-func TestAddToGauge(t *testing.T) {
+func TestAddAndSubGauge(t *testing.T) {
 	t.Parallel()
 	g := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "test",
@@ -45,6 +45,8 @@ func TestAddToGauge(t *testing.T) {
 	g.Set(10)
 	AddToGauge(g, 5)
 	RequireIntMetricValue(t, 15, g)
+	SubFromGauge(g, 5)
+	RequireIntMetricValue(t, 10, g)
 }
 
 func TestSetGauge(t *testing.T) {

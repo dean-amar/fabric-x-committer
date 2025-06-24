@@ -11,12 +11,17 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric/protoutil"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
 
+	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoloadgen"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/cmd/config"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 )
 
 const (
@@ -40,11 +45,12 @@ func loadgenCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(config.VersionCmd())
-	cmd.AddCommand(startCmd())
+	cmd.AddCommand(loadGenCMD())
+	cmd.AddCommand(loadGenGenesisBlock())
 	return cmd
 }
 
-func startCmd() *cobra.Command {
+func loadGenCMD() *cobra.Command {
 	v := config.NewViperWithLoadGenDefaults()
 	var configPath string
 	var onlyNamespace bool
@@ -73,12 +79,44 @@ func startCmd() *cobra.Command {
 			if err != nil {
 				return errors.Wrap(err, "failed to create loadgen client")
 			}
-			return client.Run(cmd.Context())
+			return connection.StartService(cmd.Context(), client, conf.Server, func(s *grpc.Server) {
+				protoloadgen.RegisterLoadGenServiceServer(s, client)
+			})
 		},
 	}
 	utils.Must(config.SetDefaultFlags(v, cmd, &configPath))
 	p := cmd.PersistentFlags()
 	p.BoolVar(&onlyNamespace, "only-namespace", false, "only run namespace generation")
 	p.BoolVar(&onlyWorkload, "only-workload", false, "only run workload generation")
+	return cmd
+}
+
+func loadGenGenesisBlock() *cobra.Command {
+	v := config.NewViperWithLoadGenDefaults()
+	var configPath string
+	cmd := &cobra.Command{
+		Use:   "make-genesis-block",
+		Short: "Generates the genesis block and writes it to the standard output.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			conf, err := config.ReadLoadGenYamlAndSetupLogging(v, configPath)
+			if err != nil {
+				return err
+			}
+			cmd.SilenceUsage = true
+
+			block, err := workload.CreateConfigBlock(conf.LoadProfile.Transaction.Policy)
+			if err != nil {
+				return err
+			}
+			blockBytes, err := protoutil.Marshal(block)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(blockBytes)
+			return err
+		},
+	}
+	utils.Must(config.SetDefaultFlags(v, cmd, &configPath))
 	return cmd
 }

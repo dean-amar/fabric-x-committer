@@ -19,6 +19,7 @@ type (
 		CoordinatorClient *CoordinatorClientConfig `mapstructure:"coordinator-client"`
 		VCClient          *VCClientConfig          `mapstructure:"vc-client"`
 		VerifierClient    *VerifierClientConfig    `mapstructure:"verifier-client"`
+		LoadGenClient     *LoadGenClientConfig     `mapstructure:"loadgen-client"`
 	}
 
 	// OrdererClientConfig is a struct that contains the configuration for the orderer client.
@@ -48,5 +49,10 @@ type (
 	// VerifierClientConfig is a struct that contains the configuration for the verifier client.
 	VerifierClientConfig struct {
 		Endpoints []*connection.Endpoint `mapstructure:"endpoints"`
+	}
+
+	// LoadGenClientConfig is a struct that contains the configuration for the load generator client.
+	LoadGenClientConfig struct {
+		Endpoint *connection.Endpoint `mapstructure:"endpoint"`
 	}
 )

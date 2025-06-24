@@ -21,7 +21,7 @@ type CobraFlag struct {
 
 // SetDefaultFlags setting useful Cobra flags for the cmd parameter.
 func SetDefaultFlags(v *viper.Viper, cmd *cobra.Command, configPath *string) error {
-	cmd.PersistentFlags().StringVar(configPath, "config", "", "set the config file path")
+	cmd.PersistentFlags().StringVarP(configPath, "config", "c", "", "set the config file path")
 	err := make([]error, 3)
 	err[0] = CobraString(v, cmd, CobraFlag{
 		Name:  "endpoint",

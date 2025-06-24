@@ -54,6 +54,8 @@ func TestReadConfigSidecar(t *testing.T) {
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
 			},
+			LastCommittedBlockSetInterval: 3 * time.Second,
+			WaitingTxsLimit:               100_000,
 		},
 	}, {
 		name:           "sample",
@@ -87,6 +89,8 @@ func TestReadConfigSidecar(t *testing.T) {
 			Ledger: sidecar.LedgerConfig{
 				Path: "/root/sc/ledger",
 			},
+			LastCommittedBlockSetInterval: 5 * time.Second,
+			WaitingTxsLimit:               20_000_000,
 		},
 	}}
 	for _, test := range tests {
@@ -115,7 +119,7 @@ func TestReadConfigCoordinator(t *testing.T) {
 			Monitoring: makeMonitoring("localhost", 2119),
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 10000,
+				WaitingTxsLimit:                 100_000,
 				NumOfWorkersForGlobalDepManager: 1,
 			},
 			ChannelBufferSizePerGoroutine: 10,
@@ -134,7 +138,7 @@ func TestReadConfigCoordinator(t *testing.T) {
 			},
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 10000,
+				WaitingTxsLimit:                 10_000,
 				NumOfWorkersForGlobalDepManager: 1,
 			},
 			ChannelBufferSizePerGoroutine: 10,
@@ -305,16 +309,18 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &loadgen.ClientConfig{
+			Server: makeServer("localhost", 8001),
 			Monitoring: metrics.Config{
-				Config: makeMonitoring("localhost", 2110),
+				Config: makeMonitoring("localhost", 2118),
 			},
 		},
 	}, {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
 		expectedConfig: &loadgen.ClientConfig{
+			Server: makeServer("", 8001),
 			Monitoring: metrics.Config{
-				Config: makeMonitoring("", 2110),
+				Config: makeMonitoring("", 2118),
 				Latency: metrics.LatencyConfig{
 					SamplerConfig: metrics.SamplerConfig{
 						Portion: 0.01,
@@ -335,7 +341,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 								0, "", makeServer("ordering-service", 7050),
 							),
 						},
-						ChannelID:     "channel",
+						ChannelID:     "mychannel",
 						ConsensusType: "BFT",
 					},
 					BroadcastParallelism: 1,
@@ -366,7 +372,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			Stream: &workload.StreamOptions{
 				RateLimit: &workload.LimiterConfig{
 					Endpoint:     *makeEndpoint("", 6997),
-					InitialLimit: 1000,
+					InitialLimit: 10_000,
 				},
 				BuffersSize: 10,
 				GenBatch:    10,
@@ -376,7 +382,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				Load:       true,
 			},
 			Limit: &adapters.GenerateLimit{
-				Transactions: 5_000,
+				Transactions: 50_000,
 			},
 		},
 	}}

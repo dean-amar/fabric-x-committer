@@ -47,7 +47,6 @@ type sidecarTestEnv struct {
 	ordererEnv        *mock.OrdererTestEnv
 
 	sidecar        *Service
-	gServer        *grpc.Server
 	committedBlock chan *common.Block
 	configBlock    *common.Block
 }
@@ -129,6 +128,7 @@ func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
 			Path: t.TempDir(),
 		},
 		LastCommittedBlockSetInterval: 100 * time.Millisecond,
+		WaitingTxsLimit:               1000,
 		Monitoring: monitoring.Config{
 			Server: connection.NewLocalHostServer(),
 		},
@@ -152,7 +152,7 @@ func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
 
 func (env *sidecarTestEnv) start(ctx context.Context, t *testing.T, startBlkNum int64) {
 	t.Helper()
-	env.gServer = test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server, func(server *grpc.Server) {
+	test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server, func(server *grpc.Server) {
 		peer.RegisterDeliverServer(server, env.sidecar.GetLedgerService())
 	})
 	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{

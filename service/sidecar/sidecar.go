@@ -166,6 +166,7 @@ func (s *Service) sendBlocksAndReceiveStatus(
 			configUpdater:                  s.configUpdater,
 			incomingBlockToBeCommitted:     s.blockToBeCommitted,
 			outgoingCommittedBlock:         s.committedBlock,
+			waitingTxsLimit:                s.config.WaitingTxsLimit,
 		})
 	})
 

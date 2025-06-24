@@ -39,6 +39,10 @@ func eventuallyMetrics(
 // DefaultClientConf returns default config values for client testing.
 func DefaultClientConf() *ClientConfig {
 	return &ClientConfig{
+		Server: connection.NewLocalHostServer(),
+		Monitoring: metrics.Config{
+			Config: defaultMonitoring(),
+		},
 		LoadProfile: &workload.Profile{
 			Key:   workload.KeyProfile{Size: 32},
 			Block: workload.BlockProfile{Size: defaultBlockSize},
@@ -71,9 +75,6 @@ func DefaultClientConf() *ClientConfig {
 			Config:     true,
 			Namespaces: true,
 			Load:       true,
-		},
-		Monitoring: metrics.Config{
-			Config: defaultMonitoring(),
 		},
 	}
 }

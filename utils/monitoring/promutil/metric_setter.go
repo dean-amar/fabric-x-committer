@@ -27,6 +27,11 @@ func AddToGauge(g prometheus.Gauge, n int) {
 	g.Add(float64(n))
 }
 
+// SubFromGauge subtracts a given value from a prometheus gauge.
+func SubFromGauge(g prometheus.Gauge, n int) {
+	g.Sub(float64(n))
+}
+
 // SetGaugeVec sets a value to given labels on the prometheus gauge vector.
 func SetGaugeVec(c *prometheus.GaugeVec, labels []string, n int) {
 	c.WithLabelValues(labels...).Set(float64(n))

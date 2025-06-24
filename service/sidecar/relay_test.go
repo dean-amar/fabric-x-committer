@@ -26,10 +26,12 @@ import (
 
 type relayTestEnv struct {
 	relay                      *relay
+	coordinator                *mock.Coordinator
 	incomingBlockToBeCommitted chan *common.Block
 	committedBlock             chan *common.Block
 	configBlocks               []*common.Block
 	metrics                    *perfMetrics
+	waitingTxsLimit            int
 }
 
 const (
@@ -39,7 +41,7 @@ const (
 
 func newRelayTestEnv(t *testing.T) *relayTestEnv {
 	t.Helper()
-	_, coordinatorServer := mock.StartMockCoordinatorService(t)
+	coord, coordinatorServer := mock.StartMockCoordinatorService(t)
 	coordinatorEndpoint := coordinatorServer.Configs[0].Endpoint
 
 	metrics := newPerformanceMetrics()
@@ -56,9 +58,11 @@ func newRelayTestEnv(t *testing.T) *relayTestEnv {
 
 	env := &relayTestEnv{
 		relay:                      relayService,
+		coordinator:                coord,
 		incomingBlockToBeCommitted: make(chan *common.Block, 10),
 		committedBlock:             make(chan *common.Block, 10),
 		metrics:                    metrics,
+		waitingTxsLimit:            100,
 	}
 
 	client := protocoordinatorservice.NewCoordinatorClient(conn)
@@ -71,6 +75,7 @@ func newRelayTestEnv(t *testing.T) *relayTestEnv {
 			},
 			incomingBlockToBeCommitted: env.incomingBlockToBeCommitted,
 			outgoingCommittedBlock:     env.committedBlock,
+			waitingTxsLimit:            env.waitingTxsLimit,
 		}))
 	}, nil)
 	return env
@@ -79,14 +84,23 @@ func newRelayTestEnv(t *testing.T) *relayTestEnv {
 func TestRelayNormalBlock(t *testing.T) {
 	t.Parallel()
 	relayEnv := newRelayTestEnv(t)
+	relayEnv.coordinator.SetDelay(10 * time.Second)
+
 	blk0 := createBlockForTest(0, nil, [3]string{"tx1", "tx2", "tx3"})
 	require.Nil(t, blk0.Metadata)
 	relayEnv.incomingBlockToBeCommitted <- blk0
+
 	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.transactionsSentTotal, 5*time.Second, 10*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.waitingTransactionsQueueSize, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, int64(relayEnv.waitingTxsLimit-3), relayEnv.relay.waitingTxsSlots.Load(t))
+
 	committedBlock0 := <-relayEnv.committedBlock
 	promutil.RequireIntMetricValue(t, 3, relayEnv.metrics.transactionsStatusReceivedTotal.WithLabelValues(
 		protoblocktx.Status_COMMITTED.String(),
 	))
+	promutil.EventuallyIntMetric(t, 0, relayEnv.metrics.waitingTransactionsQueueSize, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, int64(relayEnv.waitingTxsLimit), relayEnv.relay.waitingTxsSlots.Load(t))
+
 	expectedMetadata := &common.BlockMetadata{
 		Metadata: [][]byte{nil, nil, {valid, valid, valid}},
 	}
@@ -97,6 +111,16 @@ func TestRelayNormalBlock(t *testing.T) {
 	require.Greater(t, promutil.GetMetricValue(t, m.blockMappingInRelaySeconds), float64(0))
 	require.Greater(t, promutil.GetMetricValue(t, m.mappedBlockProcessingInRelaySeconds), float64(0))
 	require.Greater(t, promutil.GetMetricValue(t, m.transactionStatusesProcessingInRelaySeconds), float64(0))
+
+	relayEnv.relay.waitingTxsSlots.Store(t, int64(0))
+	blk1 := createBlockForTest(1, nil, [3]string{"tx1", "tx2", "tx3"})
+	relayEnv.incomingBlockToBeCommitted <- blk1
+	require.Never(t, func() bool {
+		return promutil.GetMetricValue(t, m.transactionsSentTotal) > 3
+	}, 3*time.Second, 1*time.Second)
+	relayEnv.relay.waitingTxsSlots.Store(t, int64(3))
+	relayEnv.relay.waitingTxsSlots.Broadcast()
+	promutil.EventuallyIntMetric(t, 6, relayEnv.metrics.transactionsSentTotal, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestBlockWithDuplicateTransactions(t *testing.T) {

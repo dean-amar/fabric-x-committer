@@ -111,7 +111,6 @@ func (s *LedgerService) Deliver(srv peer.Deliver_DeliverServer) error {
 	for {
 		logger.Infof("Attempting to read seek info message from %s", addr)
 		envelope, err := srv.Recv()
-		logger.Infof("Received seek info message from %s", addr)
 		if errors.Is(err, io.EOF) {
 			logger.Infof("Received EOF from %s,", addr)
 			return nil
@@ -120,6 +119,7 @@ func (s *LedgerService) Deliver(srv peer.Deliver_DeliverServer) error {
 			return err
 		}
 
+		logger.Infof("Received seek info message from %s", addr)
 		status, err := s.deliverBlocks(srv, envelope)
 		if err != nil {
 			logger.Infof("Failed delivering to %s with status %v: %v", addr, status, err)
@@ -133,8 +133,6 @@ func (s *LedgerService) Deliver(srv peer.Deliver_DeliverServer) error {
 			logger.Infof("Error sending to %s: %s", addr, err)
 			return err
 		}
-
-		logger.Infof("Waiting for new SeekInfo from %s", addr)
 	}
 }
 
@@ -183,7 +181,7 @@ func (s *LedgerService) deliverBlocks(
 		block, status := cursor.Next()
 
 		if status != common.Status_SUCCESS {
-			return status, errors.New("error reading from channel")
+			return status, nil
 		}
 
 		if err := srv.Send(&peer.DeliverResponse{Type: &peer.DeliverResponse_Block{Block: block}}); err != nil {

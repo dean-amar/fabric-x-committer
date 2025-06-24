@@ -26,21 +26,15 @@ import (
 )
 
 var testGrpcRetryProfile = connection.RetryProfile{
-	InitialInterval: 200 * time.Millisecond,
-	MaxInterval:     500 * time.Millisecond,
+	InitialInterval: 10 * time.Millisecond,
+	MaxInterval:     100 * time.Millisecond,
 	Multiplier:      2,
 	MaxElapsedTime:  time.Second,
 }
 
-//nolint:paralleltest // modifies default grpc retry profile.
 func TestBroadcastDeliver(t *testing.T) {
+	t.Parallel()
 	// We use a short retry grpc-config to shorten the test time.
-	// This change prevents this test from being parallelized with other tests.
-	prevGrpcProfile := connection.DefaultGrpcRetryProfile
-	t.Cleanup(func() {
-		connection.DefaultGrpcRetryProfile = prevGrpcProfile
-	})
-	connection.DefaultGrpcRetryProfile = testGrpcRetryProfile
 	ordererService, servers, conf := makeConfig(t)
 
 	allEndpoints := conf.Connection.Endpoints
@@ -99,7 +93,7 @@ func TestBroadcastDeliver(t *testing.T) {
 	submit(t, stream, outputBlocks, expectedSubmit{
 		id:          "3",
 		success:     2,
-		unavailable: 2,
+		unavailable: 1,
 	})
 
 	t.Log("One incorrect server")
@@ -109,7 +103,6 @@ func TestBroadcastDeliver(t *testing.T) {
 	submit(t, stream, outputBlocks, expectedSubmit{
 		id:            "4",
 		success:       2,
-		unavailable:   1,
 		unimplemented: 1,
 	})
 
@@ -132,9 +125,8 @@ func TestBroadcastDeliver(t *testing.T) {
 	time.Sleep(3 * time.Second)
 	submit(t, stream, outputBlocks, expectedSubmit{
 		id:          "6",
-		error:       true,
 		success:     1,
-		unavailable: 4,
+		unavailable: 2,
 	})
 
 	t.Log("Update endpoints")
@@ -149,7 +141,6 @@ func TestBroadcastDeliver(t *testing.T) {
 
 type expectedSubmit struct {
 	id            string
-	error         bool
 	success       int
 	unavailable   int
 	unimplemented int
@@ -163,34 +154,26 @@ func submit(
 ) {
 	t.Helper()
 	tx := &protoblocktx.Tx{Id: expected.id}
-	_, resp, err := stream.SubmitWithEnv(tx)
-	var info string
+	_, err := stream.SendWithEnv(tx)
 	if err != nil {
 		t.Logf("Response error:\n%s", err)
-		info = err.Error()
-	} else {
-		t.Logf("Response info:\n%s", resp.Info)
-		info = resp.Info
 	}
-	if expected.error {
+	if expected.unavailable > 0 {
+		// Unimplemented sometimes not responding with error, so we cannot enforce it.
 		require.Error(t, err)
-	} else {
+	} else if expected.unimplemented == 0 {
 		require.NoError(t, err)
-		require.Equal(t, common.Status_SUCCESS, resp.Status)
 	}
 
-	require.Equal(t, expected.success, strings.Count(info, "SUCCESS"), info)
-
-	// We verify that we didn't get more Unavailable or Unimplemented than expected.
-	// These errors sometimes returns DeadlineExceeded instead, so we might not get exact value.
-	require.LessOrEqual(t, strings.Count(info, "Unavailable"), expected.unavailable+expected.unimplemented, info)
-	require.LessOrEqual(t, strings.Count(info, "Unimplemented"), expected.unimplemented, info)
-
-	// We count all of these errors together to ensure we didn't get fewer errors than expected.
-	nonSuccessCount := strings.Count(info, "Unavailable") +
-		strings.Count(info, "DeadlineExceeded") +
-		strings.Count(info, "Unimplemented")
-	require.Equal(t, expected.unavailable+expected.unimplemented, nonSuccessCount, info)
+	if err != nil {
+		errStr := err.Error()
+		// We verify that we didn't get more Unavailable or Unimplemented than expected.
+		// Unimplemented sometimes returns Unavailable or no error at all, so we might not get exact value.
+		unavailableCount := strings.Count(errStr, "Unavailable")
+		unimplementedCount := strings.Count(errStr, "Unimplemented")
+		require.LessOrEqual(t, unavailableCount, expected.unavailable+expected.unimplemented, err)
+		require.LessOrEqual(t, unimplementedCount, expected.unimplemented, err)
+	}
 
 	b, ok := outputBlocks.Read()
 	require.True(t, ok)
@@ -218,11 +201,7 @@ func makeConfig(t *testing.T) (*mock.Orderer, []test.GrpcServers, Config) {
 	conf := Config{
 		ChannelID:     "mychannel",
 		ConsensusType: Bft,
-		Connection: ConnectionConfig{
-			Retry: &connection.RetryProfile{
-				MaxElapsedTime: time.Second,
-			},
-		},
+		Connection:    ConnectionConfig{Retry: &testGrpcRetryProfile},
 	}
 	servers := make([]test.GrpcServers, idCount)
 	for i, c := range ordererServer.Configs {

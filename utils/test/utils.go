@@ -146,7 +146,7 @@ func RunServiceForTest(
 	waitFunc func(ctx context.Context) bool,
 ) *channel.Ready {
 	tb.Helper()
-	ready := channel.NewReady()
+	doneFlag := channel.NewReady()
 	var wg sync.WaitGroup
 	// NOTE: we should cancel the context before waiting for the completion. Therefore, the
 	//       order of cleanup matters, which is last added first called.
@@ -160,19 +160,19 @@ func RunServiceForTest(
 	require.True(tb, ok)
 	go func() {
 		defer wg.Done()
-		defer ready.SignalReady()
+		defer doneFlag.SignalReady()
 		// We use assert to prevent panicking for cleanup errors.
 		assert.NoErrorf(tb, service(dCtx), "called from %s:%d\n\t%s", file, no, runtime.FuncForPC(pc).Name())
 	}()
 
 	if waitFunc == nil {
-		return ready
+		return doneFlag
 	}
 
 	initCtx, initCancel := context.WithTimeout(dCtx, 2*time.Minute)
 	tb.Cleanup(initCancel)
 	require.True(tb, waitFunc(initCtx), "service is not ready")
-	return ready
+	return doneFlag
 }
 
 // RunServiceAndGrpcForTest combines running a service and its GRPC server.
@@ -185,15 +185,16 @@ func RunServiceAndGrpcForTest(
 	service connection.Service,
 	serverConfig *connection.ServerConfig,
 	register ...func(server *grpc.Server),
-) *grpc.Server {
+) *channel.Ready {
 	t.Helper()
-	RunServiceForTest(ctx, t, func(ctx context.Context) error {
+	doneFlag := RunServiceForTest(ctx, t, func(ctx context.Context) error {
 		return connection.FilterStreamRPCError(service.Run(ctx))
 	}, service.WaitForReady)
 	if serverConfig == nil || register == nil {
 		return nil
 	}
-	return RunGrpcServerForTest(ctx, t, serverConfig, register...)
+	RunGrpcServerForTest(ctx, t, serverConfig, register...)
+	return doneFlag
 }
 
 // WaitUntilGrpcServerIsReady uses the health check API to check a service readiness.

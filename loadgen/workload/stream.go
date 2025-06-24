@@ -36,7 +36,6 @@ type (
 
 	stream struct {
 		options *StreamOptions
-		ready   *channel.Ready
 		limiter *rate.Limiter
 	}
 )
@@ -53,7 +52,10 @@ func NewTxStream(
 	modifierGenerators ...Generator[Modifier],
 ) *TxStream {
 	signer := NewTxSignerVerifier(profile.Transaction.Policy)
-	txStream := &TxStream{stream: newStream(profile, options)}
+	txStream := &TxStream{
+		stream: newStream(profile, options),
+		queue:  make(chan []*protoblocktx.Tx, max(options.BuffersSize, 1)),
+	}
 	for _, w := range makeWorkersData(profile) {
 		modifiers := make([]Modifier, 0, len(modifierGenerators)+2)
 		if len(profile.Conflicts.Dependencies) > 0 {
@@ -75,14 +77,6 @@ func NewTxStream(
 // Run starts the stream workers.
 func (s *TxStream) Run(ctx context.Context) error {
 	logger.Debugf("Starting %d workers to generate load", len(s.gens))
-
-	s.queue = make(chan []*protoblocktx.Tx, max(s.options.BuffersSize, 1))
-	defer func() {
-		// It is safe to close the channel as we only exit this method once all the ingesters are done.
-		close(s.queue)
-	}()
-	s.ready.SignalReady()
-
 	g, gCtx := errgroup.WithContext(ctx)
 	for _, gen := range s.gens {
 		g.Go(func() error {
@@ -91,6 +85,21 @@ func (s *TxStream) Run(ctx context.Context) error {
 		})
 	}
 	return errors.Wrap(g.Wait(), "stream finished")
+}
+
+// AppendBatch appends a batch to the stream.
+func (s *TxStream) AppendBatch(ctx context.Context, batch []*protoblocktx.Tx) {
+	channel.NewWriter(ctx, s.queue).Write(batch)
+}
+
+// GetLimit reads the stream limit.
+func (s *TxStream) GetLimit() rate.Limit {
+	return s.limiter.Limit()
+}
+
+// SetLimit sets the stream limit.
+func (s *TxStream) SetLimit(limit rate.Limit) {
+	s.limiter.SetLimit(limit)
 }
 
 // MakeGenerator creates a new generator that consumes from the stream.
@@ -105,7 +114,10 @@ func (s *TxStream) MakeGenerator() *RateLimiterGenerator[*protoblocktx.Tx] {
 
 // NewQueryGenerator creates workers that generates queries into a queue.
 func NewQueryGenerator(profile *Profile, options *StreamOptions) *QueryStream {
-	qs := &QueryStream{stream: newStream(profile, options)}
+	qs := &QueryStream{
+		stream: newStream(profile, options),
+		queue:  make(chan []*protoqueryservice.Query, max(options.BuffersSize, 1)),
+	}
 	for _, w := range makeWorkersData(profile) {
 		queryGen := newQueryGenerator(NewRandFromSeedGenerator(w.seed), w.keyGen, profile)
 		qs.gen = append(qs.gen, queryGen)
@@ -116,13 +128,6 @@ func NewQueryGenerator(profile *Profile, options *StreamOptions) *QueryStream {
 // Run starts the workers.
 func (s *QueryStream) Run(ctx context.Context) error {
 	logger.Debugf("Starting %d workers to generate query load", len(s.gen))
-
-	s.queue = make(chan []*protoqueryservice.Query, max(s.options.BuffersSize, 1))
-	defer func() {
-		// It is safe to close the channel as we only exit this method once all the ingesters are done.
-		close(s.queue)
-	}()
-	s.ready.SignalReady()
 
 	g, gCtx := errgroup.WithContext(ctx)
 	for _, gen := range s.gen {
@@ -151,7 +156,7 @@ type workerData struct {
 
 func makeWorkersData(profile *Profile) []workerData {
 	seedGen := rand.New(rand.NewSource(profile.Seed))
-	workers := make([]workerData, max(profile.Workers, 1))
+	workers := make([]workerData, profile.Workers)
 	for i := range workers {
 		seed := NewRandFromSeedGenerator(seedGen)
 		// Each worker has a unique seed to generate keys in addition the seed for the other content.
@@ -183,13 +188,6 @@ func newStream(profile *Profile, options *StreamOptions) stream {
 	burst := max(int(options.GenBatch), int(profile.Block.Size)) //nolint:gosec // uint64 -> int.
 	return stream{
 		options: options,
-		ready:   channel.NewReady(),
 		limiter: NewLimiter(options.RateLimit, burst),
 	}
-}
-
-// WaitForReady waits for the service resources to initialize, so it is ready to answers requests.
-// If the context ended before the service is ready, returns false.
-func (s *stream) WaitForReady(ctx context.Context) bool {
-	return s.ready.WaitForReady(ctx)
 }

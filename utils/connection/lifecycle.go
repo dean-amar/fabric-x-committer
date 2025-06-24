@@ -48,7 +48,7 @@ func Sustain(ctx context.Context, op func() error) error {
 		if !errors.Is(opErr, ErrBackOff) {
 			b.Reset()
 		}
-		if err := waitForNextBackOffDuration(ctx, b); err != nil {
+		if err := WaitForNextBackOffDuration(ctx, b); err != nil {
 			return err
 		}
 	}
@@ -56,7 +56,10 @@ func Sustain(ctx context.Context, op func() error) error {
 	return errors.Wrap(ctx.Err(), "context has been cancelled")
 }
 
-func waitForNextBackOffDuration(ctx context.Context, b *backoff.ExponentialBackOff) error {
+// WaitForNextBackOffDuration waits for the next backoff duration.
+// It stops if the context ends.
+// If the backoff should stop, it returns ErrRetryTimeout.
+func WaitForNextBackOffDuration(ctx context.Context, b *backoff.ExponentialBackOff) error {
 	waitTime := b.NextBackOff()
 	if waitTime == backoff.Stop {
 		return ErrRetryTimeout

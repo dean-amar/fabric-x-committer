@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
@@ -91,7 +92,7 @@ func BenchmarkGenTx(b *testing.B) {
 		t := NewTxStream(p, defaultBenchStreamOptions())
 
 		b.ResetTimer()
-		test.RunServiceForTest(b.Context(), b, t.Run, t.WaitForReady)
+		test.RunServiceForTest(b.Context(), b, t.Run, nil)
 		g := t.MakeGenerator()
 
 		var sum float64
@@ -113,7 +114,7 @@ func BenchmarkGenQuery(b *testing.B) {
 		c := NewQueryGenerator(p, defaultBenchStreamOptions())
 
 		b.ResetTimer()
-		test.RunServiceForTest(b.Context(), b, c.Run, c.WaitForReady)
+		test.RunServiceForTest(b.Context(), b, c.Run, nil)
 		g := c.MakeGenerator()
 
 		var sum float64
@@ -200,7 +201,7 @@ func startTxGeneratorUnderTest(
 ) *TxStream {
 	t.Helper()
 	g := NewTxStream(profile, options, modifierGenerators...)
-	test.RunServiceForTest(t.Context(), t, g.Run, g.WaitForReady)
+	test.RunServiceForTest(t.Context(), t, g.Run, nil)
 	return g
 }
 
@@ -209,7 +210,7 @@ func startQueryGeneratorUnderTest(
 ) *RateLimiterGenerator[*protoqueryservice.Query] {
 	t.Helper()
 	g := NewQueryGenerator(profile, options)
-	test.RunServiceForTest(t.Context(), t, g.Run, g.WaitForReady)
+	test.RunServiceForTest(t.Context(), t, g.Run, nil)
 	return g.MakeGenerator()
 }
 
@@ -370,7 +371,7 @@ func TestGenTxWithRateLimit(t *testing.T) {
 	producedTotal := expectedSeconds * limit
 
 	options := defaultStreamOptions()
-	options.RateLimit = &LimiterConfig{InitialLimit: limit}
+	options.RateLimit = &LimiterConfig{InitialLimit: rate.Limit(limit)}
 	options.GenBatch = uint32(producedTotal) //nolint:gosec // int -> uint32.
 	c := startTxGeneratorUnderTest(t, p, options)
 	g := c.MakeGenerator()

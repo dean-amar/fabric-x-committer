@@ -47,6 +47,7 @@ type (
 		Policy            *workload.PolicyProfile // loadgen
 		LoadGenBlockLimit uint64                  // loadgen
 		LoadGenTXLimit    uint64                  // loadgen
+		LoadGenWorkers    uint64                  // loadgen
 		Logging           *logging.Config         // for all
 	}
 
@@ -93,11 +94,12 @@ var (
 	//go:embed templates/signatureverifier.yaml
 	TemplateVerifier string
 
-	TemplateLoadGenOrderer     = templateLoadGenOrdererClient + templateLoadGenCommon
-	TemplateLoadGenCommitter   = templateLoadGenCommitterClient + templateLoadGenCommon
-	TemplateLoadGenCoordinator = templateLoadGenCoordinatorClient + templateLoadGenCommon
-	TemplateLoadGenVC          = templateLoadGenVCClient + templateLoadGenCommon
-	TemplateLoadGenVerifier    = templateLoadGenVerifierClient + templateLoadGenCommon
+	TemplateLoadGenOrderer                  = templateLoadGenOrdererClient + templateLoadGenCommon
+	TemplateLoadGenCommitter                = templateLoadGenCommitterClient + templateLoadGenCommon
+	TemplateLoadGenCoordinator              = templateLoadGenCoordinatorClient + templateLoadGenCommon
+	TemplateLoadGenVC                       = templateLoadGenVCClient + templateLoadGenCommon
+	TemplateLoadGenVerifier                 = templateLoadGenVerifierClient + templateLoadGenCommon
+	TemplateLoadGenDistributedLoadGenClient = templateLoadGenDistributedLoadGenClient + templateLoadGenCommon
 
 	//go:embed templates/loadgen_common.yaml
 	templateLoadGenCommon string
@@ -111,6 +113,8 @@ var (
 	templateLoadGenVCClient string
 	//go:embed templates/loadgen_client_verifier.yaml
 	templateLoadGenVerifierClient string
+	//go:embed templates/loadgen_client_distributed_loadgen.yaml
+	templateLoadGenDistributedLoadGenClient string
 )
 
 // CreateConfigFromTemplate creates a config file using template yaml and writes it to the outputPath.

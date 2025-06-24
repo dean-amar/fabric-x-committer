@@ -32,6 +32,7 @@ type (
 		blkNumToBlkWithStatus         utils.SyncMap[uint64, *blockWithStatus]
 		txIDToBlkNum                  utils.SyncMap[string, uint64]
 		lastCommittedBlockSetInterval time.Duration
+		waitingTxsSlots               *utils.Slots
 		metrics                       *perfMetrics
 	}
 
@@ -48,6 +49,7 @@ type (
 		configUpdater                  func(*common.Block)
 		incomingBlockToBeCommitted     <-chan *common.Block
 		outgoingCommittedBlock         chan<- *common.Block
+		waitingTxsLimit                int
 	}
 )
 
@@ -74,6 +76,7 @@ func (r *relay) run(ctx context.Context, config *relayRunConfig) error { //nolin
 	r.outgoingCommittedBlock = config.outgoingCommittedBlock
 	r.blkNumToBlkWithStatus.Clear()
 	r.txIDToBlkNum.Clear()
+	r.waitingTxsSlots = utils.NewSlots(int64(config.waitingTxsLimit))
 
 	rCtx, rCancel := context.WithCancel(ctx)
 	defer rCancel()
@@ -119,6 +122,9 @@ func (r *relay) preProcessBlockAndSendToCoordinator( //nolint:gocognit
 	mappedBlockQueue := channel.Make[*scBlockWithStatus](gCtx, len(r.incomingBlockToBeCommitted))
 	outgoingCommittedBlock := channel.NewWriter(gCtx, r.outgoingCommittedBlock)
 
+	done := context.AfterFunc(gCtx, r.waitingTxsSlots.Broadcast)
+	defer done()
+
 	g.Go(func() error {
 		for {
 			block, ok := incomingBlockToBeCommitted.Read()
@@ -138,7 +144,11 @@ func (r *relay) preProcessBlockAndSendToCoordinator( //nolint:gocognit
 			if mappedBlock.isConfig {
 				configUpdater(block)
 			}
-			mappedBlockQueue.Write(mapBlock(block))
+
+			txsCount := len(mappedBlock.block.Txs)
+			r.waitingTxsSlots.Acquire(gCtx, int64(txsCount))
+			promutil.AddToGauge(r.metrics.waitingTransactionsQueueSize, txsCount)
+			mappedBlockQueue.Write(mappedBlock)
 		}
 	})
 
@@ -224,6 +234,7 @@ func (r *relay) processStatusBatch(
 			return errors.Wrap(ctx.Err(), "context ended")
 		}
 
+		txStatusProcessedCount := int64(0)
 		startTime := time.Now()
 		for txID, txStatus := range tStatus.GetStatus() {
 			if blockNum, ok := r.txIDToBlkNum.Load(txID); !ok || txStatus.BlockNumber != blockNum {
@@ -269,8 +280,11 @@ func (r *relay) processStatusBatch(
 
 			r.txIDToBlkNum.Delete(txID)
 			blkWithStatus.pendingCount--
+			txStatusProcessedCount++
 		}
 
+		r.waitingTxsSlots.Release(txStatusProcessedCount)
+		promutil.AddToGauge(r.metrics.waitingTransactionsQueueSize, -int(txStatusProcessedCount))
 		r.processCommittedBlocksInOrder(ctx, outgoingCommittedBlock)
 		promutil.Observe(r.metrics.transactionStatusesProcessingInRelaySeconds, time.Since(startTime))
 	}

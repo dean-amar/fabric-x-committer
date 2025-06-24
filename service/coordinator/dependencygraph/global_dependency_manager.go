@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 )
@@ -54,7 +55,7 @@ type (
 		// must be lower than the maximum allowed number of slots. This is not guaranteed by the
 		// localDependencyConstructor, but rather by the input provided to it. Typically, the
 		// maximum allowed number of slots would be considerably larger than the batch size.
-		waitingTxsSlots *waitingTransactionsSlots
+		waitingTxsSlots *utils.Slots
 		waitingTxsLimit int
 
 		metrics *perfMetrics
@@ -65,11 +66,6 @@ type (
 		mu       sync.Mutex
 		nonEmpty *atomic.Bool
 		cond     *sync.Cond
-	}
-
-	waitingTransactionsSlots struct {
-		availableSlots *atomic.Int64
-		slotsCond      *sync.Cond
 	}
 
 	globalDepConfig struct {
@@ -83,8 +79,6 @@ type (
 
 func newGlobalDependencyManager(c *globalDepConfig) *globalDependencyManager {
 	logger.Info("Initializing newGlobalDependencyManager")
-	slotsForWaitingTxs := &atomic.Int64{}
-	slotsForWaitingTxs.Store(int64(c.waitingTxsLimit))
 
 	return &globalDependencyManager{
 		incomingTransactionsNode:        c.incomingTxsNode,
@@ -98,10 +92,7 @@ func newGlobalDependencyManager(c *globalDepConfig) *globalDependencyManager {
 			nonEmpty: &atomic.Bool{},
 			cond:     sync.NewCond(&sync.Mutex{}),
 		},
-		waitingTxsSlots: &waitingTransactionsSlots{
-			availableSlots: slotsForWaitingTxs,
-			slotsCond:      sync.NewCond(&sync.Mutex{}),
-		},
+		waitingTxsSlots: utils.NewSlots(int64(c.waitingTxsLimit)),
 		waitingTxsLimit: c.waitingTxsLimit,
 		metrics:         c.metrics,
 	}
@@ -131,7 +122,7 @@ func (dm *globalDependencyManager) run(ctx context.Context) {
 }
 
 func (dm *globalDependencyManager) constructDependencyGraph(ctx context.Context) {
-	done := context.AfterFunc(ctx, dm.waitingTxsSlots.broadcast)
+	done := context.AfterFunc(ctx, dm.waitingTxsSlots.Broadcast)
 	defer done()
 	m := dm.metrics
 	var txsNode TxNodeBatch
@@ -146,12 +137,12 @@ func (dm *globalDependencyManager) constructDependencyGraph(ctx context.Context)
 		constructionStart := time.Now()
 
 		txsNode = txsNodeBatch.txsNode
-		dm.waitingTxsSlots.acquire(ctx, int64(len(txsNode)))
+		dm.waitingTxsSlots.Acquire(ctx, int64(len(txsNode)))
 		if ctx.Err() != nil {
 			return
 		}
 
-		promutil.SetGauge(m.gdgWaitingTxQueueSize, dm.waitingTxsLimit-int(dm.waitingTxsSlots.availableSlots.Load()))
+		promutil.AddToGauge(m.gdgWaitingTxQueueSize, len(txsNode))
 		depFreeTxs := make(TxNodeBatch, 0, len(txsNode))
 
 		start := time.Now()
@@ -167,6 +158,7 @@ func (dm *globalDependencyManager) constructDependencyGraph(ctx context.Context)
 		for _, txNode := range txsNode {
 			dependsOnTx := dm.dependencyDetector.getDependenciesOf(txNode)
 			if len(dependsOnTx) > 0 {
+				promutil.AddToGauge(m.dependentTransactionsQueueSize, 1)
 				txNode.addDependenciesAndUpdateDependents(dependsOnTx)
 			} else if len(txNode.dependsOnTxs) == 0 {
 				depFreeTxs = append(depFreeTxs, txNode)
@@ -205,8 +197,8 @@ func (dm *globalDependencyManager) processValidatedTransactions(ctx context.Cont
 			return
 		}
 		processValidatedStart := time.Now()
-		dm.waitingTxsSlots.release(int64(len(txsNode)))
-		promutil.SetGauge(m.gdgWaitingTxQueueSize, dm.waitingTxsLimit-int(dm.waitingTxsSlots.availableSlots.Load()))
+		dm.waitingTxsSlots.Release(int64(len(txsNode)))
+		promutil.SubFromGauge(m.gdgWaitingTxQueueSize, len(txsNode))
 
 		start := time.Now()
 		dm.mu.Lock()
@@ -227,6 +219,7 @@ func (dm *globalDependencyManager) processValidatedTransactions(ctx context.Cont
 		// Step 2: Send the fullyFreedDependents to the outgoingDepFreeTransactionsNode.
 		start = time.Now()
 		if len(fullyFreedDependents) > 0 {
+			promutil.SubFromGauge(m.dependentTransactionsQueueSize, (len(fullyFreedDependents)))
 			dm.freedTransactionsSet.add(fullyFreedDependents)
 			fullyFreedDependents = nil
 		}
@@ -286,23 +279,4 @@ func (f *dependencyFreedTransactions) waitAndRemove() TxNodeBatch {
 	f.mu.Unlock()
 
 	return txsNode
-}
-
-// acquire assumes waitingTransactionsSlots.broadcast was registered to be called when the context is closed.
-func (w *waitingTransactionsSlots) acquire(ctx context.Context, n int64) {
-	w.slotsCond.L.Lock()
-	defer w.slotsCond.L.Unlock()
-	for w.availableSlots.Load() < n && ctx.Err() == nil {
-		w.slotsCond.Wait()
-	}
-	w.availableSlots.Add(-n)
-}
-
-func (w *waitingTransactionsSlots) release(n int64) {
-	w.availableSlots.Add(n)
-	w.slotsCond.Signal()
-}
-
-func (w *waitingTransactionsSlots) broadcast() {
-	w.slotsCond.Broadcast()
 }
