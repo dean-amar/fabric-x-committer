@@ -90,15 +90,18 @@ func TestRelayNormalBlock(t *testing.T) {
 	require.Nil(t, blk0.Metadata)
 	relayEnv.incomingBlockToBeCommitted <- blk0
 
-	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.transactionsSentTotal, 5*time.Second, 10*time.Millisecond)
-	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.waitingTransactionsQueueSize, 5*time.Second, 10*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.transactionsSentTotal,
+		5*time.Second, 10*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 3, relayEnv.metrics.waitingTransactionsQueueSize,
+		5*time.Second, 10*time.Millisecond)
 	require.Equal(t, int64(relayEnv.waitingTxsLimit-3), relayEnv.relay.waitingTxsSlots.Load(t))
 
 	committedBlock0 := <-relayEnv.committedBlock
 	promutil.RequireIntMetricValue(t, 3, relayEnv.metrics.transactionsStatusReceivedTotal.WithLabelValues(
 		protoblocktx.Status_COMMITTED.String(),
 	))
-	promutil.EventuallyIntMetric(t, 0, relayEnv.metrics.waitingTransactionsQueueSize, 5*time.Second, 10*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 0, relayEnv.metrics.waitingTransactionsQueueSize,
+		5*time.Second, 10*time.Millisecond)
 	require.Equal(t, int64(relayEnv.waitingTxsLimit), relayEnv.relay.waitingTxsSlots.Load(t))
 
 	expectedMetadata := &common.BlockMetadata{

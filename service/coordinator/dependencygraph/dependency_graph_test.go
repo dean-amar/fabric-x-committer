@@ -16,6 +16,7 @@ import (
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
 
@@ -51,7 +52,7 @@ func TestDependencyGraph(t *testing.T) {
 	t.Log("check reads and writes dependency tracking")
 	keys := makeTestKeys(t, 10)
 
-	test.RequireIntMetricValue(t, 0, metrics.dependentTransactionsQueueSize)
+	promutil.RequireIntMetricValue(t, 0, metrics.dependentTransactionsQueueSize)
 
 	// t2 depends on t1
 	t1 := createTxForTest(
@@ -67,7 +68,7 @@ func TestDependencyGraph(t *testing.T) {
 		TxsNum: []uint32{0, 1},
 	}
 
-	test.EventuallyIntMetric(t, 1, metrics.dependentTransactionsQueueSize, 5*time.Second, 100*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 1, metrics.dependentTransactionsQueueSize, 5*time.Second, 100*time.Millisecond)
 
 	// t3 depends on t2 and t1
 	t3 := createTxForTest(
@@ -84,7 +85,7 @@ func TestDependencyGraph(t *testing.T) {
 		TxsNum: []uint32{0, 1},
 	}
 
-	test.EventuallyIntMetric(t, 3, metrics.dependentTransactionsQueueSize, 5*time.Second, 100*time.Millisecond)
+	promutil.EventuallyIntMetric(t, 3, metrics.dependentTransactionsQueueSize, 5*time.Second, 100*time.Millisecond)
 
 	// only t1 is dependency free
 	depFreeTxs := <-globalDepOutgoingTxs
@@ -105,7 +106,7 @@ func TestDependencyGraph(t *testing.T) {
 	actualT2 := depFreeTxs[0]
 	require.Equal(t, t2.Id, actualT2.Tx.ID)
 
-	test.RequireIntMetricValue(t, 2, metrics.dependentTransactionsQueueSize)
+	promutil.RequireIntMetricValue(t, 2, metrics.dependentTransactionsQueueSize)
 
 	// t2 has 2 dependent transactions, t3 and t4
 	require.Equal(t, 2, actualT2.dependentTxs.Count())
@@ -126,7 +127,7 @@ func TestDependencyGraph(t *testing.T) {
 	require.Equal(t, t3.Id, actualT3.Tx.ID)
 	require.Equal(t, t4.Id, actualT4.Tx.ID)
 
-	test.RequireIntMetricValue(t, 0, metrics.dependentTransactionsQueueSize)
+	promutil.RequireIntMetricValue(t, 0, metrics.dependentTransactionsQueueSize)
 
 	validatedTxs <- TxNodeBatch{actualT3, actualT4}
 
