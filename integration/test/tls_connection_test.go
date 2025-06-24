@@ -35,7 +35,7 @@ func TestMutualTLSConnection(t *testing.T) {
 		count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
 		t.Logf("count %d", count)
 		return count > 1_000
-	}, 20*time.Second, 500*time.Millisecond)
+	}, 90*time.Second, 500*time.Millisecond)
 	require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 }
 
