@@ -10,3 +10,12 @@ verifier-client:
     {{- range .Endpoints.Verifier }}
     - {{ .Server }}
     {{- end }}
+  client-creds:
+    tls-mode: {{ .ClientsCreds.Verifier.Mode }}
+    server-name: {{ .ClientsCreds.Verifier.ServerName }}
+    key-path: {{ .ClientsCreds.Verifier.KeyPath }}
+    cert-path: {{ .ClientsCreds.Verifier.CertPath }}
+    ca-cert-paths:
+      {{- range .ClientsCreds.Verifier.CACertPaths }}
+      - {{ . }}
+      {{- end }}

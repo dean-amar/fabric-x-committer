@@ -6,4 +6,14 @@
 # It should be complimented by the common load generator configuration.
 
 coordinator-client:
-  endpoint: {{ .Endpoints.Coordinator.Server }}
+  endpoints:
+    - {{ .Endpoints.Coordinator.Server }}
+  client-creds:
+    tls-mode: {{ .ClientsCreds.Coordinator.Mode }}
+    server-name: {{ .ClientsCreds.Coordinator.ServerName }}
+    key-path: {{ .ClientsCreds.Coordinator.KeyPath }}
+    cert-path: {{ .ClientsCreds.Coordinator.CertPath }}
+    ca-cert-paths:
+      {{- range .ClientsCreds.Coordinator.CACertPaths }}
+      - {{ . }}
+      {{- end }}

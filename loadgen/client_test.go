@@ -84,7 +84,7 @@ func TestLoadGenForVCService(t *testing.T) {
 			t.Parallel()
 			env := vc.NewValidatorAndCommitServiceTestEnv(t, 2)
 			clientConf.Adapter.VCClient = &adapters.VCClientConfig{
-				Endpoints: env.Endpoints,
+				Client: *test.MakeClientConfig(env.Endpoints...),
 			}
 			testLoadGenerator(t, clientConf)
 		})
@@ -126,7 +126,7 @@ func startVerifiers(t *testing.T) *adapters.VerifierClientConfig {
 		endpoints[i] = &sConf.Server.Endpoint
 	}
 	return &adapters.VerifierClientConfig{
-		Endpoints: endpoints,
+		Client: *test.MakeClientConfig(endpoints...),
 	}
 }
 
@@ -164,7 +164,7 @@ func TestLoadGenForCoordinator(t *testing.T) {
 
 			// Start client
 			clientConf.Adapter.CoordinatorClient = &adapters.CoordinatorClientConfig{
-				Endpoint: &cConf.Server.Endpoint,
+				Client: *test.MakeClientConfig(&cConf.Server.Endpoint),
 			}
 			testLoadGenerator(t, clientConf)
 		})

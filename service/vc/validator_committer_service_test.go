@@ -40,7 +40,7 @@ func TestVCSecureConnection(t *testing.T) {
 			ServerCN: "validator-committer",
 			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
 				t.Helper()
-				env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
+				env := NewValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
 				return env.Configs[0].Server.Endpoint
 			},
 			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {

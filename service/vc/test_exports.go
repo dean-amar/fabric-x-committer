@@ -53,10 +53,10 @@ func NewValidatorAndCommitServiceTestEnv(
 	db ...*DatabaseTestEnv,
 ) *ValidatorAndCommitterServiceTestEnv {
 	t.Helper()
-	return newValidatorAndCommitServiceTestEnvWithTLS(t, numServices, nil, db...)
+	return NewValidatorAndCommitServiceTestEnvWithTLS(t, numServices, nil, db...)
 }
 
-func newValidatorAndCommitServiceTestEnvWithTLS(
+func NewValidatorAndCommitServiceTestEnvWithTLS(
 	t *testing.T,
 	numServices int,
 	serverCreds *connection.ConfigTLS, // one credentials set for all the vc-services.

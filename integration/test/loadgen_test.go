@@ -15,6 +15,7 @@ import (
 
 	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
 	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
 )
@@ -59,6 +60,7 @@ func TestLoadGen(t *testing.T) {
 				NumVCService: 2,
 				BlockTimeout: 2 * time.Second,
 				BlockSize:    500,
+				TLS:          connection.TLSMutual,
 			})
 			c.Start(t, serviceFlags)
 

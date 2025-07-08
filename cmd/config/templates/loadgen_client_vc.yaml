@@ -10,3 +10,12 @@ vc-client:
     {{- range .Endpoints.VCService }}
     - {{ .Server }}
     {{- end }}
+  client-creds:
+    tls-mode: {{ .ClientsCreds.Vc.Mode }}
+    server-name: {{ .ClientsCreds.Vc.ServerName }}
+    key-path: {{ .ClientsCreds.Vc.KeyPath }}
+    cert-path: {{ .ClientsCreds.Vc.CertPath }}
+    ca-cert-paths:
+      {{- range .ClientsCreds.Vc.CACertPaths }}
+      - {{ . }}
+      {{- end }}
