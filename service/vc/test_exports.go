@@ -26,13 +26,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
-const (
-	queryKeyValueVersionSQLTmpt = "SELECT key, value, version FROM %s WHERE key = ANY($1)"
-	insertTemplate              = `
-			INSERT INTO %s (key, value, version)
-			SELECT _key, _value, _version
-			FROM UNNEST($1::bytea[], $2::bytea[], $3::bytea[]) AS t(_key, _value, _version);`
-)
+const queryKeyValueVersionSQLTmpt = "SELECT key, value, version FROM %s WHERE key = ANY($1)"
 
 type (
 	// ValidatorAndCommitterServiceTestEnv denotes the test environment for vcservice.
@@ -295,9 +289,16 @@ func (env *DatabaseTestEnv) populateData( //nolint:revive
 		require.Len(t, writes.values, len(writes.keys))
 		require.Len(t, writes.versions, len(writes.keys))
 
+		insertQuery := `
+INSERT INTO ns_${NAMESPACE_ID} (key, value, version)
+SELECT _key, _value, _version
+FROM UNNEST($1::bytea[], $2::bytea[], $3::bigint[]) AS t(_key, _value, _version);
+`
+		query := FmtNsID(insertQuery, nsID)
+
 		require.NoError(t, env.DB.retry.ExecuteSQL(t.Context(), &connection.SQLExecutionBundle{
 			OperationName: fmt.Sprintf("write_to_ns_%v", nsID),
-			Stmt:          FmtNsID(insertTemplate, nsID),
+			Stmt:          query,
 			Pool:          env.DB.pool,
 			RetryMetrics:  env.DB.metrics.failedRetriesCounter,
 		},
