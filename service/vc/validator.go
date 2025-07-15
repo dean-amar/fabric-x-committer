@@ -14,9 +14,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 // transactionValidator validates the reads of transactions against the committed states.
@@ -169,15 +169,10 @@ func (v *validatedTransactions) invalidateTxsOnReadConflicts(nsToReadConflicts n
 	// transactions are removed from the valid writes.
 	for nsID, readConflicts := range nsToReadConflicts {
 		for index, key := range readConflicts.keys {
-			r := comparableRead{
-				nsID:    nsID,
-				key:     string(key),
-				version: string(readConflicts.versions[index]),
-			}
-
-			txIDs, ok := v.readToTxIDs[r]
+			cr := newCmpRead(nsID, key, readConflicts.versions[index])
+			txIDs, ok := v.readToTxIDs[cr]
 			if !ok {
-				return errors.Newf("read %v not found in readToTransactionIndices", r)
+				return errors.Newf("read %v not found in readToTransactionIndices", cr)
 			}
 
 			v.updateInvalidTxs(txIDs, protoblocktx.Status_ABORTED_MVCC_CONFLICT)

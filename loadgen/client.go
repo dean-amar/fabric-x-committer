@@ -16,14 +16,14 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoloadgen"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
+	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
+	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
 )
 
 type (
@@ -185,7 +185,7 @@ func (c *Client) runLimiterServer(ctx context.Context) error {
 		c.txStream.SetLimit(request.Limit)
 		ginCtx.IndentedJSON(http.StatusOK, request)
 	})
-	logger.Infof("Start remote controller listener on %c", endpoint.Address())
+	logger.Infof("Start remote controller listener on %s", endpoint.Address())
 	g, gCtx := errgroup.WithContext(ctx)
 	logger.Infof("Serving...")
 	server := &http.Server{Addr: endpoint.Address(), Handler: router, ReadTimeout: time.Minute}

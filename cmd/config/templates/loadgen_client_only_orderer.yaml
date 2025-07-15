@@ -1,0 +1,17 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# This is a partial template. It contains only the orderer client configurations.
+# It should be complimented by the common load generator configuration.
+
+orderer-client:
+  orderer:
+    connection:
+      endpoints:
+        {{- range .Endpoints.Orderer }}
+        - {{ .Server }}
+        {{- end }}
+    consensus-type: BFT
+    channel-id: {{ .ChannelID }}
+  broadcast-parallelism: 5

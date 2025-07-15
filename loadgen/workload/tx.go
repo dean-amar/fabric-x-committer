@@ -9,8 +9,7 @@ package workload
 import (
 	"math/rand"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 )
 
 type (
@@ -66,7 +65,7 @@ func (g *IndependentTxGenerator) Next() *protoblocktx.Tx {
 		Namespaces: []*protoblocktx.TxNamespace{
 			{
 				NsId:        GeneratedNamespaceID,
-				NsVersion:   types.VersionNumber(0).Bytes(),
+				NsVersion:   0,
 				ReadsOnly:   make([]*protoblocktx.Read, len(readOnly)),
 				ReadWrites:  make([]*protoblocktx.ReadWrite, len(readWrite)),
 				BlindWrites: make([]*protoblocktx.Write, len(blindWriteKey)),

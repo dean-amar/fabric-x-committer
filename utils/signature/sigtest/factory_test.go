@@ -16,8 +16,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -36,7 +36,7 @@ func TestEndToEnd(t *testing.T) {
 				Namespaces: []*protoblocktx.TxNamespace{
 					{
 						NsId:       "0",
-						NsVersion:  make([]byte, 0),
+						NsVersion:  0,
 						ReadWrites: make([]*protoblocktx.ReadWrite, 0),
 					},
 				},
@@ -89,7 +89,7 @@ func TestEcdsaPem(t *testing.T) {
 		Namespaces: []*protoblocktx.TxNamespace{
 			{
 				NsId:       "0",
-				NsVersion:  make([]byte, 0),
+				NsVersion:  0,
 				ReadWrites: make([]*protoblocktx.ReadWrite, 0),
 			},
 		},

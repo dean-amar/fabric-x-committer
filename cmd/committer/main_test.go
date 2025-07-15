@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/cmd/config"
+	"github.com/hyperledger/fabric-x-committer/cmd/config"
 )
 
 //nolint:paralleltest // Cannot parallelize due to logger.

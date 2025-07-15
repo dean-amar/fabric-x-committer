@@ -24,18 +24,18 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier/policy"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/loadgen"
+	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 type queryServiceTestEnv struct {
@@ -207,7 +207,7 @@ func TestQueryWithConsistentView(t *testing.T) {
 	testItem2 := items{testItem1.ns, t1.keys[1:2], t1.values[1:2], t1.versions[1:2]}
 	testItem2Mod := testItem2
 	testItem2Mod.values = strToBytes("value2/1")
-	testItem2Mod.versions = verToBytes(2)
+	testItem2Mod.versions = []uint64{2}
 	env.update(t, &testItem2Mod)
 
 	key2Query := &protoqueryservice.Query{
@@ -295,14 +295,6 @@ func encodeBytesForProto(str string) []byte {
 	return decodeString
 }
 
-func verToBytes(ver ...int) [][]byte {
-	ret := make([][]byte, len(ver))
-	for i, v := range ver {
-		ret[i] = types.VersionNumber(v).Bytes() //nolint:gosec
-	}
-	return ret
-}
-
 func newQueryServiceTestEnv(t *testing.T) *queryServiceTestEnv {
 	t.Helper()
 	t.Log("generating config and namespaces")
@@ -384,8 +376,9 @@ func generateNamespacesUnderTest(t *testing.T, namespaces []string) *vc.Database
 }
 
 type items struct {
-	ns                     string
-	keys, values, versions [][]byte
+	ns           string
+	keys, values [][]byte
+	versions     []uint64
 }
 
 func (it *items) asRows() []*protoqueryservice.Row {
@@ -411,9 +404,12 @@ func (it *items) asQuery() *protoqueryservice.QueryNamespace {
 
 func (q *queryServiceTestEnv) insert(t *testing.T, i *items) {
 	t.Helper()
+	require.NotEmpty(t, i.keys)
+	require.Len(t, i.values, len(i.keys))
+	require.Len(t, i.versions, len(i.keys))
 	query := fmt.Sprintf(
 		`insert into %s values (
-			UNNEST($1::bytea[]), UNNEST($2::bytea[]), UNNEST($3::bytea[])
+			UNNEST($1::bytea[]), UNNEST($2::bytea[]), UNNEST($3::bigint[])
 		);`,
 		vc.TableName(i.ns),
 	)
@@ -423,12 +419,15 @@ func (q *queryServiceTestEnv) insert(t *testing.T, i *items) {
 
 func (q *queryServiceTestEnv) update(t *testing.T, i *items) {
 	t.Helper()
+	require.NotEmpty(t, i.keys)
+	require.Len(t, i.values, len(i.keys))
+	require.Len(t, i.versions, len(i.keys))
 	query := fmt.Sprintf(`
 		UPDATE %[1]s
 			SET value = t.value,
 				version = t.version
 		FROM (
-			SELECT * FROM UNNEST($1::bytea[], $2::bytea[], $3::bytea[]) AS t(key, value, version)
+			SELECT * FROM UNNEST($1::bytea[], $2::bytea[], $3::bigint[]) AS t(key, value, version)
 		) AS t
 		WHERE %[1]s.key = t.key;
 		`,
@@ -510,7 +509,7 @@ func (q *queryServiceTestEnv) makeItems(t *testing.T) []*items {
 			ns:       ns,
 			keys:     strToBytes("item1", "item2", "item3", "item4"),
 			values:   strToBytes("value1", "value2", "value3", "value4"),
-			versions: verToBytes(0, 1, 2, 3),
+			versions: []uint64{0, 1, 2, 3},
 		}
 		q.insert(t, requiredItems[i])
 	}

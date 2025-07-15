@@ -74,7 +74,7 @@ In this section, we provide an overview of each of these tasks in detail.
 The following code runs *Task 1* which fetches blocks from the ordering service and
 enqueue to `blockToBeCommitted` queues.
 
-From [https://github.ibm.com/decentralized-trust-research/scalable-committer/blob/main/service/sidecar/sidecar.go](https://github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecar.go#L138)
+From [https://github.com/hyperledger/fabric-x-committer/blob/main/service/sidecar/sidecar.go](https://github.com/hyperledger/fabric-x-committer/service/sidecar/sidecar.go#L138)
 
 ```go
     g.Go(func() error {
@@ -183,7 +183,7 @@ Sidecar responsible for relaying them to the Coordinator.
 The following code runs *Task 2* which relays the blocks present in 
 `blocksToBeCommitted` to coordinator and receive statuses.
 
-From [https://github.ibm.com/decentralized-trust-research/scalable-committer/blob/main/service/sidecar/sidecar.go](https://github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecar.go#L152)
+From [https://github.com/hyperledger/fabric-x-committer/blob/main/service/sidecar/sidecar.go](https://github.com/hyperledger/fabric-x-committer/service/sidecar/sidecar.go#L152)
 ```go
   	relayService := newRelay(c.LastCommittedBlockSetInterval, metrics)
     ...
@@ -277,7 +277,7 @@ Subsequently, this modified block is enqueued onto the `committedBlocks` output 
 The following code runs *Task 3* which reads blocks present in the `committedBlocks`
 queue and store the block in the file system.
 
-From [https://github.ibm.com/decentralized-trust-research/scalable-committer/blob/main/service/sidecar/sidecar.go](https://github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecar.go#L103)
+From [https://github.com/hyperledger/fabric-x-committer/blob/main/service/sidecar/sidecar.go](https://github.com/hyperledger/fabric-x-committer/service/sidecar/sidecar.go#L103)
 
 ```go
 	g.Go(func() error {

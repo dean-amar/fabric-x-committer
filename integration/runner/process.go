@@ -17,7 +17,7 @@ import (
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/ginkgomon"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/cmd/config"
+	"github.com/hyperledger/fabric-x-committer/cmd/config"
 )
 
 type (

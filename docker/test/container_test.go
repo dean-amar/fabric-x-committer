@@ -20,18 +20,16 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecarclient"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 const (
 	testNodeImage      = "icr.io/cbdc/committer-test-node:0.0.2"
-	ordererPort        = "7050"
 	sidecarPort        = "4001"
-	queryServicePort   = "7001"
 	loadGenMetricsPort = "2118"
 	channelName        = "mychannel"
 	monitoredMetric    = "loadgen_transaction_committed_total"
@@ -71,7 +69,7 @@ func TestStartTestNode(t *testing.T) {
 	require.Eventually(t, func() bool {
 		count := promutil.GetMetricValueFromURL(t, metricsURL, monitoredMetric)
 		if prevCount != count {
-			t.Logf("%x: %d", monitoredMetric, count)
+			t.Logf("%s: %d", monitoredMetric, count)
 		}
 		prevCount = count
 		return count > 1_000
@@ -86,33 +84,22 @@ func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Clie
 		Cmd:   []string{"run", "db", "committer", "orderer", "loadgen"},
 		ExposedPorts: nat.PortSet{
 			nat.Port(sidecarPort + "/tcp"):        struct{}{},
-			nat.Port(queryServicePort + "/tcp"):   struct{}{},
 			nat.Port(loadGenMetricsPort + "/tcp"): struct{}{},
 		},
 		Tty: true,
 	}
 
 	hostCfg := &container.HostConfig{
-		NetworkMode: network.NetworkHost,
+		NetworkMode: network.NetworkDefault,
 		PortBindings: nat.PortMap{
-			// orderer port binding
-			nat.Port(ordererPort + "/tcp"): []nat.PortBinding{{
-				HostIP:   "0.0.0.0",
-				HostPort: ordererPort,
-			}},
 			// sidecar port binding
 			nat.Port(sidecarPort + "/tcp"): []nat.PortBinding{{
-				HostIP:   "0.0.0.0",
+				HostIP:   "localhost",
 				HostPort: sidecarPort,
-			}},
-			// query service port bindings
-			nat.Port(queryServicePort + "/tcp"): []nat.PortBinding{{
-				HostIP:   "0.0.0.0",
-				HostPort: queryServicePort,
 			}},
 			// loadgen service port bindings
 			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
-				HostIP:   "0.0.0.0",
+				HostIP:   "localhost",
 				HostPort: loadGenMetricsPort,
 			}},
 		},

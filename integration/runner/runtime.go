@@ -21,23 +21,23 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/cmd/config"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecarclient"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature/sigtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/cmd/config"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/serialization"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/utils/signature/sigtest"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 type (
@@ -105,6 +105,8 @@ const (
 	Verifier
 	VC
 	QueryService
+
+	LoadGenForOnlyOrderer
 	LoadGenForOrderer
 	LoadGenForCommitter
 	LoadGenForCoordinator
@@ -120,7 +122,7 @@ const (
 	CommitterTxPathWithLoadGen = CommitterTxPath | LoadGenForCommitter
 
 	// loadGenMatcher is used to extract only the load generator flags from the full service flags value.
-	loadGenMatcher = LoadGenForOrderer | LoadGenForCommitter | LoadGenForCoordinator |
+	loadGenMatcher = LoadGenForOnlyOrderer | LoadGenForOrderer | LoadGenForCommitter | LoadGenForCoordinator |
 		LoadGenForVCService | LoadGenForVerifier
 )
 
@@ -181,7 +183,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	})
 
 	t.Log("Create processes")
-	c.MockOrderer = newProcess(t, cmdOrderer, s)
+	c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
 	for i, e := range s.Endpoints.Verifier {
 		p := cmdVerifier
 		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
@@ -272,10 +274,12 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	require.Falsef(t, isMoreThanOneBitSet(loadGenFlag), "only one load generator may be set")
 	loadGenParams := cmdLoadGen
 	switch loadGenFlag {
-	case LoadGenForCommitter:
-		loadGenParams.Template = config.TemplateLoadGenCommitter
+	case LoadGenForOnlyOrderer:
+		loadGenParams.Template = config.TemplateLoadGenOnlyOrderer
 	case LoadGenForOrderer:
 		loadGenParams.Template = config.TemplateLoadGenOrderer
+	case LoadGenForCommitter:
+		loadGenParams.Template = config.TemplateLoadGenCommitter
 	case LoadGenForCoordinator:
 		loadGenParams.Template = config.TemplateLoadGenCoordinator
 	case LoadGenForVCService:
@@ -356,7 +360,7 @@ func (c *CommitterRuntime) CreateMetaTX(t *testing.T, namespaces ...string) *pro
 	t.Helper()
 	writeToMetaNs := &protoblocktx.TxNamespace{
 		NsId:       types.MetaNamespaceID,
-		NsVersion:  types.VersionNumber(0).Bytes(),
+		NsVersion:  0,
 		ReadWrites: make([]*protoblocktx.ReadWrite, 0, len(namespaces)),
 	}
 

@@ -78,7 +78,7 @@ MAKEFLAGS += --jobs=16
 # Tests
 #########################
 
-ROOT_PKG_REGEXP = github.ibm.com/decentralized-trust-research/scalable-committer
+ROOT_PKG_REGEXP = github.com/hyperledger/fabric-x-committer
 CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query)
 REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(service/coordinator|loadgen|cmd)
 HEAVY_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(docker|integration)
@@ -88,7 +88,7 @@ COR_DB_PACKAGES=$(shell $(go_cmd) list ./... | grep -E "$(CORE_DB_PACKAGES_REGEX
 REQUIRES_DB_PACKAGES=$(shell $(go_cmd) list ./... | grep -E "$(REQUIRES_DB_PACKAGES_REGEXP)")
 NO_DB_PACKAGES=$(shell $(go_cmd) list ./... | grep -vE "$(CORE_DB_PACKAGES_REGEXP)|$(REQUIRES_DB_PACKAGES_REGEXP)|$(HEAVY_PACKAGES_REGEXP)")
 
-GO_TEST_FMT_FLAGS := -hide empty-packages $(if $(TRAVIS),-template-dir .gotestfmt/travisci,)
+GO_TEST_FMT_FLAGS := -hide empty-packages
 
 
 # Excludes integration and container tests.
@@ -111,7 +111,7 @@ test-integration-db-resiliency: build
 
 # Tests the all-in-one docker image.
 test-container: build-test-node-image
-	@$(go_test) ./docker/... | gotestfmt ${GO_TEST_FMT_FLAGS}
+	$(go_cmd) test -v -timeout 30m ./docker/...
 
 # Tests for components that directly talk to the DB, where different DBs might affect behaviour.
 test-core-db: build
@@ -120,6 +120,10 @@ test-core-db: build
 # Tests for components that depend on the DB layer, but are agnostic to the specific DB used.
 test-requires-db: build
 	@$(go_test) ${REQUIRES_DB_PACKAGES} | gotestfmt ${GO_TEST_FMT_FLAGS}
+
+# Tests the ASN.1 marshalling using fuzz testing.
+test-fuzz: build
+	@$(go_test) -run="^$$" -fuzz=".*" -fuzztime=5m ./utils/signature | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests that require no DB at all, e.g., pure logic, utilities
 test-no-db: build
@@ -145,6 +149,10 @@ kill-test-docker: FORCE
 	$(docker_cmd) ps -aq -f name=sc_yugabyte_unit_tests | xargs $(docker_cmd) rm -f
 	$(docker_cmd) ps -aq -f name=sc_postgres_unit_tests | xargs $(docker_cmd) rm -f
 
+#########################
+# Benchmarks
+#########################
+
 # Run a load generation benchmarks with added TX/sec column.
 bench-loadgen: FORCE
 	$(go_cmd) test ./loadgen/... -bench "Benchmark.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
@@ -156,6 +164,14 @@ bench-dep: FORCE
 # Run dependency detector benchmarks with added op/sec column.
 bench-preparer: FORCE
 	$(go_cmd) test ./service/vc/... -bench "BenchmarkPrepare.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
+
+# Run signature benchmarks with added op/sec column.
+bench-sign: FORCE
+	$(go_cmd) test ./utils/signature/... -bench ".*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
+
+# Run verifier benchmarks with added op/sec column.
+bench-verify: FORCE
+	$(go_cmd) test ./service/verifier/... -bench "BenchmarkVerifyForm.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
 
 #########################
 # Generate protos
@@ -227,7 +243,11 @@ build-release-image: build-arch
 		$(docker_cmd) $(version) $(image_namespace) $(dockerfile_release_dir) $(multiplatform) $(arch_output_dir_rel)
 
 build-test-genesis-block: $(output_dir) build-cli-loadgen
-	bin/loadgen make-genesis-block -c "$(project_dir)/cmd/config/samples/loadgen.yaml" > "$(output_dir)/sc-genesis-block.proto.bin"
+	@# We load the env from the Dockerfile to use them to generate the config block.
+	env -v $(shell grep '^ENV' $(dockerfile_test_node_dir)/Dockerfile | cut -d' ' -f2- | xargs) \
+		bin/loadgen make-genesis-block \
+		-c "$(project_dir)/cmd/config/samples/loadgen.yaml" \
+		>"$(output_dir)/sc-genesis-block.proto.bin"
 
 #########################
 # Linter

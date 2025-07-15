@@ -9,7 +9,7 @@ package query
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 const (
@@ -118,7 +118,7 @@ func newQueryServiceMetrics() *perfMetrics {
 		}),
 		failedRetriesCounter: p.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "queryservice",
-			Subsystem: "database_retry",
+			Subsystem: "database_failed_retry",
 			Name:      "per_operation_total",
 			Help:      "Total number of failed retries per operation",
 		}, []string{"operation_name", "status"}),

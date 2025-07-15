@@ -15,7 +15,7 @@ import (
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"gopkg.in/yaml.v3"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tls"
+	"github.com/hyperledger/fabric-x-committer/utils/tls"
 )
 
 // NewIdentitySigner instantiate a signer for the given identity.

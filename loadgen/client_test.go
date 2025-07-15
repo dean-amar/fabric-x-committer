@@ -19,21 +19,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoloadgen"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protosigverifierservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/mock"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
+	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
+	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
+	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/coordinator"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 // We expect at least 3 blocks for a valid test run.
@@ -289,6 +289,48 @@ func TestLoadGenForOrderer(t *testing.T) {
 			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
 				SidecarEndpoint:      &sidecarConf.Server.Endpoint,
 				Orderer:              sidecarConf.Orderer,
+				BroadcastParallelism: 5,
+			}
+			testLoadGenerator(t, clientConf)
+		})
+	}
+}
+
+func TestLoadGenForOnlyOrderer(t *testing.T) {
+	t.Parallel()
+	for _, limit := range defaultLimits {
+		clientConf := DefaultClientConf()
+		clientConf.Limit = limit
+		t.Run(limitToString(limit), func(t *testing.T) {
+			t.Parallel()
+			// Start dependencies
+			orderer, ordererServer := mock.StartMockOrderingServices(
+				t, &mock.OrdererConfig{
+					NumService: 3,
+					BlockSize:  int(clientConf.LoadProfile.Block.Size), //nolint:gosec // uint64 -> int.
+				},
+			)
+
+			endpoints := connection.NewOrdererEndpoints(0, "msp", ordererServer.Configs...)
+
+			// Submit default config block.
+			// This is ignored when sidecar isn't used.
+			// We validate the test doesn't break when config block is delivered.
+			require.NotNil(t, clientConf.LoadProfile)
+			clientConf.LoadProfile.Transaction.Policy.OrdererEndpoints = endpoints
+			configBlock, err := workload.CreateConfigBlock(clientConf.LoadProfile.Transaction.Policy)
+			require.NoError(t, err)
+			orderer.SubmitBlock(t.Context(), configBlock)
+
+			// Start client
+			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
+				Orderer: broadcastdeliver.Config{
+					Connection: broadcastdeliver.ConnectionConfig{
+						Endpoints: endpoints,
+					},
+					ChannelID:     "mychannel",
+					ConsensusType: broadcastdeliver.Bft,
+				},
 				BroadcastParallelism: 5,
 			}
 			testLoadGenerator(t, clientConf)

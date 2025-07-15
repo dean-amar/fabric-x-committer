@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
 )
 
 func TestRequireProtoEqual(t *testing.T) {

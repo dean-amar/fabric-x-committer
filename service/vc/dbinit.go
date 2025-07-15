@@ -10,13 +10,16 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"strings"
+	_ "strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	_ "github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 const (
@@ -31,61 +34,23 @@ const (
 	updateNsStatesFuncNamePrefix    = "update_"
 	insertNsStatesFuncNamePrefix    = "insert_"
 
-	createTxStatusTableSQLStmt = `
-		CREATE TABLE IF NOT EXISTS ` + txStatusTableName + `(
-				tx_id BYTEA NOT NULL PRIMARY KEY,
-				status INTEGER,
-				height BYTEA NOT NULL
-		);
-	`
-
-	createMetadataTableSQLStmt = `
-		CREATE TABLE IF NOT EXISTS ` + metadataTableName + `(
-				key BYTEA NOT NULL PRIMARY KEY,
-				value BYTEA
-		);
-	`
-	createNsTableSQLTempl = `
-		CREATE TABLE IF NOT EXISTS %[1]s (
-				key BYTEA NOT NULL PRIMARY KEY,
-				value BYTEA DEFAULT NULL,
-				version BYTEA DEFAULT '\x00'::BYTEA
-		);
-	`
-
-	initializeMetadataPrepSQLStmt = "INSERT INTO " + metadataTableName + " VALUES ($1, $2) ON CONFLICT DO NOTHING;"
-	setMetadataPrepSQLStmt        = "UPDATE " + metadataTableName + " SET value = $2 WHERE key = $1;"
-	getMetadataPrepSQLStmt        = "SELECT value FROM " + metadataTableName + " WHERE key = $1;"
-	queryTxIDsStatusPrepSQLStmt   = "SELECT tx_id, status, height FROM " + txStatusTableName + " WHERE tx_id = ANY($1);"
+	setMetadataPrepSQLStmt      = "UPDATE " + metadataTableName + " SET value = $2 WHERE key = $1;"
+	getMetadataPrepSQLStmt      = "SELECT value FROM " + metadataTableName + " WHERE key = $1;"
+	queryTxIDsStatusPrepSQLStmt = "SELECT tx_id, status, height FROM " + txStatusTableName + " WHERE tx_id = ANY($1);"
 
 	lastCommittedBlockNumberKey = "last committed block number"
+
+	// nsIDTemplatePlaceholder is used as a template placeholder for SQL queries.
+	nsIDTemplatePlaceholder = "${NAMESPACE_ID}"
 )
 
 var (
-
-	//go:embed create_insert_tx_status_func.sql
-	createInsertTxStatusFuncSQLStmt string
-	//go:embed create_validate_func_templ.sql
-	createValidateReadsOnNsStatesFuncSQLTempl string
-	//go:embed create_update_ns_states_func_templ.sql
-	createUpdateNsStatesFuncSQLTempl string
-	//go:embed create_insert_ns_states_func_templ.sql
-	createInsertNsStatesFuncSQLTempl string
+	//go:embed init_database.sql
+	dbInitSQLStmt string
+	//go:embed create_namespace.sql
+	createNamespaceSQLStmt string
 
 	systemNamespaces = []string{types.MetaNamespaceID, types.ConfigNamespaceID}
-
-	createSystemTablesAndFuncsStmts = []string{
-		createTxStatusTableSQLStmt,
-		createInsertTxStatusFuncSQLStmt,
-		createMetadataTableSQLStmt,
-	}
-
-	createNsTablesAndFuncsTemplates = []string{
-		createNsTableSQLTempl,
-		createValidateReadsOnNsStatesFuncSQLTempl,
-		createUpdateNsStatesFuncSQLTempl,
-		createInsertNsStatesFuncSQLTempl,
-	}
 )
 
 // NewDatabasePool creates a new pool from a database config.
@@ -116,37 +81,43 @@ func NewDatabasePool(ctx context.Context,
 
 // TODO: merge this file with database.go.
 func (db *database) setupSystemTablesAndNamespaces(ctx context.Context) error {
-	executeSQL := func(operationName, sqlStmt string, args ...any) error {
-		return db.retry.ExecuteSQL(ctx, &connection.SQLExecutionBundle{
-			OperationName: operationName,
-			Stmt:          sqlStmt,
-			Pool:          db.pool,
-			RetryMetrics:  db.metrics.failedRetriesCounter,
-		}, args...)
-	}
-
-	for _, stmt := range createSystemTablesAndFuncsStmts {
-		if err := executeSQL("database_init_statement", stmt); err != nil {
-			return fmt.Errorf("failed to create system tables and functions: %w", err)
-		}
-	}
 	logger.Info("Created tx status table, metadata table, and its methods.")
-
-	if err := executeSQL("metadata_table_initialization",
-		initializeMetadataPrepSQLStmt,
-		[]byte(lastCommittedBlockNumberKey), nil); err != nil {
-		return fmt.Errorf("failed to initialize metadata table: %w", err)
+	if execErr := db.retry.ExecuteSQL(ctx, &connection.SQLExecutionBundle{
+		OperationName: "init_tables",
+		Stmt:          dbInitSQLStmt,
+		Pool:          db.pool,
+		RetryMetrics:  db.metrics.failedRetriesCounter,
+	}); execErr != nil {
+		return fmt.Errorf("failed to create system tables and functions: %w", execErr)
 	}
 
 	for _, nsID := range systemNamespaces {
-		tableName := TableName(nsID)
-		for _, stmt := range createNsTablesAndFuncsTemplates {
-			if err := executeSQL(fmt.Sprintf("creating_table_and_its_methods_for%s", nsID),
-				fmt.Sprintf(stmt, tableName)); err != nil {
-				return fmt.Errorf("failed to create tables and functions for system namespaces: %w", err)
-			}
+		execErr := createNsTables(nsID, func(q string) error {
+			return db.retry.ExecuteSQL(ctx, &connection.SQLExecutionBundle{
+				OperationName: fmt.Sprintf("creating_namespace_%s", nsID),
+				Stmt:          q,
+				Pool:          db.pool,
+				RetryMetrics:  db.metrics.failedRetriesCounter,
+			})
+		})
+		if execErr != nil {
+			return execErr
 		}
-		logger.Infof("namespace %s: created table '%s' and its methods.", nsID, tableName)
+		logger.Infof("namespace %s: created table and its methods.", nsID)
 	}
 	return nil
+}
+
+func createNsTables(nsID string, queryFunc func(q string) error) error {
+	query := FmtNsID(createNamespaceSQLStmt, nsID)
+	if err := queryFunc(query); err != nil {
+		return errors.Wrapf(err, "failed to create table and functions for namespace [%s] with query [%s]",
+			nsID, query)
+	}
+	return nil
+}
+
+// FmtNsID replaces the namespace placeholder with the namespace ID in an SQL template string.
+func FmtNsID(sqlTemplate, namespaceID string) string {
+	return strings.ReplaceAll(sqlTemplate, nsIDTemplatePlaceholder, namespaceID)
 }

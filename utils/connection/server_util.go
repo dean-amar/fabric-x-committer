@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils"
 )
 
 const grpcProtocol = "tcp"

@@ -14,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 // ErrInvalidOrStaleView is returned when attempting to use wrong, stale, or cancelled view.
@@ -87,11 +87,13 @@ func (q *Service) BeginView(
 	q.metrics.requests.WithLabelValues(grpcBeginView).Inc()
 	defer q.requestLatency(grpcBeginView, time.Now())
 
+	// Validate and cap timeout.
 	if params.TimeoutMilliseconds == 0 ||
 		int64(params.TimeoutMilliseconds) > q.config.MaxViewTimeout.Milliseconds() { //nolint:gosec
 		params.TimeoutMilliseconds = uint64(q.config.MaxViewTimeout.Milliseconds()) //nolint:gosec
 	}
 
+	// Generate unique view ID and create view.
 	// We try again if we have view-id collision.
 	for ctx.Err() == nil {
 		viewID, err := getUUID()

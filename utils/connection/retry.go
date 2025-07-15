@@ -20,7 +20,7 @@ import (
 	"github.com/yugabyte/pgx/v4/pgxpool"
 	"go.uber.org/zap"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 type (

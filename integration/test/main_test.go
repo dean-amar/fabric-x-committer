@@ -17,7 +17,7 @@ import (
 
 	"google.golang.org/grpc/grpclog"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 )
 
 func TestMain(m *testing.M) {

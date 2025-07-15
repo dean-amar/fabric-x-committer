@@ -7,21 +7,18 @@ SPDX-License-Identifier: Apache-2.0
 package vc
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yugabyte/pgx/v4/pgxpool"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/api/types"
 )
 
 const (
 	ns1 = "1"
 	ns2 = "2"
-)
-
-var (
-	v0 = types.VersionNumber(0).Bytes()
-	v1 = types.VersionNumber(1).Bytes()
 )
 
 func newDatabaseTestEnvWithTablesSetup(t *testing.T) *DatabaseTestEnv {
@@ -30,6 +27,77 @@ func newDatabaseTestEnvWithTablesSetup(t *testing.T) *DatabaseTestEnv {
 	ctx, _ := createContext(t)
 	require.NoError(t, env.DB.setupSystemTablesAndNamespaces(ctx))
 	return env
+}
+
+func TestTablesAndMethods(t *testing.T) {
+	t.Parallel()
+	env := NewDatabaseTestEnv(t)
+	ctx, _ := createContext(t)
+	require.NoError(t, env.DB.setupSystemTablesAndNamespaces(ctx))
+	env.populateData(t, []string{"a", "b"}, namespaceToWrites{}, nil, nil)
+
+	expectedTables := []string{"metadata", "tx_status", "ns__meta", "ns__config", "ns_a", "ns_b"}
+	expectedMethodsPerNamespace := []string{"insert_", "update_", "validate_reads_"}
+	expectedMethods := []string{"insert_tx_status"}
+	for _, table := range expectedTables {
+		if !strings.HasPrefix(table, "ns_") {
+			continue
+		}
+		for _, method := range expectedMethodsPerNamespace {
+			expectedMethods = append(expectedMethods, method+table)
+		}
+	}
+
+	tables := readTables(t, env.DB.pool)
+	require.ElementsMatch(t, tables, expectedTables)
+	methods := readMethods(t, env.DB.pool)
+	require.ElementsMatch(t, methods, expectedMethods)
+}
+
+func readTables(t *testing.T, querier *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := querier.Query(t.Context(), `
+SELECT DISTINCT tablename
+FROM pg_catalog.pg_tables
+WHERE tablename NOT LIKE 'sql_%'
+  AND tablename NOT LIKE 'pg_%';
+`)
+	require.NoError(t, err)
+	t.Cleanup(rows.Close)
+
+	var tables []string
+	for rows.Next() {
+		require.NoError(t, rows.Err())
+		var tableName string
+		require.NoError(t, rows.Scan(&tableName))
+		t.Logf("table: %s", tableName)
+		tables = append(tables, tableName)
+	}
+	return tables
+}
+
+func readMethods(t *testing.T, querier *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := querier.Query(t.Context(), `
+SELECT proname, pg_get_function_identity_arguments(oid)
+FROM pg_proc
+WHERE pronamespace = 'public'::regnamespace
+  AND proname NOT LIKE 'sql_%'
+  AND proname NOT LIKE 'pg_%';
+`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var methods []string
+	for rows.Next() {
+		require.NoError(t, rows.Err())
+		var methodName string
+		var methodVars string
+		require.NoError(t, rows.Scan(&methodName, &methodVars))
+		t.Logf("method: %-30s vars: %s", methodName, methodVars)
+		methods = append(methods, methodName)
+	}
+	return methods
 }
 
 func TestValidateNamespaceReads(t *testing.T) {
@@ -53,12 +121,12 @@ func TestValidateNamespaceReads(t *testing.T) {
 			ns1: {
 				keys:     [][]byte{k1, k2, k3},
 				values:   [][]byte{[]byte("value1"), []byte("value2"), []byte("value3")},
-				versions: [][]byte{v0, v0, v0},
+				versions: []uint64{0, 0, 0},
 			},
 			ns2: {
 				keys:     [][]byte{k4, k5, k6},
 				values:   [][]byte{[]byte("value4"), []byte("value5"), []byte("value6")},
-				versions: [][]byte{v1, v1, v1},
+				versions: []uint64{1, 1, 1},
 			},
 		},
 		nil,
@@ -82,7 +150,7 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns1,
 			r: &reads{
 				keys:     [][]byte{k4, k5, k6},
-				versions: [][]byte{nil, nil, nil},
+				versions: []*uint64{nil, nil, nil},
 			},
 			expectedReadConflicts: &reads{},
 		},
@@ -91,11 +159,11 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns2,
 			r: &reads{
 				keys:     [][]byte{k7, k8, k9},
-				versions: [][]byte{nil, v0, nil},
+				versions: []*uint64{nil, types.Version(0), nil},
 			},
 			expectedReadConflicts: &reads{
 				keys:     [][]byte{k8},
-				versions: [][]byte{v0},
+				versions: []*uint64{types.Version(0)},
 			},
 		},
 		{
@@ -103,11 +171,11 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns2,
 			r: &reads{
 				keys:     [][]byte{k7, k8, k9},
-				versions: [][]byte{v1, v0, v1},
+				versions: []*uint64{types.Version(1), types.Version(0), types.Version(1)},
 			},
 			expectedReadConflicts: &reads{
 				keys:     [][]byte{k7, k8, k9},
-				versions: [][]byte{v1, v0, v1},
+				versions: []*uint64{types.Version(1), types.Version(0), types.Version(1)},
 			},
 		},
 		{
@@ -115,7 +183,7 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns1,
 			r: &reads{
 				keys:     [][]byte{k1, k2, k3},
-				versions: [][]byte{v0, v0, v0},
+				versions: []*uint64{types.Version(0), types.Version(0), types.Version(0)},
 			},
 			expectedReadConflicts: &reads{},
 		},
@@ -124,11 +192,11 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns1,
 			r: &reads{
 				keys:     [][]byte{k1, k2, k3},
-				versions: [][]byte{v1, v0, v1},
+				versions: []*uint64{types.Version(1), types.Version(0), types.Version(1)},
 			},
 			expectedReadConflicts: &reads{
 				keys:     [][]byte{k1, k3},
-				versions: [][]byte{v1, v1},
+				versions: []*uint64{types.Version(1), types.Version(1)},
 			},
 		},
 		{
@@ -136,11 +204,11 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns2,
 			r: &reads{
 				keys:     [][]byte{k4, k5, k6},
-				versions: [][]byte{v0, v0, v0},
+				versions: []*uint64{types.Version(0), types.Version(0), types.Version(0)},
 			},
 			expectedReadConflicts: &reads{
 				keys:     [][]byte{k4, k5, k6},
-				versions: [][]byte{v0, v0, v0},
+				versions: []*uint64{types.Version(0), types.Version(0), types.Version(0)},
 			},
 		},
 		{
@@ -148,11 +216,11 @@ func TestValidateNamespaceReads(t *testing.T) {
 			nsID: ns2,
 			r: &reads{
 				keys:     [][]byte{k4, k5, k6, k7, k8, k9},
-				versions: [][]byte{v1, v0, v1, nil, v0, nil},
+				versions: []*uint64{types.Version(1), types.Version(0), types.Version(1), nil, types.Version(0), nil},
 			},
 			expectedReadConflicts: &reads{
 				keys:     [][]byte{k5, k8},
-				versions: [][]byte{v0, v0},
+				versions: []*uint64{types.Version(0), types.Version(0)},
 			},
 		},
 	}
@@ -193,17 +261,17 @@ func TestDBCommit(t *testing.T) {
 		ns1: {
 			keys:     [][]byte{k1, k2, k3},
 			values:   [][]byte{[]byte("value1"), []byte("value2"), []byte("value3")},
-			versions: [][]byte{v0, v0, v0},
+			versions: []uint64{0, 0, 0},
 		},
 		ns2: {
 			keys:     [][]byte{k4, k5, k6},
 			values:   [][]byte{[]byte("value4"), []byte("value5"), []byte("value6")},
-			versions: [][]byte{v1, v1, v1},
+			versions: []uint64{1, 1, 1},
 		},
 		types.MetaNamespaceID: {
 			keys:     [][]byte{[]byte("3"), []byte("4")},
 			values:   [][]byte{[]byte("value7"), []byte("value8")},
-			versions: [][]byte{v0, v0, v0},
+			versions: []uint64{0, 0, 0},
 		},
 	}
 
@@ -219,12 +287,12 @@ func TestDBCommit(t *testing.T) {
 		"3": {
 			keys:     [][]byte{k1, k2},
 			values:   [][]byte{[]byte("value1"), []byte("value2")},
-			versions: [][]byte{v0, v0},
+			versions: []uint64{0, 0},
 		},
 		"4": {
 			keys:     [][]byte{k4, k5},
 			values:   [][]byte{[]byte("value4"), []byte("value5")},
-			versions: [][]byte{v0, v0},
+			versions: []uint64{0, 0},
 		},
 	}
 
@@ -248,13 +316,9 @@ func toComparableReads(r *reads) []comparableRead {
 	if r == nil || len(r.keys) == 0 {
 		return nil
 	}
-
 	compReads := make([]comparableRead, len(r.keys))
 	for i := range r.keys {
-		compReads[i] = comparableRead{
-			key:     string(r.keys[i]),
-			version: string(r.versions[i]),
-		}
+		compReads[i] = newCmpRead("", r.keys[i], r.versions[i])
 	}
 	return compReads
 }

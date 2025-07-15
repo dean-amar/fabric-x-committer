@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tls"
+	"github.com/hyperledger/fabric-x-committer/utils/tls"
 )
 
 func tlsFromConnectionConfig(connConfig *ClientConfig) (credentials.TransportCredentials, error) {

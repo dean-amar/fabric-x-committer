@@ -14,14 +14,13 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 )
 
-//nolint:paralleltest // Reduce tests load.
 func TestQueryService(t *testing.T) {
+	t.Parallel()
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
 		NumVerifiers: 2,
@@ -45,7 +44,7 @@ func TestQueryService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("k1"),
@@ -59,7 +58,7 @@ func TestQueryService(t *testing.T) {
 						},
 						{
 							NsId:      "2",
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("k3"),
@@ -111,7 +110,7 @@ func TestQueryService(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		testItemsVersion := types.VersionNumber(0).Bytes()
+		testItemsVersion := uint64(0)
 
 		requiredItems := []*protoqueryservice.RowsNamespace{
 			{

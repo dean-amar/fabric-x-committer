@@ -6,6 +6,6 @@ SPDX-License-Identifier: Apache-2.0
 
 package mock
 
-import "github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
+import "github.com/hyperledger/fabric-x-committer/utils/logging"
 
 var logger = logging.New("mock")

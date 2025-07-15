@@ -16,9 +16,10 @@ import (
 	"github.com/yugabyte/pgx/v4"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
 )
 
 //go:embed query.sql
@@ -95,13 +96,13 @@ func (t *sharedLazyTx) Release() {
 func unsafeQueryRows(
 	ctx context.Context, queryObj querier, nsID string, keys [][]byte,
 ) ([]*protoqueryservice.Row, error) {
-	queryStmt := fmt.Sprintf(queryRowSQLTemplate, nsID)
+	queryStmt := vc.FmtNsID(queryRowSQLTemplate, nsID)
 	r, err := queryObj.Query(ctx, queryStmt, keys)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
-	return readKeysAndValues(r, len(keys))
+	return readQueryRows(r, len(keys))
 }
 
 func queryPolicies(ctx context.Context, queryObj querier) (*protoblocktx.NamespacePolicies, error) {
@@ -110,7 +111,7 @@ func queryPolicies(ctx context.Context, queryObj querier) (*protoblocktx.Namespa
 		return nil, errors.Wrap(err, "failed to query policies")
 	}
 	defer r.Close()
-	rows, err := readKeysAndValues(r, 1)
+	rows, err := readQueryRows(r, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +134,7 @@ func queryConfig(ctx context.Context, queryObj querier) (*protoblocktx.ConfigTra
 		return nil, errors.Wrap(err, "failed to query policies")
 	}
 	defer r.Close()
-	rows, err := readKeysAndValues(r, 1)
+	rows, err := readQueryRows(r, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +146,7 @@ func queryConfig(ctx context.Context, queryObj querier) (*protoblocktx.ConfigTra
 	return configTX, nil
 }
 
-func readKeysAndValues(r pgx.Rows, expectedSize int) ([]*protoqueryservice.Row, error) {
+func readQueryRows(r pgx.Rows, expectedSize int) ([]*protoqueryservice.Row, error) {
 	rows := make([]*protoqueryservice.Row, 0, expectedSize)
 	for r.Next() {
 		v := &protoqueryservice.Row{}

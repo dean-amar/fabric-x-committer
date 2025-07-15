@@ -12,9 +12,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
-
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
 )
 
 // YugaClusterController is a struct that facilitates the manipulation of a DB cluster,
@@ -82,8 +83,11 @@ func (cc *YugaClusterController) AddNode(ctx context.Context, t *testing.T) *dbt
 
 	cc.nodes = append(cc.nodes, node)
 
-	node.StartContainer(ctx, t)
-	waitForNodeReadiness(t, node, "Data placement constraint successfully verified")
+	require.NoError(t, nodeStartupRetry.Execute(ctx, func() error {
+		t.Logf("starting db node %v with role: %v", node.Name, node.Role)
+		node.StartContainer(ctx, t)
+		return node.EnsureNodeReadiness(t, "Data placement constraint successfully verified")
+	}))
 
 	return node
 }

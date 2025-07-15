@@ -14,10 +14,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 // transactionCommitter is responsible for committing the transactions.
@@ -221,10 +221,10 @@ func (c *transactionCommitter) populateVersionsAndCategorizeBlindWrites(
 			nsState := state[ns]
 			for i, key := range nsWrites.keys {
 				if ver, present := nsState[string(key)]; present {
-					nextVer := (types.VersionNumberFromBytes(ver) + 1).Bytes()
+					nextVer := ver + 1
 					vTx.validTxNonBlindWrites.getOrCreate(curTxID, ns).append(key, nsWrites.values[i], nextVer)
 				} else {
-					vTx.newWrites.getOrCreate(curTxID, ns).append(key, nsWrites.values[i], nil)
+					vTx.newWrites.getOrCreate(curTxID, ns).append(key, nsWrites.values[i], 0)
 				}
 			}
 		}
@@ -278,8 +278,8 @@ func groupWritesByNamespace(txWrites transactionToWrites) namespaceToWrites {
 			if writes.empty() {
 				continue
 			}
-			nsWrites := nsToWrites.getOrCreate(ns)
-			nsWrites.appendMany(writes.keys, writes.values, writes.versions)
+			curNsWrites := nsToWrites.getOrCreate(ns)
+			curNsWrites.appendWrites(writes)
 		}
 	}
 

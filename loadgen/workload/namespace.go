@@ -13,8 +13,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/types"
 )
 
 // CreateNamespacesTX creating the transaction containing the requested namespaces into the MetaNamespace.
@@ -46,7 +46,7 @@ func CreateNamespacesTX(policy *PolicyProfile) (*protoblocktx.Tx, error) {
 		Id: fmt.Sprintf("initial policy update: %v", strings.Join(allNamespaces, ",")),
 		Namespaces: []*protoblocktx.TxNamespace{{
 			NsId:       types.MetaNamespaceID,
-			NsVersion:  types.VersionNumber(0).Bytes(),
+			NsVersion:  0,
 			ReadWrites: readWrites,
 		}},
 	}

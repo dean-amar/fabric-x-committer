@@ -14,10 +14,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 type committerTestEnv struct {
@@ -56,9 +56,9 @@ func writes(isBlind bool, allWrites ...state) namespaceToWrites { //nolint: revi
 	ntw := make(namespaceToWrites)
 	for _, ww := range allWrites {
 		nw := ntw.getOrCreate(ww.namespace)
-		var ver []byte
+		var ver uint64
 		if !isBlind {
-			ver = types.VersionNumber(ww.updateSequence).Bytes()
+			ver = ww.updateSequence
 		}
 		nw.append(
 			fmt.Appendf(nil, "key%s.%d", ww.namespace, ww.keySuffix),
@@ -328,7 +328,7 @@ func TestCommit(t *testing.T) { //nolint:maintidx // cannot improve.
 					"tx-conflict-4": protoblocktx.Status_ABORTED_MVCC_CONFLICT,
 				},
 				readToTxIDs: map[comparableRead][]TxID{
-					{"1", "key1.10", ""}: {"tx-violate-1"},
+					newCmpRead("1", []byte("key1.10"), nil): {"tx-violate-1"},
 				},
 				txIDToHeight: transactionIDToHeight{
 					"tx-violate-1":     types.NewHeight(1, 1),

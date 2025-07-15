@@ -11,11 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 // DBClusterController is a class that facilitates the manipulation of a DB cluster,
@@ -31,6 +30,13 @@ const (
 
 	linuxOS = "linux"
 )
+
+var nodeStartupRetry = &connection.RetryProfile{
+	// MaxElapsedTime is the duration allocated for the retry mechanism during the database initialization process.
+	MaxElapsedTime: 5 * time.Minute,
+	// InitialInterval is the starting wait time interval that increases every retry attempt.
+	InitialInterval: 1 * time.Second,
+}
 
 // StopAndRemoveNodeWithRole stops and removes a node given a role.
 func (cc *DBClusterController) StopAndRemoveNodeWithRole(t *testing.T, role string) {
@@ -92,13 +98,4 @@ func (cc *DBClusterController) stopAndRemoveCluster(t *testing.T) {
 		node.StopAndRemoveContainer(t)
 	}
 	cc.nodes = nil
-}
-
-// waitForNodeReadiness checks the container's readiness by monitoring its logs.
-func waitForNodeReadiness(t *testing.T, node *dbtest.DatabaseContainer, requiredOutput string) {
-	t.Helper()
-	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		output := node.GetContainerLogs(t)
-		require.Contains(ct, output, requiredOutput)
-	}, 90*time.Second, 250*time.Millisecond, "Node %s readiness check failed", node.Name)
 }
