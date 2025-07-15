@@ -137,7 +137,7 @@ func (cc *PostgresClusterController) createAndStartNode(
 	cc.nodes = append(cc.nodes, node)
 	node.StartContainer(ctx, t)
 
-	require.NoError(t, nodeStartupRetry.Execute(ctx, func() error {
+	require.NoError(t, nodeStartupRetry.Execute(ctx, "postgres_node_startup", nil, func() error {
 		t.Logf("starting db node %v with role: %v", node.Name, node.Role)
 		node.StartContainer(ctx, t)
 		return node.EnsureNodeReadiness(t, nodeCreationOpts.requiredOutput)

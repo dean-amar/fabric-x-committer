@@ -10,16 +10,14 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"strings"
-	_ "strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
 	"github.com/hyperledger/fabric-x-committer/api/types"
-	_ "github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 const (

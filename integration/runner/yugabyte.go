@@ -83,7 +83,7 @@ func (cc *YugaClusterController) AddNode(ctx context.Context, t *testing.T) *dbt
 
 	cc.nodes = append(cc.nodes, node)
 
-	require.NoError(t, nodeStartupRetry.Execute(ctx, func() error {
+	require.NoError(t, nodeStartupRetry.Execute(ctx, "yugabyte_node_start_up", nil, func() error {
 		t.Logf("starting db node %v with role: %v", node.Name, node.Role)
 		node.StartContainer(ctx, t)
 		return node.EnsureNodeReadiness(t, "Data placement constraint successfully verified")
