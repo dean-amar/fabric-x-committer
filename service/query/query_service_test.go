@@ -387,7 +387,7 @@ func generateNamespacesUnderTest(t *testing.T, namespaces []string) *vc.Database
 
 	clientConf := loadgen.DefaultClientConf()
 	clientConf.Adapter.VCClient = &adapters.VCClientConfig{
-		Endpoints: env.Endpoints,
+		Client: *test.MakeClientConfig(env.Endpoints...),
 	}
 	policies := &workload.PolicyProfile{
 		NamespacePolicies: make(map[string]*workload.Policy, len(namespaces)),
