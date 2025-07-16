@@ -26,4 +26,4 @@ orderer-client:
         {{- end }}
     consensus-type: BFT
     channel-id: {{ .ChannelID }}
-  broadcast-parallelism: 50
+  broadcast-parallelism: 5

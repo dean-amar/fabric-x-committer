@@ -10,7 +10,7 @@ import (
 	"context"
 	"sync"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
 )
 
 type (

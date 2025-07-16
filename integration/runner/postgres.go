@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -136,7 +136,12 @@ func (cc *PostgresClusterController) createAndStartNode(
 
 	cc.nodes = append(cc.nodes, node)
 	node.StartContainer(ctx, t)
-	waitForNodeReadiness(t, node, nodeCreationOpts.requiredOutput)
+
+	require.NoError(t, nodeStartupRetry.Execute(ctx, func() error {
+		t.Logf("starting db node %v with role: %v", node.Name, node.Role)
+		node.StartContainer(ctx, t)
+		return node.EnsureNodeReadiness(t, nodeCreationOpts.requiredOutput)
+	}))
 
 	return node
 }

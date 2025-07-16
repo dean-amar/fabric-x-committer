@@ -12,7 +12,7 @@ import (
 	"github.com/hyperledger/fabric/protoutil"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
+	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 )
 
 type (
@@ -31,10 +31,16 @@ type (
 
 // SendWithEnv wraps a payload with an envelope, signs it and send it to the stream.
 func (s *EnvelopedStream) SendWithEnv(dataMsg proto.Message) (string, error) {
-	env, txID, err := serialization.CreateEnvelope(s.channelID, s.signer, dataMsg)
+	env, txID, err := s.CreateEnvelope(dataMsg)
 	if err != nil {
-		return txID, errors.Wrap(err, "error serializing envelope")
+		return txID, err
 	}
 	err = s.Send(env)
 	return txID, errors.Wrap(err, "error submitting envelope")
+}
+
+// CreateEnvelope wraps a payload with an envelope, and signs it.
+func (s *EnvelopedStream) CreateEnvelope(dataMsg proto.Message) (*common.Envelope, string, error) {
+	env, txID, err := serialization.CreateEnvelope(s.channelID, s.signer, dataMsg)
+	return env, txID, errors.Wrap(err, "error serializing envelope")
 }

@@ -12,9 +12,9 @@ import (
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
 )
 
 // Profile describes the generated workload characteristics.

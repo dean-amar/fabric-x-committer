@@ -21,24 +21,24 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/cmd/config"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecarclient"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature/sigtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/cmd/config"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection/tlsgen"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/serialization"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/utils/signature/sigtest"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 type (
@@ -110,6 +110,8 @@ const (
 	Verifier
 	VC
 	QueryService
+
+	LoadGenForOnlyOrderer
 	LoadGenForOrderer
 	LoadGenForCommitter
 	LoadGenForCoordinator
@@ -125,7 +127,7 @@ const (
 	CommitterTxPathWithLoadGen = CommitterTxPath | LoadGenForCommitter
 
 	// loadGenMatcher is used to extract only the load generator flags from the full service flags value.
-	loadGenMatcher = LoadGenForOrderer | LoadGenForCommitter | LoadGenForCoordinator |
+	loadGenMatcher = LoadGenForOnlyOrderer | LoadGenForOrderer | LoadGenForCommitter | LoadGenForCoordinator |
 		LoadGenForVCService | LoadGenForVerifier
 )
 
@@ -189,42 +191,41 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.TLSManager = tlsgen.NewSecureCommunicationManager(t)
 
 	t.Log("create clients certificates per service")
-	s.ClientsCreds.Vc = c.createClientCerts(t, "validator-committer")
-	s.ClientsCreds.Verifier = c.createClientCerts(t, "verifier")
-	s.ClientsCreds.Coordinator = c.createClientCerts(t, "coordinator")
-	s.ClientsCreds.Query = c.createClientCerts(t, "query-service")
-	s.ClientsCreds.Sidecar = c.createClientCerts(t, "sidecar")
+	s.ClientsCreds.Vc = c.createClientConfigTLS(t, "validator-committer")
+	s.ClientsCreds.Verifier = c.createClientConfigTLS(t, "verifier")
+	s.ClientsCreds.Coordinator = c.createClientConfigTLS(t, "coordinator")
+	s.ClientsCreds.Query = c.createClientConfigTLS(t, "query-service")
+	s.ClientsCreds.Sidecar = c.createClientConfigTLS(t, "sidecar")
 
 	t.Log("Create processes")
-	c.MockOrderer = newProcess(t, cmdOrderer, s)
-
+	c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
 	for i, e := range s.Endpoints.Verifier {
 		p := cmdVerifier
 		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
 		c.Verifier = append(c.Verifier, newProcess(
-			t, p, c.createServerCerts(t, e, "verifier")))
+			t, p, c.createSystemConfigWithServerCerts(t, e, "verifier")))
 	}
 
 	for i, e := range s.Endpoints.VCService {
 		p := cmdVC
 		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
 		c.VcService = append(c.VcService, newProcess(
-			t, p, c.createServerCerts(t, e, "validator-committer")))
+			t, p, c.createSystemConfigWithServerCerts(t, e, "validator-committer")))
 	}
 
 	c.Coordinator = newProcess(t,
 		cmdCoordinator,
-		c.createServerCerts(t, s.Endpoints.Coordinator, "coordinator"),
+		c.createSystemConfigWithServerCerts(t, s.Endpoints.Coordinator, "coordinator"),
 	)
 
 	c.QueryService = newProcess(t,
 		cmdQuery,
-		c.createServerCerts(t, s.Endpoints.Query, "query-service"),
+		c.createSystemConfigWithServerCerts(t, s.Endpoints.Query, "query-service"),
 	)
 
 	c.Sidecar = newProcess(t,
 		cmdSidecar,
-		c.createServerCerts(t, s.Endpoints.Sidecar, "sidecar"),
+		c.createSystemConfigWithServerCerts(t, s.Endpoints.Sidecar, "sidecar"),
 	)
 
 	t.Log("Create clients")
@@ -317,10 +318,12 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	require.Falsef(t, isMoreThanOneBitSet(loadGenFlag), "only one load generator may be set")
 	loadGenParams := cmdLoadGen
 	switch loadGenFlag {
-	case LoadGenForCommitter:
-		loadGenParams.Template = config.TemplateLoadGenCommitter
+	case LoadGenForOnlyOrderer:
+		loadGenParams.Template = config.TemplateLoadGenOnlyOrderer
 	case LoadGenForOrderer:
 		loadGenParams.Template = config.TemplateLoadGenOrderer
+	case LoadGenForCommitter:
+		loadGenParams.Template = config.TemplateLoadGenCommitter
 	case LoadGenForCoordinator:
 		loadGenParams.Template = config.TemplateLoadGenCoordinator
 	case LoadGenForVCService:
@@ -403,7 +406,7 @@ func (c *CommitterRuntime) CreateMetaTX(t *testing.T, namespaces ...string) *pro
 	t.Helper()
 	writeToMetaNs := &protoblocktx.TxNamespace{
 		NsId:       types.MetaNamespaceID,
-		NsVersion:  types.VersionNumber(0).Bytes(),
+		NsVersion:  0,
 		ReadWrites: make([]*protoblocktx.ReadWrite, 0, len(namespaces)),
 	}
 
@@ -635,25 +638,34 @@ func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, b
 	}, 2*time.Minute, 250*time.Millisecond)
 }
 
-func (c *CommitterRuntime) createServerCerts(
+func (c *CommitterRuntime) createSystemConfigWithServerCerts(
 	t *testing.T,
 	endpoints config.ServiceEndpoints,
 	serverName string,
 ) *config.SystemConfig {
 	t.Helper()
 	serviceCfg := c.SystemConfig
-	serviceTLSCertsPath := c.TLSManager.CreateServerCertificate(t, serverName)
-	serviceCfg.ServiceTLS = c.createTLSConfig(serviceTLSCertsPath, serverName)
+	serviceCfg.ServiceTLS = c.createServerConfigTLS(t, serverName)
 	serviceCfg.ServiceEndpoints = endpoints
 	return &serviceCfg
 }
 
-func (c *CommitterRuntime) createClientCerts(t *testing.T, forServer string) connection.ConfigTLS {
+func (c *CommitterRuntime) createServerConfigTLS(t *testing.T, asServer string) connection.ConfigTLS {
 	t.Helper()
-	return c.createTLSConfig(c.TLSManager.CreateClientCertificate(t), forServer)
+	// We pass asServer twice: first to generate the server's keys,
+	// and second to include the server name in the ConfigTLS.
+	// Note: the Server Name Indication (SNI) is not used when creating
+	// the server's transport credentials, so passing it during TLS config
+	// creation is not strictly necessary.
+	return c.createConfigTLS(c.TLSManager.CreateServerCertificate(t, asServer), asServer)
 }
 
-func (c *CommitterRuntime) createTLSConfig(paths map[string]string, serverName string) connection.ConfigTLS {
+func (c *CommitterRuntime) createClientConfigTLS(t *testing.T, forServer string) connection.ConfigTLS {
+	t.Helper()
+	return c.createConfigTLS(c.TLSManager.CreateClientCertificate(t), forServer)
+}
+
+func (c *CommitterRuntime) createConfigTLS(paths map[string]string, serverName string) connection.ConfigTLS {
 	return test.CreateTLSConfigFromPaths(c.config.TLS, paths, serverName)
 }
 

@@ -12,13 +12,12 @@ import (
 
 	"github.com/onsi/gomega"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 )
 
-//nolint:paralleltest // Reduce tests load.
 func TestMixOfValidAndInvalidSign(t *testing.T) { //nolint:gocognit
+	t.Parallel()
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
 		NumVerifiers: 2,
@@ -100,13 +99,12 @@ func TestMixOfValidAndInvalidSign(t *testing.T) { //nolint:gocognit
 		},
 	}
 
-	v0 := types.VersionNumber(0).Bytes()
 	for _, tt := range tests { //nolint:paralleltest // order is important.
 		t.Run(tt.name, func(t *testing.T) {
 			for i, tx := range tt.txs {
 				for _, ns := range tx.Namespaces {
 					ns.NsId = "1"
-					ns.NsVersion = v0
+					ns.NsVersion = 0
 				}
 				if tt.validSign[i] {
 					c.AddSignatures(t, tx)

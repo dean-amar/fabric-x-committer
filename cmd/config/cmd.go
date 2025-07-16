@@ -17,17 +17,17 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protosigverifierservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/query"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
+	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/service/coordinator"
+	"github.com/hyperledger/fabric-x-committer/service/query"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 // Service names and version.

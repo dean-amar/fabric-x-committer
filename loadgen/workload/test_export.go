@@ -7,13 +7,14 @@ SPDX-License-Identifier: Apache-2.0
 package workload
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 // StartGenerator is used for benchmarking.
@@ -29,6 +30,19 @@ func StartGenerator(tb testing.TB, p *Profile) *RateLimiterGenerator[*protoblock
 	time.Sleep(3 * time.Second)
 
 	return s.MakeGenerator()
+}
+
+// GenerateTransactions is used for benchmarking.
+func GenerateTransactions(tb testing.TB, p *Profile, count int) []*protoblocktx.Tx {
+	tb.Helper()
+	s := NewTxStream(p, &StreamOptions{
+		BuffersSize: 1024,
+		GenBatch:    4096,
+	})
+	ctx, cancel := context.WithCancel(tb.Context())
+	defer cancel()
+	test.RunServiceForTest(ctx, tb, s.Run, nil)
+	return s.MakeGenerator().NextN(ctx, count)
 }
 
 // DefaultProfile is used for testing and benchmarking.

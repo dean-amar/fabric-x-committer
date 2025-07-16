@@ -14,12 +14,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 const (
@@ -29,6 +31,10 @@ const (
 
 	defaultHostIP  = "127.0.0.1"
 	defaultPortMap = "7000/tcp"
+
+	// container's Memory and CPU management.
+	gb         = 1 << 30 // gb is the number of bytes needed to represent 1 GB.
+	memorySwap = -1      // memorySwap disable memory swaps (don't store data on disk)
 )
 
 // YugabyteCMD starts yugabyte without SSL and fault tolerance (single server).
@@ -37,7 +43,12 @@ var YugabyteCMD = []string{
 	"--callhome", "false",
 	"--background", "false",
 	"--ui", "false",
-	"--tserver_flags", "ysql_max_connections=5000",
+	"--tserver_flags",
+	"ysql_max_connections=500," +
+		"tablet_replicas_per_gib_limit=4000," +
+		"yb_num_shards_per_tserver=1," +
+		"minloglevel=3," +
+		"yb_enable_read_committed_isolation=true",
 	"--insecure",
 }
 
@@ -73,7 +84,8 @@ func (dc *DatabaseContainer) StartContainer(ctx context.Context, t *testing.T) {
 
 	// Starts the container
 	err := dc.client.StartContainerWithContext(dc.containerID, nil, ctx)
-	if _, ok := err.(*docker.ContainerAlreadyRunning); ok {
+	var containerAlreadyRunning *docker.ContainerAlreadyRunning
+	if errors.As(err, &containerAlreadyRunning) {
 		t.Log("Container is already running")
 		return
 	}
@@ -147,9 +159,8 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) {
 	t.Helper()
 	// If container exists, we don't have to create it.
-	found := dc.findContainer(t)
-
-	if found {
+	err := dc.findContainer(t)
+	if err == nil {
 		return
 	}
 
@@ -175,6 +186,8 @@ func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) 
 				AutoRemove:   dc.AutoRm,
 				PortBindings: dc.PortBinds,
 				NetworkMode:  dc.Network,
+				Memory:       4 * gb,
+				MemorySwap:   memorySwap,
 			},
 		},
 	)
@@ -187,25 +200,26 @@ func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) 
 	require.ErrorIs(t, err, docker.ErrContainerAlreadyExists)
 
 	// Try to find it again.
-	require.True(t, dc.findContainer(t), "cannot create container (already exists), but cannot find it")
+	require.NoError(t, dc.findContainer(t))
 }
 
 // findContainer looks up a container with the same name.
-func (dc *DatabaseContainer) findContainer(t *testing.T) bool {
+func (dc *DatabaseContainer) findContainer(t *testing.T) error {
 	t.Helper()
 	allContainers, err := dc.client.ListContainers(docker.ListContainersOptions{All: true})
 	require.NoError(t, err, "could not load containers.")
 
+	names := make([]string, 0, len(allContainers))
 	for _, c := range allContainers {
 		for _, n := range c.Names {
+			names = append(names, n)
 			if n == dc.Name || n == fmt.Sprintf("/%s", dc.Name) {
 				dc.containerID = c.ID
-				return true
+				return nil
 			}
 		}
 	}
-
-	return false
+	return errors.Errorf("cannot find container '%s'. Containers: %v", dc.Name, names)
 }
 
 // getConnectionOptions inspect the container and fetches the available connection options.
@@ -284,12 +298,18 @@ func (dc *DatabaseContainer) GetContainerLogs(t *testing.T) string {
 // StopAndRemoveContainer stops and removes the db container from the docker engine.
 func (dc *DatabaseContainer) StopAndRemoveContainer(t *testing.T) {
 	t.Helper()
-	require.NoError(t, dc.client.StopContainer(dc.ContainerID(), 10))
+	dc.StopContainer(t)
 	require.NoError(t, dc.client.RemoveContainer(docker.RemoveContainerOptions{
 		ID:    dc.ContainerID(),
 		Force: true,
 	}))
 	t.Logf("Container %s stopped and removed successfully", dc.ContainerID())
+}
+
+// StopContainer stops db container.
+func (dc *DatabaseContainer) StopContainer(t *testing.T) {
+	t.Helper()
+	require.NoError(t, dc.client.StopContainer(dc.ContainerID(), 10))
 }
 
 // ContainerID returns the container ID.
@@ -308,6 +328,24 @@ func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{}))
+}
+
+// EnsureNodeReadiness checks the container's readiness by monitoring its logs and ensure its running correctly.
+func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput string) error {
+	t.Helper()
+	var err error
+	if ok := assert.Eventually(t, func() bool {
+		output := dc.GetContainerLogs(t)
+		if !strings.Contains(output, requiredOutput) {
+			err = errors.Newf("Node %s readiness check failed", dc.Name)
+			return false
+		}
+		return true
+	}, 45*time.Second, 250*time.Millisecond); !ok {
+		dc.StopContainer(t)
+		return err
+	}
+	return nil
 }
 
 // GetDockerClient instantiate a new docker client.

@@ -12,17 +12,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 type validatorAndCommitterServiceTestEnvWithClient struct {
@@ -40,7 +41,7 @@ func TestVCSecureConnection(t *testing.T) {
 			ServerCN: "validator-committer",
 			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
 				t.Helper()
-				env := NewValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
+				env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
 				return env.Configs[0].Server.Endpoint
 			},
 			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
@@ -121,7 +122,7 @@ func TestCreateConfigAndTables(t *testing.T) {
 			ID: configID,
 			Namespaces: []*protoblocktx.TxNamespace{{
 				NsId:      types.ConfigNamespaceID,
-				NsVersion: types.VersionNumber(0).Bytes(),
+				NsVersion: 0,
 				BlindWrites: []*protoblocktx.Write{
 					{
 						Key:   []byte(types.ConfigKey),
@@ -158,7 +159,7 @@ func TestCreateConfigAndTables(t *testing.T) {
 			ID: metaID,
 			Namespaces: []*protoblocktx.TxNamespace{{
 				NsId:      types.MetaNamespaceID,
-				NsVersion: types.VersionNumber(0).Bytes(),
+				NsVersion: 0,
 				ReadWrites: []*protoblocktx.ReadWrite{
 					{
 						Key:   []byte(utNsID),
@@ -190,10 +191,10 @@ func TestCreateConfigAndTables(t *testing.T) {
 	require.Equal(t, pBytes, policies.Policies[0].Policy)
 
 	// Ensure the table exists.
-	rows, err := env.dbEnv.DB.pool.Query(ctx, fmt.Sprintf("select key, value from ns_%s", utNsID))
+	rows, err := env.dbEnv.DB.pool.Query(ctx, fmt.Sprintf("select key, value from %s", TableName(utNsID)))
 	require.NoError(t, err)
 	defer rows.Close()
-	keys, values, err := readKeysAndValues[[]byte, []byte](rows)
+	keys, values, err := readTwoItems[[]byte, []byte](rows)
 	require.NoError(t, err)
 	require.Empty(t, keys)
 	require.Empty(t, values)
@@ -207,7 +208,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 			"1": &namespaceWrites{
 				keys:     [][]byte{[]byte("Existing key"), []byte("Existing key update")},
 				values:   [][]byte{[]byte("value"), []byte("value")},
-				versions: [][]byte{v0},
+				versions: []uint64{0, 0},
 			},
 		}, nil, nil)
 		return env
@@ -224,7 +225,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key: []byte("blind write without value"),
@@ -240,7 +241,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("Blind write with value"),
@@ -257,7 +258,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("Existing key update"),
@@ -275,7 +276,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key:   []byte("New key with value"),
@@ -292,7 +293,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key: []byte("New key no value"),
@@ -309,12 +310,12 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key:     []byte("Existing key"),
 									Value:   []byte("new-value"),
-									Version: v0,
+									Version: types.Version(0),
 								},
 							},
 						},
@@ -334,13 +335,14 @@ func TestValidatorAndCommitterService(t *testing.T) {
 		expectedTxStatus := make(map[string]*protoblocktx.StatusWithHeight)
 		txIDs := make([]string, len(txBatch.Transactions))
 		for i, tx := range txBatch.Transactions {
-			expectedTxStatus[tx.ID] = types.CreateStatusWithHeight(protoblocktx.Status_COMMITTED, tx.BlockNumber,
-				int(tx.TxNum))
+			status := types.CreateStatusWithHeight(protoblocktx.Status_COMMITTED, tx.BlockNumber, int(tx.TxNum))
+			expectedTxStatus[tx.ID] = status
 			txIDs[i] = tx.ID
+			assert.EqualExportedValuesf(t, status, txStatus.Status[tx.ID], "TX ID: %s", tx.ID)
 		}
 
 		test.RequireIntMetricValue(t, len(txBatch.Transactions), env.vcs[0].metrics.transactionReceivedTotal)
-		require.Equal(t, expectedTxStatus, txStatus.Status)
+		require.EqualExportedValues(t, expectedTxStatus, txStatus.Status)
 
 		env.dbEnv.StatusExistsForNonDuplicateTxID(t, expectedTxStatus)
 
@@ -354,7 +356,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key: []byte("New key 2 no value"),
@@ -387,7 +389,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v1,
+							NsVersion: 1,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key: []byte("blind write without value"),
@@ -411,7 +413,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: v0,
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key:     []byte("Existing key"),
@@ -563,7 +565,7 @@ func TestTransactionResubmission(t *testing.T) {
 			"3": &namespaceWrites{
 				keys:     [][]byte{[]byte("Existing key")},
 				values:   [][]byte{[]byte("value")},
-				versions: [][]byte{v0},
+				versions: []uint64{0},
 			},
 		}, nil, nil)
 
@@ -581,7 +583,7 @@ func TestTransactionResubmission(t *testing.T) {
 				Namespaces: []*protoblocktx.TxNamespace{
 					{
 						NsId:      "3",
-						NsVersion: v0,
+						NsVersion: 0,
 						BlindWrites: []*protoblocktx.Write{
 							{
 								Key:   []byte("Blind write with value"),
@@ -601,7 +603,7 @@ func TestTransactionResubmission(t *testing.T) {
 				Namespaces: []*protoblocktx.TxNamespace{
 					{
 						NsId:      "3",
-						NsVersion: v0,
+						NsVersion: 0,
 						ReadWrites: []*protoblocktx.ReadWrite{
 							{
 								Key:   []byte("New key with value"),
@@ -621,7 +623,7 @@ func TestTransactionResubmission(t *testing.T) {
 				Namespaces: []*protoblocktx.TxNamespace{
 					{
 						NsId:      "3",
-						NsVersion: v0,
+						NsVersion: 0,
 						ReadWrites: []*protoblocktx.ReadWrite{
 							{
 								Key: []byte("New key no value"),
@@ -662,7 +664,7 @@ func TestTransactionResubmission(t *testing.T) {
 				Namespaces: []*protoblocktx.TxNamespace{
 					{
 						NsId:      "3",
-						NsVersion: v0,
+						NsVersion: 0,
 						ReadWrites: []*protoblocktx.ReadWrite{
 							{
 								Key: []byte("Existing key"),

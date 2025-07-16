@@ -9,7 +9,7 @@ package sidecar
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 type perfMetrics struct {

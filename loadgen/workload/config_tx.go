@@ -13,14 +13,14 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/core/config/configtest"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/internaltools/configtxgen"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/internaltools/configtxgen/genesisconfig"
+	"github.com/hyperledger/fabric-x-common/core/config/configtest"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen/genesisconfig"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
 )
 
 // ConfigBlock represents the configuration of the config block.
@@ -88,6 +88,8 @@ func CreateDefaultConfigBlock(conf *ConfigBlock) (*common.Block, error) {
 		consenter.ClientTLSCert = tlsCertPath
 		consenter.ServerTLSCert = tlsCertPath
 	}
+	// Resetting Arma.Path to an empty string as it isn't needed.
+	configBlock.Orderer.Arma.Path = ""
 
 	if conf.MetaNamespaceVerificationKey == nil {
 		conf.MetaNamespaceVerificationKey, _ = NewHashSignerVerifier(&Policy{

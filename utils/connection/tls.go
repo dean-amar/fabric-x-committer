@@ -12,7 +12,6 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"

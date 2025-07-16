@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection/tlsgen"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection/tlsgen"
 )
 
 type (
@@ -46,7 +46,6 @@ func RunSecureConnectionTest(
 	secureConnArguments SecureConnectionFunctionArguments,
 ) {
 	t.Helper()
-
 	tlsMgr := tlsgen.NewSecureCommunicationManager(t)
 	serverCreds := tlsMgr.CreateServerCertificate(t, secureConnArguments.ServerCN)
 	serverTLS := CreateTLSConfigFromPaths(connection.TLSMutual, serverCreds, "")
