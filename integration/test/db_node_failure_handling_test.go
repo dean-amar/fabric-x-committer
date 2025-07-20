@@ -39,8 +39,8 @@ func TestDBResiliencyYugabyteLeaderNodeCrash(t *testing.T) {
 	// Yugabyte has an undetected bug that causes slow tablet distribution.
 	// As a result, when a leader node fails before replication is complete,
 	// the db hangs and the remaining nodes become unreachable.
-	// To support this test, wait for the tablet replication to finish (~3m).
-	time.Sleep(3 * time.Minute)
+	// To support this test, wait for the tablet replication to finish (~5m).
+	time.Sleep(5 * time.Minute)
 
 	c := registerAndCreateRuntime(t, clusterConnection)
 
