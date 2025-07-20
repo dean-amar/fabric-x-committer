@@ -477,6 +477,7 @@ func (dc *DatabaseContainer) WaitForNodeReadiness(t *testing.T, requiredOutput s
 	t.Helper()
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		output := dc.GetContainerLogs(t)
+		t.Logf("\n\n\nthe output: %v\n\n\n", output)
 		require.Contains(ct, output, requiredOutput)
 	}, 90*time.Second, 250*time.Millisecond, "Node %s readiness check failed", dc.Name)
 }
