@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package monitoring
 
 import (
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 // Config represents the monitoring configuration.

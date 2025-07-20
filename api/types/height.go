@@ -9,13 +9,23 @@ package types
 import (
 	"fmt"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/utils"
 )
 
 // Height represents the height of a transaction in blockchain.
 type Height struct {
 	BlockNum uint64
 	TxNum    uint32
+}
+
+// CreateStatusWithHeight creates a protoblocktx.StatusWithHeight with the given values.
+func CreateStatusWithHeight(s protoblocktx.Status, blkNum uint64, txNum int) *protoblocktx.StatusWithHeight {
+	return &protoblocktx.StatusWithHeight{
+		Code:        s,
+		BlockNumber: blkNum,
+		TxNumber:    uint32(txNum), //nolint:gosec
+	}
 }
 
 // NewHeight constructs a new instance of Height.

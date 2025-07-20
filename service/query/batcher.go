@@ -15,9 +15,9 @@ import (
 	"github.com/yugabyte/pgx/v4"
 	"github.com/yugabyte/pgx/v4/pgxpool"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoqueryservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 // viewParametersPermutations there is a constant number of view-parameter permutations.
@@ -421,10 +421,12 @@ func (q *namespaceQueryBatch) waitForRows(
 	ctx context.Context,
 	keys [][]byte,
 ) ([]*protoqueryservice.Row, error) {
+	// Wait for batch to be finalized or context to be canceled.
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-q.ctx.Done():
+		// Query completed.
 	}
 
 	if errors.Is(q.ctx.Err(), context.DeadlineExceeded) {
@@ -435,8 +437,10 @@ func (q *namespaceQueryBatch) waitForRows(
 		return nil, err
 	}
 
+	// Extract results for requested keys.
 	res := make([]*protoqueryservice.Row, 0, len(keys))
 	for _, key := range keys {
+		// Get result for this key from the batch results.
 		if row, ok := q.result[string(key)]; ok && row != nil {
 			res = append(res, row)
 		}

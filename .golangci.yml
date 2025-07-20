@@ -183,7 +183,7 @@ linters:
       # An array of strings that specify globs of packages to ignore.
       # Default: []
       ignore-package-globs:
-        - github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror
+        - github.com/hyperledger/fabric-x-committer/utils/grpcerror
       # An array of strings that specify regular expressions of interfaces to ignore.
       # Default: []
       # ignoreInterfaceRegexps:
@@ -224,6 +224,6 @@ formatters:
       # with the given prefixes are grouped after 3rd-party packages.
       # Default: ""
       local-prefixes:
-        - github.ibm.com/decentralized-trust-research/scalable-committer
+        - github.com/hyperledger/fabric-x-committer
   exclusions:
     generated: lax

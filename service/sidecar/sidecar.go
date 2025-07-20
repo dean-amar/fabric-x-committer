@@ -17,15 +17,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 var logger = logging.New("sidecar")
@@ -64,7 +64,7 @@ func New(c *Config) (*Service, error) {
 
 	// 3. Deliver the block with status to client.
 	logger.Infof("Create ledger service for channel %s", c.Orderer.ChannelID)
-	ledgerService, err := newLedgerService(c.Orderer.ChannelID, c.Ledger.Path)
+	ledgerService, err := newLedgerService(c.Orderer.ChannelID, c.Ledger.Path, metrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ledger: %w", err)
 	}
@@ -94,25 +94,23 @@ func (s *Service) Run(ctx context.Context) error {
 		_ = s.metrics.StartPrometheusServer(pCtx, s.config.Monitoring.Server, s.monitorQueues)
 	}()
 
-	logger.Infof("Create coordinator client and connect to %s", connection.AddressString(
-		s.config.Committer.Config.Endpoints...),
-	)
+	coordinatorEndpoints := connection.AddressString(s.config.Committer.Config.Endpoints...)
+	logger.Infof("Create coordinator client and connect to %s", coordinatorEndpoints)
 
 	committerDialConfig, err := connection.NewLoadBalancedDialConfig(s.config.Committer.Config)
 	if err != nil {
 		return errors.Wrapf(err, "could not load coordinator dial config")
 	}
+
 	// connecting to the coordinator.
 	conn, connErr := connection.Connect(committerDialConfig)
 	if connErr != nil {
-		return errors.Wrapf(err, "failed to connect to coordinator")
+		return errors.Wrapf(connErr, "failed to connect to coordinator")
 	}
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)
+	logger.Infof("sidecar connected to coordinator at %s", coordinatorEndpoints)
 
-	logger.Infof("sidecar connected to coordinator at %s", connection.AddressString(
-		s.config.Committer.Config.Endpoints...),
-	)
 	// creating coordinator client.
 	coordClient := protocoordinatorservice.NewCoordinatorClient(conn)
 
@@ -178,6 +176,7 @@ func (s *Service) sendBlocksAndReceiveStatus(
 			configUpdater:                  s.configUpdater,
 			incomingBlockToBeCommitted:     s.blockToBeCommitted,
 			outgoingCommittedBlock:         s.committedBlock,
+			waitingTxsLimit:                s.config.WaitingTxsLimit,
 		})
 	})
 

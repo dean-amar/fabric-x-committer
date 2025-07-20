@@ -10,14 +10,14 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 )
 
+// Dependency types.
 const (
-	dependencyReadOnly   = "read"
-	dependencyReadWrite  = "read-write"
-	dependencyBlindWrite = "write"
+	DependencyReadOnly   = "read"
+	DependencyReadWrite  = "read-write"
+	DependencyBlindWrite = "write"
 )
 
 type (
@@ -59,7 +59,7 @@ func newSignTxModifier(
 		Namespaces: []*protoblocktx.TxNamespace{
 			{
 				NsId:      GeneratedNamespaceID,
-				NsVersion: types.VersionNumber(0).Bytes(),
+				NsVersion: 0,
 			},
 		},
 	}
@@ -138,11 +138,11 @@ func (g *dependenciesModifier) Modify(tx *protoblocktx.Tx) (*protoblocktx.Tx, er
 func addKey(tx *protoblocktx.Tx, dependencyType string, key []byte) {
 	txNs := tx.Namespaces[0]
 	switch dependencyType {
-	case dependencyReadOnly:
+	case DependencyReadOnly:
 		txNs.ReadsOnly = append(txNs.ReadsOnly, &protoblocktx.Read{Key: key})
-	case dependencyReadWrite:
+	case DependencyReadWrite:
 		txNs.ReadWrites = append(txNs.ReadWrites, &protoblocktx.ReadWrite{Key: key})
-	case dependencyBlindWrite:
+	case DependencyBlindWrite:
 		txNs.BlindWrites = append(txNs.BlindWrites, &protoblocktx.Write{Key: key})
 	default:
 		panic(fmt.Sprintf("invalid dependency type: %s", dependencyType))

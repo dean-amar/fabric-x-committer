@@ -9,7 +9,7 @@ package sidecar
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 type perfMetrics struct {
@@ -21,14 +21,20 @@ type perfMetrics struct {
 
 	// processing duration in relay service
 	// block and transaction status batch can be of different sizes but the processing time is still useful.
-	blockProcessingInRelaySeconds               prometheus.Histogram
+	blockMappingInRelaySeconds                  prometheus.Histogram
+	mappedBlockProcessingInRelaySeconds         prometheus.Histogram
 	transactionStatusesProcessingInRelaySeconds prometheus.Histogram
+
+	waitingTransactionsQueueSize prometheus.Gauge
 
 	// queue sizes
 	yetToBeCommittedBlocksQueueSize prometheus.Gauge
 	committedBlocksQueueSize        prometheus.Gauge
 
 	coordConnection *monitoring.ConnectionMetrics
+
+	appendBlockToLedgerSeconds prometheus.Histogram
+	blockHeight                prometheus.Gauge
 }
 
 func newPerformanceMetrics() *perfMetrics {
@@ -49,11 +55,18 @@ func newPerformanceMetrics() *perfMetrics {
 			Name:      "received_transaction_status_total",
 			Help:      "Total number of transactions statuses received from the coordinator service.",
 		}, []string{"status"}),
-		blockProcessingInRelaySeconds: p.NewHistogram(prometheus.HistogramOpts{
+		blockMappingInRelaySeconds: p.NewHistogram(prometheus.HistogramOpts{
 			Namespace: "sidecar",
 			Subsystem: "relay",
-			Name:      "block_processing_seconds",
-			Help:      "Time spent processing a received block and sent to the coordinator.",
+			Name:      "block_mapping_seconds",
+			Help:      "Time spent mapping a received block to an internal block.",
+			Buckets:   histoBuckets,
+		}),
+		mappedBlockProcessingInRelaySeconds: p.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "sidecar",
+			Subsystem: "relay",
+			Name:      "mapped_block_processing_seconds",
+			Help:      "Time spent processing an internal block and sending it to the coordinator.",
 			Buckets:   histoBuckets,
 		}),
 		transactionStatusesProcessingInRelaySeconds: p.NewHistogram(prometheus.HistogramOpts{
@@ -62,6 +75,12 @@ func newPerformanceMetrics() *perfMetrics {
 			Name:      "transaction_status_batch_processing_seconds",
 			Help:      "Time spent processing a received status batch from the coordinator.",
 			Buckets:   histoBuckets,
+		}),
+		waitingTransactionsQueueSize: p.NewGauge(prometheus.GaugeOpts{
+			Namespace: "sidecar",
+			Subsystem: "relay",
+			Name:      "waiting_transactions_queue_size",
+			Help:      "Total number of transactions waiting at the relay for statuses.",
 		}),
 		yetToBeCommittedBlocksQueueSize: p.NewGauge(prometheus.GaugeOpts{
 			Namespace: "sidecar",
@@ -78,6 +97,19 @@ func newPerformanceMetrics() *perfMetrics {
 		coordConnection: p.NewConnectionMetrics(monitoring.ConnectionMetricsOpts{
 			Namespace:       "sidecar",
 			RemoteNamespace: "coordinator",
+		}),
+		appendBlockToLedgerSeconds: p.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "sidecar",
+			Subsystem: "ledger",
+			Name:      "append_block_seconds",
+			Help:      "Time spent appending a block to the ledger.",
+			Buckets:   histoBuckets,
+		}),
+		blockHeight: p.NewGauge(prometheus.GaugeOpts{
+			Namespace: "sidecar",
+			Subsystem: "ledger",
+			Name:      "block_height",
+			Help:      "The current block height of the ledger.",
 		}),
 	}
 }

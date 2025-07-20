@@ -9,7 +9,7 @@ package query
 import (
 	"context"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils"
 )
 
 // The following implementation is lock-free. It guarantees that for multiple parallel calls,

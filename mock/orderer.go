@@ -18,20 +18,23 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	ab "github.com/hyperledger/fabric-protos-go-apiv2/orderer"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/protoutil"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/internaltools/configtxgen"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 )
 
 type (
 	// OrdererConfig configuration for the mock orderer.
 	OrdererConfig struct {
+		// Server and ServerConfigs sets the used serving endpoints.
+		// We support both for compatibility with other services.
+		Server           *connection.ServerConfig   `mapstructure:"server"`
 		ServerConfigs    []*connection.ServerConfig `mapstructure:"servers"`
 		NumService       int                        `mapstructure:"num-services"`
 		BlockSize        int                        `mapstructure:"block-size"`

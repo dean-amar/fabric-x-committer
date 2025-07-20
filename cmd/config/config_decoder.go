@@ -13,7 +13,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/viper"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 type decoderFunc = func(dataType, targetType reflect.Type, rawData any) (any, bool, error)

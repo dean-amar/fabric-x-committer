@@ -12,10 +12,10 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"go.uber.org/zap/zapcore"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/serialization"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 )
 
 type (
@@ -128,7 +128,7 @@ func configTx(id string, value []byte) *protoblocktx.Tx {
 		Id: id,
 		Namespaces: []*protoblocktx.TxNamespace{{
 			NsId:      types.ConfigNamespaceID,
-			NsVersion: types.VersionNumber(0).Bytes(),
+			NsVersion: 0,
 			BlindWrites: []*protoblocktx.Write{{
 				Key:   []byte(types.ConfigKey),
 				Value: value,

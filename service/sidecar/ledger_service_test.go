@@ -17,10 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar/sidecarclient"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 func TestLedgerService(t *testing.T) {
@@ -28,7 +28,8 @@ func TestLedgerService(t *testing.T) {
 	ledgerPath := t.TempDir()
 	channelID := "ch1"
 
-	ls, err := newLedgerService(channelID, ledgerPath)
+	metrics := newPerformanceMetrics()
+	ls, err := newLedgerService(channelID, ledgerPath, metrics)
 	require.NoError(t, err)
 	t.Cleanup(ls.close)
 
@@ -59,6 +60,8 @@ func TestLedgerService(t *testing.T) {
 	require.Zero(t, ls.GetBlockHeight())
 	inputBlock <- blk0
 	ensureAtLeastHeight(t, ls, 1)
+	require.Equal(t, 1, test.GetIntMetricValue(t, metrics.blockHeight))
+	require.Greater(t, test.GetMetricValue(t, metrics.appendBlockToLedgerSeconds), float64(0))
 
 	receivedBlocksFromLedgerService := sidecarclient.StartSidecarClient(t.Context(), t, &sidecarclient.Config{
 		ChannelID:    channelID,
@@ -73,6 +76,7 @@ func TestLedgerService(t *testing.T) {
 	inputBlock <- blk2
 
 	ensureAtLeastHeight(t, ls, 3)
+	require.Equal(t, 3, test.GetIntMetricValue(t, metrics.blockHeight))
 	for i := range 3 {
 		blk := <-receivedBlocksFromLedgerService
 		require.Equal(t, uint64(i), blk.Header.Number) //nolint:gosec
@@ -81,6 +85,7 @@ func TestLedgerService(t *testing.T) {
 	// if we input the already stored block, it would simply skip.
 	inputBlock <- blk2
 	ensureAtLeastHeight(t, ls, 3)
+	require.Equal(t, 3, test.GetIntMetricValue(t, metrics.blockHeight))
 }
 
 // ensureAtLeastHeight checks if the ledger is at or above the specified height.

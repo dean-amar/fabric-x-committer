@@ -23,7 +23,7 @@ import (
 	"google.golang.org/grpc/resolver/manual"
 	"google.golang.org/grpc/status"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
 )
 
 const (

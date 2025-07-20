@@ -9,11 +9,12 @@ package runner
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 // DBClusterController is a class that facilitates the manipulation of a DB cluster,
@@ -29,6 +30,13 @@ const (
 
 	linuxOS = "linux"
 )
+
+var nodeStartupRetry = &connection.RetryProfile{
+	// MaxElapsedTime is the duration allocated for the retry mechanism during the database initialization process.
+	MaxElapsedTime: 5 * time.Minute,
+	// InitialInterval is the starting wait time interval that increases every retry attempt.
+	InitialInterval: 1 * time.Second,
+}
 
 // StopAndRemoveNodeWithRole stops and removes a node given a role.
 func (cc *DBClusterController) StopAndRemoveNodeWithRole(t *testing.T, role string) {

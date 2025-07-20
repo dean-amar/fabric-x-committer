@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/tlsgen"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection/tlsgen"
 )
 
 type (
@@ -46,7 +46,6 @@ func RunSecureConnectionTest(
 	secureConnArguments SecureConnectionFunctionArguments,
 ) {
 	t.Helper()
-
 	tlsMgr := tlsgen.NewSecureCommunicationManager(t)
 	serverCreds := tlsMgr.CreateServerCertificate(t, secureConnArguments.ServerCN)
 	serverTLS := CreateTLSConfigFromPaths(connection.TLSMutual, serverCreds, "")
@@ -122,12 +121,10 @@ func CreateTLSConfigFromPaths(
 	serverName string,
 ) connection.ConfigTLS {
 	return connection.ConfigTLS{
-		Mode:       connectionMode,
-		ServerName: serverName,
-		KeyPath:    paths[tlsgen.KeyPrivate],
-		CertPath:   paths[tlsgen.KeyPublic],
-		CACertPaths: []string{
-			paths[tlsgen.KeyCACert],
-		},
+		Mode:        connectionMode,
+		ServerName:  serverName,
+		KeyPath:     paths["private-key"],
+		CertPath:    paths["public-key"],
+		CACertPaths: []string{paths["ca-certificate"]},
 	}
 }

@@ -14,9 +14,8 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 )
 
 var failureScenarios = [][]string{
@@ -33,8 +32,8 @@ var failureScenarios = [][]string{
 	{"sidecar", "vcservices", "verifiers", "coordinator"},
 }
 
-//nolint:paralleltest // Reduce tests load.
 func TestCrashWhenIdle(t *testing.T) {
+	t.Parallel()
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
 		NumVerifiers: 2,
@@ -109,19 +108,18 @@ func TestCrashWhenIdle(t *testing.T) {
 
 func addSignAndSendTransactions(t *testing.T, c *runner.CommitterRuntime, txs []*protoblocktx.Tx) {
 	t.Helper()
-	v0 := types.VersionNumber(0).Bytes()
 	for _, tx := range txs {
 		for _, ns := range tx.Namespaces {
 			ns.NsId = "1"
-			ns.NsVersion = v0
+			ns.NsVersion = 0
 		}
 		c.AddSignatures(t, tx)
 	}
 	c.SendTransactionsToOrderer(t, txs)
 }
 
-//nolint:paralleltest // Reduce tests load.
 func TestCrashWhenNonIdle(t *testing.T) {
+	t.Parallel()
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
 		NumVerifiers:      2,

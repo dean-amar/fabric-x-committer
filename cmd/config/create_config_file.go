@@ -20,12 +20,12 @@ import (
 	sprig "github.com/go-task/slim-sprig/v3"
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/stretchr/testify/require"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/internaltools/configtxgen"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
 )
 
 type (
@@ -51,6 +51,7 @@ type (
 		Policy            *workload.PolicyProfile // loadgen
 		LoadGenBlockLimit uint64                  // loadgen
 		LoadGenTXLimit    uint64                  // loadgen
+		LoadGenWorkers    uint64                  // loadgen
 		Logging           *logging.Config         // for all
 	}
 
@@ -108,14 +109,18 @@ var (
 	//go:embed templates/signatureverifier.yaml
 	TemplateVerifier string
 
-	TemplateLoadGenOrderer     = templateLoadGenOrdererClient + templateLoadGenCommon
-	TemplateLoadGenCommitter   = templateLoadGenCommitterClient + templateLoadGenCommon
-	TemplateLoadGenCoordinator = templateLoadGenCoordinatorClient + templateLoadGenCommon
-	TemplateLoadGenVC          = templateLoadGenVCClient + templateLoadGenCommon
-	TemplateLoadGenVerifier    = templateLoadGenVerifierClient + templateLoadGenCommon
+	TemplateLoadGenOnlyOrderer              = templateLoadGenOnlyOrdererClient + templateLoadGenCommon
+	TemplateLoadGenOrderer                  = templateLoadGenOrdererClient + templateLoadGenCommon
+	TemplateLoadGenCommitter                = templateLoadGenCommitterClient + templateLoadGenCommon
+	TemplateLoadGenCoordinator              = templateLoadGenCoordinatorClient + templateLoadGenCommon
+	TemplateLoadGenVC                       = templateLoadGenVCClient + templateLoadGenCommon
+	TemplateLoadGenVerifier                 = templateLoadGenVerifierClient + templateLoadGenCommon
+	TemplateLoadGenDistributedLoadGenClient = templateLoadGenDistributedLoadGenClient + templateLoadGenCommon
 
 	//go:embed templates/loadgen_common.yaml
 	templateLoadGenCommon string
+	//go:embed templates/loadgen_client_only_orderer.yaml
+	templateLoadGenOnlyOrdererClient string
 	//go:embed templates/loadgen_client_orderer.yaml
 	templateLoadGenOrdererClient string
 	//go:embed templates/loadgen_client_sidecar.yaml
@@ -126,6 +131,8 @@ var (
 	templateLoadGenVCClient string
 	//go:embed templates/loadgen_client_verifier.yaml
 	templateLoadGenVerifierClient string
+	//go:embed templates/loadgen_client_distributed_loadgen.yaml
+	templateLoadGenDistributedLoadGenClient string
 )
 
 // CreateConfigFromTemplate creates a config file using template yaml and writes it to the outputPath.

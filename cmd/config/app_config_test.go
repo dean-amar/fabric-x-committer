@@ -15,19 +15,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/query"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/loadgen"
+	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
+	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/coordinator"
+	"github.com/hyperledger/fabric-x-committer/service/query"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 func TestReadConfigSidecar(t *testing.T) {
@@ -54,6 +54,8 @@ func TestReadConfigSidecar(t *testing.T) {
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
 			},
+			LastCommittedBlockSetInterval: 3 * time.Second,
+			WaitingTxsLimit:               100_000,
 		},
 	}, {
 		name:           "sample",
@@ -87,6 +89,8 @@ func TestReadConfigSidecar(t *testing.T) {
 			Ledger: sidecar.LedgerConfig{
 				Path: "/root/sc/ledger",
 			},
+			LastCommittedBlockSetInterval: 5 * time.Second,
+			WaitingTxsLimit:               20_000_000,
 		},
 	}}
 	for _, test := range tests {
@@ -115,7 +119,7 @@ func TestReadConfigCoordinator(t *testing.T) {
 			Monitoring: makeMonitoring("localhost", 2119),
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 10000,
+				WaitingTxsLimit:                 100_000,
 				NumOfWorkersForGlobalDepManager: 1,
 			},
 			ChannelBufferSizePerGoroutine: 10,
@@ -130,7 +134,7 @@ func TestReadConfigCoordinator(t *testing.T) {
 			ValidatorCommitterConfig: *makeClientConfig("validator-persister", 6001),
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 10000,
+				WaitingTxsLimit:                 10_000,
 				NumOfWorkersForGlobalDepManager: 1,
 			},
 			ChannelBufferSizePerGoroutine: 10,
@@ -301,20 +305,21 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &loadgen.ClientConfig{
+			Server: makeServer("localhost", 8001),
 			Monitoring: metrics.Config{
-				Config: makeMonitoring("localhost", 2110),
+				Config: makeMonitoring("localhost", 2118),
 			},
 		},
 	}, {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
 		expectedConfig: &loadgen.ClientConfig{
+			Server: makeServer("", 8001),
 			Monitoring: metrics.Config{
-				Config: makeMonitoring("", 2110),
+				Config: makeMonitoring("", 2118),
 				Latency: metrics.LatencyConfig{
 					SamplerConfig: metrics.SamplerConfig{
-						Type:             "timer",
-						SamplingInterval: 10 * time.Second,
+						Portion: 0.01,
 					},
 					BucketConfig: metrics.BucketConfig{
 						Distribution: "uniform",
@@ -332,7 +337,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 								0, "", makeServer("ordering-service", 7050),
 							),
 						},
-						ChannelID:     "channel",
+						ChannelID:     "mychannel",
 						ConsensusType: "BFT",
 					},
 					BroadcastParallelism: 1,
@@ -352,6 +357,12 @@ func TestReadConfigLoadGen(t *testing.T) {
 								Scheme: "ECDSA", Seed: 11,
 							},
 						},
+						OrdererEndpoints: []*connection.OrdererEndpoint{{
+							ID:       0,
+							MspID:    "org",
+							API:      []string{"broadcast", "deliver"},
+							Endpoint: *makeEndpoint("ordering-service", 7050),
+						}},
 					},
 				},
 				Conflicts: workload.ConflictProfile{
@@ -363,7 +374,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			Stream: &workload.StreamOptions{
 				RateLimit: &workload.LimiterConfig{
 					Endpoint:     *makeEndpoint("", 6997),
-					InitialLimit: 1000,
+					InitialLimit: 10_000,
 				},
 				BuffersSize: 10,
 				GenBatch:    10,
@@ -373,7 +384,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				Load:       true,
 			},
 			Limit: &adapters.GenerateLimit{
-				Transactions: 5_000,
+				Transactions: 50_000,
 			},
 		},
 	}}

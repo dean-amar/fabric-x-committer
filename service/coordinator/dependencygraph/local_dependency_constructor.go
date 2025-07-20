@@ -13,10 +13,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 var logger = logging.New("dependencygraph")
@@ -116,7 +116,10 @@ func (p *localDependencyConstructor) construct(ctx context.Context) {
 			// by this transaction can be considered to detect dependencies
 			// of the next transaction.
 			dependsOnTxs := depDetector.getDependenciesOf(txNode)
-			txNode.addDependenciesAndUpdateDependents(dependsOnTxs)
+			if len(dependsOnTxs) > 0 {
+				promutil.AddToGauge(p.metrics.dependentTransactionsQueueSize, 1)
+				txNode.addDependenciesAndUpdateDependents(dependsOnTxs)
+			}
 			depDetector.addWaitingTx(txNode)
 			txsNode[i] = txNode
 		}

@@ -9,7 +9,7 @@ package dependencygraph
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 var bucket = []float64{.0001, .001, .002, .003, .004, .005, .01, .03, .05, .1, .3, .5, 1}
@@ -41,6 +41,8 @@ type perfMetrics struct {
 
 	// performance of outputFreedExistingTransactions()
 	gdgOutputFreedTxSeconds prometheus.Histogram
+
+	dependentTransactionsQueueSize prometheus.Gauge
 }
 
 func newPerformanceMetrics(p *monitoring.Provider) *perfMetrics {
@@ -151,6 +153,12 @@ func newPerformanceMetrics(p *monitoring.Provider) *perfMetrics {
 			Name:      "output_freed_tx_batch_seconds",
 			Help:      "Time spent outputting a freed transaction batch in the global dependency graph manager",
 			Buckets:   bucket,
+		}),
+		dependentTransactionsQueueSize: p.NewGauge(prometheus.GaugeOpts{
+			Namespace: "coordinator",
+			Subsystem: "dependency_graph",
+			Name:      "dependent_transactions_queue_size",
+			Help:      "The number of transactions currently waiting on dependencies.",
 		}),
 	}
 }

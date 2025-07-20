@@ -19,19 +19,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protosigverifierservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/adapters"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/metrics"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/loadgen/workload"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/mock"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/coordinator"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/sidecar"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/verifier"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
+	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
+	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
+	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/coordinator"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 // We expect at least 3 blocks for a valid test run.
@@ -42,6 +43,36 @@ const defaultExpectedTXs = defaultBlockSize * 3
 // So we test both requirements together and enforce that the result is greater.
 var defaultLimits = []*adapters.GenerateLimit{
 	nil, {}, {Blocks: 5, Transactions: 5 * defaultBlockSize},
+}
+
+func TestLoadGenForLoadGen(t *testing.T) {
+	t.Parallel()
+
+	for _, limit := range defaultLimits {
+		clientConf := DefaultClientConf()
+		clientConf.Limit = limit
+		// Ensure the client doesn't generate load, but only receives it from the sub client.
+		clientConf.LoadProfile.Workers = 0
+		t.Run(limitToString(limit), func(t *testing.T) {
+			t.Parallel()
+			clientConf.Adapter.VerifierClient = startVerifiers(t)
+			_, err := clientConf.Server.PreAllocateListener()
+			require.NoError(t, err)
+
+			subClientConf := DefaultClientConf()
+			subClientConf.Adapter.LoadGenClient = &adapters.LoadGenClientConfig{
+				Endpoint: &clientConf.Server.Endpoint,
+			}
+			subClient, err := NewLoadGenClient(subClientConf)
+			require.NoError(t, err)
+
+			t.Log("Start distributed loadgen")
+			test.RunServiceAndGrpcForTest(t.Context(), t, subClient, subClientConf.Server, func(s *grpc.Server) {
+				protoloadgen.RegisterLoadGenServiceServer(s, subClient)
+			})
+			testLoadGenerator(t, clientConf)
+		})
+	}
 }
 
 func TestLoadGenForVCService(t *testing.T) {
@@ -67,31 +98,35 @@ func TestLoadGenForSigVerifier(t *testing.T) {
 		clientConf.Limit = limit
 		t.Run(limitToString(limit), func(t *testing.T) {
 			t.Parallel()
-			endpoints := make([]*connection.Endpoint, 2)
-			for i := range endpoints {
-				sConf := &verifier.Config{
-					Server: connection.NewLocalHostServer(),
-					ParallelExecutor: verifier.ExecutorConfig{
-						BatchSizeCutoff:   50,
-						BatchTimeCutoff:   10 * time.Millisecond,
-						ChannelBufferSize: 50,
-						Parallelism:       40,
-					},
-				}
-
-				service := verifier.New(sConf)
-				test.RunGrpcServerForTest(t.Context(), t, sConf.Server, func(server *grpc.Server) {
-					protosigverifierservice.RegisterVerifierServer(server, service)
-				})
-				endpoints[i] = &sConf.Server.Endpoint
-			}
-
+			clientConf.Adapter.VerifierClient = startVerifiers(t)
 			// Start client
-			clientConf.Adapter.VerifierClient = &adapters.VerifierClientConfig{
-				Endpoints: endpoints,
-			}
 			testLoadGenerator(t, clientConf)
 		})
+	}
+}
+
+func startVerifiers(t *testing.T) *adapters.VerifierClientConfig {
+	t.Helper()
+	endpoints := make([]*connection.Endpoint, 2)
+	for i := range endpoints {
+		sConf := &verifier.Config{
+			Server: connection.NewLocalHostServer(),
+			ParallelExecutor: verifier.ExecutorConfig{
+				BatchSizeCutoff:   50,
+				BatchTimeCutoff:   10 * time.Millisecond,
+				ChannelBufferSize: 50,
+				Parallelism:       40,
+			},
+		}
+
+		service := verifier.New(sConf)
+		test.RunGrpcServerForTest(t.Context(), t, sConf.Server, func(server *grpc.Server) {
+			protosigverifierservice.RegisterVerifierServer(server, service)
+		})
+		endpoints[i] = &sConf.Server.Endpoint
+	}
+	return &adapters.VerifierClientConfig{
+		Endpoints: endpoints,
 	}
 }
 
@@ -172,6 +207,8 @@ func TestLoadGenForSidecar(t *testing.T) {
 					ChannelID:     chanID,
 					ConsensusType: broadcastdeliver.Bft,
 				},
+				LastCommittedBlockSetInterval: 100 * time.Millisecond,
+				WaitingTxsLimit:               5000,
 				Committer: sidecar.CoordinatorConfig{
 					Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
 				},
@@ -221,6 +258,8 @@ func TestLoadGenForOrderer(t *testing.T) {
 					ChannelID:     "mychannel",
 					ConsensusType: broadcastdeliver.Bft,
 				},
+				LastCommittedBlockSetInterval: 100 * time.Millisecond,
+				WaitingTxsLimit:               5000,
 				Committer: sidecar.CoordinatorConfig{
 					Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
 				},
@@ -256,6 +295,48 @@ func TestLoadGenForOrderer(t *testing.T) {
 	}
 }
 
+func TestLoadGenForOnlyOrderer(t *testing.T) {
+	t.Parallel()
+	for _, limit := range defaultLimits {
+		clientConf := DefaultClientConf()
+		clientConf.Limit = limit
+		t.Run(limitToString(limit), func(t *testing.T) {
+			t.Parallel()
+			// Start dependencies
+			orderer, ordererServer := mock.StartMockOrderingServices(
+				t, &mock.OrdererConfig{
+					NumService: 3,
+					BlockSize:  int(clientConf.LoadProfile.Block.Size), //nolint:gosec // uint64 -> int.
+				},
+			)
+
+			endpoints := connection.NewOrdererEndpoints(0, "msp", ordererServer.Configs...)
+
+			// Submit default config block.
+			// This is ignored when sidecar isn't used.
+			// We validate the test doesn't break when config block is delivered.
+			require.NotNil(t, clientConf.LoadProfile)
+			clientConf.LoadProfile.Transaction.Policy.OrdererEndpoints = endpoints
+			configBlock, err := workload.CreateConfigBlock(clientConf.LoadProfile.Transaction.Policy)
+			require.NoError(t, err)
+			orderer.SubmitBlock(t.Context(), configBlock)
+
+			// Start client
+			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
+				Orderer: broadcastdeliver.Config{
+					Connection: broadcastdeliver.ConnectionConfig{
+						Endpoints: endpoints,
+					},
+					ChannelID:     "mychannel",
+					ConsensusType: broadcastdeliver.Bft,
+				},
+				BroadcastParallelism: 5,
+			}
+			testLoadGenerator(t, clientConf)
+		})
+	}
+}
+
 func preAllocatePorts(t *testing.T) *connection.ServerConfig {
 	t.Helper()
 	server := connection.NewLocalHostServer()
@@ -272,9 +353,9 @@ func testLoadGenerator(t *testing.T, c *ClientConfig) {
 	client, err := NewLoadGenClient(c)
 	require.NoError(t, err)
 
-	ready := test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(client.Run(ctx))
-	}, nil)
+	ready := test.RunServiceAndGrpcForTest(t.Context(), t, client, client.conf.Server, func(s *grpc.Server) {
+		protoloadgen.RegisterLoadGenServiceServer(s, client)
+	})
 	eventuallyMetrics(t, client.resources.Metrics, func(m metrics.MetricState) bool {
 		return m.TransactionsSent > 0 &&
 			m.TransactionsReceived > 0 &&

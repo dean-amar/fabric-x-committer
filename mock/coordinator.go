@@ -11,15 +11,16 @@ import (
 	"math/rand"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protocoordinatorservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
 // Coordinator is a mock coordinator.
@@ -32,6 +33,7 @@ type Coordinator struct {
 	txsStatus               *fifoCache[*protoblocktx.StatusWithHeight]
 	txsStatusMu             sync.Mutex
 	configTransaction       atomic.Pointer[protoblocktx.ConfigTransaction]
+	latency                 atomic.Pointer[time.Duration]
 }
 
 // We don't want to utilize unlimited memory for storing the transactions status.
@@ -170,6 +172,17 @@ func (c *Coordinator) sendTxsValidationStatus(
 		if !ok {
 			break
 		}
+
+		latency := c.latency.Load()
+		if latency != nil {
+			tc := time.NewTicker(*latency)
+			select {
+			case <-ctx.Done():
+				return errors.Wrap(ctx.Err(), "context cancelled")
+			case <-tc.C:
+			}
+		}
+
 		txs := scBlock.Txs
 		txNums := scBlock.TxsNum
 		for len(txs) > 0 {
@@ -211,4 +224,9 @@ func (c *Coordinator) sendTxsStatusChunk(
 // of this method is to set the count manually for testing purpose.
 func (c *Coordinator) SetWaitingTxsCount(count int32) {
 	c.numWaitingTxs.Store(count)
+}
+
+// SetDelay sets the duration to wait before sending statuses.
+func (c *Coordinator) SetDelay(d time.Duration) {
+	c.latency.Store(&d)
 }

@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 // Config is the configuration for the validator-committer service.

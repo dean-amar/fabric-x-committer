@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/utils"
 )
 
 type (
@@ -51,6 +51,10 @@ type (
 		dependentTxs utils.SyncMap[*TransactionNode, any]
 		rwKeys       *readWriteKeys
 		Signatures   [][]byte
+
+		// Used by the simple dependency graph.
+		waitForKeysCount uint64
+		waitingKeys      []*waiting
 	}
 
 	// TxNodeBatch is a batch of transaction nodes.
@@ -190,6 +194,10 @@ func readAndWriteKeys(txNamespaces []*protoblocktx.TxNamespace) *readWriteKeys {
 		writesOnly:     writeOnlyKeys,
 		readsAndWrites: readAndWriteKeys,
 	}
+}
+
+func (rw *readWriteKeys) size() int {
+	return len(rw.readsOnly) + len(rw.readsAndWrites) + len(rw.writesOnly)
 }
 
 func constructCompositeKey(ns string, key []byte) string {

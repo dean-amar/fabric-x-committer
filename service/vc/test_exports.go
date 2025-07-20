@@ -17,13 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/service/vc/dbtest"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 const (
@@ -42,7 +42,7 @@ type (
 	// ValueVersion contains a list of values and their matching versions.
 	ValueVersion struct {
 		Value   []byte
-		Version []byte
+		Version uint64
 	}
 )
 
@@ -274,7 +274,7 @@ func (env *DatabaseTestEnv) populateData( //nolint:revive
 	newNsIDsWrites := namespaceToWrites{}
 	for _, nsID := range createNsIDs {
 		nsWrites := newNsIDsWrites.getOrCreate(types.MetaNamespaceID)
-		nsWrites.append([]byte(nsID), nil, types.VersionNumber(0).Bytes())
+		nsWrites.append([]byte(nsID), nil, 0)
 	}
 
 	require.NoError(t, env.DB.retry.Execute(t.Context(), func() error {
@@ -288,11 +288,23 @@ func (env *DatabaseTestEnv) populateData( //nolint:revive
 	}))
 
 	for nsID, writes := range nsToWrites {
-		require.NoError(t, env.DB.retry.ExecuteSQL(t.Context(), env.DB.pool, fmt.Sprintf(`
-			INSERT INTO %s (key, value, version)
-			SELECT _key, _value, _version
-			FROM UNNEST($1::bytea[], $2::bytea[], $3::bytea[]) AS t(_key, _value, _version);`,
-			TableName(nsID)),
+		if writes.empty() {
+			continue
+		}
+
+		require.NotNil(t, writes.keys)
+		require.NotNil(t, writes.values)
+		require.NotNil(t, writes.versions)
+		require.Len(t, writes.values, len(writes.keys))
+		require.Len(t, writes.versions, len(writes.keys))
+
+		insertQuery := `
+INSERT INTO ns_${NAMESPACE_ID} (key, value, version)
+SELECT _key, _value, _version
+FROM UNNEST($1::bytea[], $2::bytea[], $3::bigint[]) AS t(_key, _value, _version);
+`
+		query := FmtNsID(insertQuery, nsID)
+		require.NoError(t, env.DB.retry.ExecuteSQL(t.Context(), env.DB.pool, query,
 			writes.keys, writes.values, writes.versions,
 		))
 	}
@@ -333,15 +345,15 @@ func (env *DatabaseTestEnv) tableExists(t *testing.T, nsID string) {
 	require.True(t, names.Next())
 }
 
-func (env *DatabaseTestEnv) rowExists(t *testing.T, nsID string, expectedRows namespaceWrites) {
+func (env *DatabaseTestEnv) rowExists(t *testing.T, nsID string, exp namespaceWrites) {
 	t.Helper()
-	actualRows := env.FetchKeys(t, nsID, expectedRows.keys)
+	actualRows := env.FetchKeys(t, nsID, exp.keys)
 
-	assert.Len(t, actualRows, len(expectedRows.keys))
-	for i, key := range expectedRows.keys {
+	assert.Len(t, actualRows, len(exp.keys))
+	for i, key := range exp.keys {
 		if assert.NotNil(t, actualRows[string(key)], "key: %s", string(key)) {
-			assert.Equal(t, expectedRows.values[i], actualRows[string(key)].Value, "key: %s", string(key))
-			assert.Equal(t, expectedRows.versions[i], actualRows[string(key)].Version, "key: %s", string(key))
+			assert.Equal(t, exp.values[i], actualRows[string(key)].Value, "key: %s", string(key))
+			assert.EqualExportedValuesf(t, exp.versions[i], actualRows[string(key)].Version, "key: %s", string(key))
 		}
 	}
 }
@@ -352,7 +364,7 @@ func (env *DatabaseTestEnv) rowNotExists(t *testing.T, nsID string, keys [][]byt
 	assert.Empty(t, actualRows)
 	for key, valVer := range actualRows {
 		assert.Failf(t, "Key should not exist", "key [%s] value: [%s] version [%d]",
-			key, string(valVer.Value), types.VersionNumberFromBytes(valVer.Version))
+			key, string(valVer.Value), valVer.Version)
 	}
 }
 

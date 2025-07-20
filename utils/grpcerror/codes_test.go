@@ -17,9 +17,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 func TestHasCode(t *testing.T) {
@@ -94,7 +94,7 @@ func TestHasCodeWithGRPCService(t *testing.T) {
 	test.CheckServerStopped(t, vcGrpc.Configs[0].Endpoint.Address())
 
 	_, err = client.GetLastCommittedBlockNumber(ctx, nil)
-	require.Truef(t, HasCode(err, codes.DeadlineExceeded), "code: %s", GetCode(err))
+	require.Truef(t, HasCode(err, codes.Unavailable), "code: %s", GetCode(err))
 	require.NoError(t, FilterUnavailableErrorCode(err))
 }
 

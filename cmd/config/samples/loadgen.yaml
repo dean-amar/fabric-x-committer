@@ -2,13 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
+server:
+  endpoint: :8001
 monitoring:
   server:
-    endpoint: :2110
+    endpoint: :2118
   latency:
     sampler:
-      type: timer
-      sampling-interval: 10s
+      portion: 0.01
     buckets:
       distribution: uniform
       max-latency: 5s
@@ -23,7 +24,7 @@ orderer-client:
       endpoints:
         - broadcast,deliver,ordering-service:7050
     consensus-type: BFT
-    channel-id: channel
+    channel-id: mychannel
   # We set low values to reduce the CPU load during tests.
   broadcast-parallelism: 1
 
@@ -43,6 +44,8 @@ load-profile:
         _meta:
           scheme: ECDSA
           seed: 11
+      orderer-endpoints:
+        - id=0,msp-id=org,broadcast,deliver,ordering-service:7050
   conflicts:
     invalid-signatures: 0.1
   seed: 12345
@@ -52,7 +55,7 @@ load-profile:
 stream:
   rate-limit:
     endpoint: :6997
-    initial-limit: 1_000
+    initial-limit: 10_000
   # We set low values to reduce the CPU load during tests.
   buffers-size: 10
   gen-batch: 10
@@ -70,7 +73,7 @@ generate:
 # The sidecar and coordinator adapters are sequential, so they don't have these issues.
 limit:
   blocks: 0
-  transactions: 5_000
+  transactions: 50_000
 
 logging:
   enabled: true

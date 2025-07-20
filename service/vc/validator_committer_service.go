@@ -14,13 +14,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protovcservice"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/channel"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/grpcerror"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/logging"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/hyperledger/fabric-x-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
 var logger = logging.New("validator and committer service")
@@ -305,6 +305,7 @@ func (vc *ValidatorCommitterService) batchReceivedTransactionsAndForwardForProce
 	toPrepareTxs := channel.NewWriter(ctx, vc.toPrepareTxs)
 
 	sendLargeBatch := func() {
+		defer timer.Reset(vc.timeoutForMinTxBatchSize)
 		if len(largerBatch.Transactions) == 0 {
 			return
 		}
@@ -312,7 +313,6 @@ func (vc *ValidatorCommitterService) batchReceivedTransactionsAndForwardForProce
 			return
 		}
 		largerBatch = &protovcservice.TransactionBatch{}
-		timer.Reset(vc.timeoutForMinTxBatchSize)
 	}
 
 	for {

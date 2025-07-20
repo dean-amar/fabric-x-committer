@@ -3,12 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 FROM registry.access.redhat.com/ubi9/ubi-micro:9.4 AS prod
-ARG SERVICE_NAME
+ARG BIN
+ARG ARCHBIN_PATH
 ARG PORTS
 ARG TARGETOS
 ARG TARGETARCH
 
-WORKDIR /
-COPY ./archbin/${TARGETOS}-${TARGETARCH}/${SERVICE_NAME} /app
+COPY ${ARCHBIN_PATH}/${TARGETOS}-${TARGETARCH}/${BIN} /bin/${BIN}
 EXPOSE ${PORTS}
-CMD ["./app"]

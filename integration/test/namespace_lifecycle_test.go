@@ -14,14 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/protoblocktx"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/api/types"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/integration/runner"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
 )
 
-//nolint:paralleltest // Reduce tests load.
 func TestCreateUpdateNamespace(t *testing.T) {
+	t.Parallel()
 	gomega.RegisterTestingT(t)
 	c := runner.NewRuntime(t, &runner.Config{
 		NumVerifiers: 2,
@@ -53,7 +53,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      types.MetaNamespaceID,
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key:   []byte("1"),
@@ -77,7 +77,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("key1"),
@@ -101,7 +101,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("key2"),
@@ -116,11 +116,11 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      types.MetaNamespaceID,
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key:     []byte("1"),
-									Version: types.VersionNumber(0).Bytes(),
+									Version: types.Version(0),
 									Value:   policyBytesNs2,
 								},
 							},
@@ -132,7 +132,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: types.VersionNumber(1).Bytes(),
+							NsVersion: 1,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("key3"),
@@ -147,11 +147,11 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      types.MetaNamespaceID,
-							NsVersion: types.VersionNumber(0).Bytes(),
+							NsVersion: 0,
 							ReadWrites: []*protoblocktx.ReadWrite{
 								{
 									Key:     []byte("1"),
-									Version: types.VersionNumber(1).Bytes(),
+									Version: types.Version(1),
 									Value:   policyBytes,
 								},
 							},
@@ -163,7 +163,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: types.VersionNumber(1).Bytes(),
+							NsVersion: 1,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("key3"),
@@ -199,7 +199,7 @@ func TestCreateUpdateNamespace(t *testing.T) {
 					Namespaces: []*protoblocktx.TxNamespace{
 						{
 							NsId:      "1",
-							NsVersion: types.VersionNumber(2).Bytes(),
+							NsVersion: 2,
 							BlindWrites: []*protoblocktx.Write{
 								{
 									Key:   []byte("key4"),

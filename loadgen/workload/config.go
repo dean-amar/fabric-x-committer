@@ -9,11 +9,12 @@ package workload
 import (
 	"fmt"
 
+	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/signature"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
 )
 
 // Profile describes the generated workload characteristics.
@@ -138,6 +139,13 @@ type StreamOptions struct {
 	GenBatch uint32 `mapstructure:"gen-batch" yaml:"gen-batch"`
 	// BuffersSize impact the rate by masking fluctuation in performance.
 	BuffersSize int `mapstructure:"buffers-size" yaml:"buffers-size"`
+}
+
+// LimiterConfig is used to create a limiter.
+type LimiterConfig struct {
+	InitialLimit rate.Limit `mapstructure:"initial-limit"`
+	// Endpoint for a simple http server to set the limiter.
+	Endpoint connection.Endpoint `mapstructure:"endpoint"`
 }
 
 // Debug outputs the profile to stdout.

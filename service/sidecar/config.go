@@ -12,13 +12,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/common/channelconfig"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/internaltools/configtxgen"
-	"github.ibm.com/decentralized-trust-research/fabricx-config/protoutil"
+	"github.com/hyperledger/fabric-x-common/common/channelconfig"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/broadcastdeliver"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/connection"
-	"github.ibm.com/decentralized-trust-research/scalable-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 type (
@@ -32,6 +32,7 @@ type (
 		Ledger                        LedgerConfig             `mapstructure:"ledger"`
 		Orderer                       broadcastdeliver.Config  `mapstructure:"orderer"`
 		LastCommittedBlockSetInterval time.Duration            `mapstructure:"last-committed-block-set-interval"`
+		WaitingTxsLimit               int                      `mapstructure:"waiting-txs-limit"`
 		Monitoring                    monitoring.Config        `mapstructure:"monitoring"`
 		Bootstrap                     Bootstrap                `mapstructure:"bootstrap"`
 	}

@@ -48,7 +48,6 @@ validator-committer:
       - {{ . }}
       {{- end }}
 
-
 dependency-graph:
   num-of-local-dep-constructors: 1
   waiting-txs-limit: 10_000
