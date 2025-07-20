@@ -64,7 +64,7 @@ func TestOneSidedTLSConnection(t *testing.T) {
 
 func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
 	t.Parallel()
-	//, dbtest.PostgresDBType
+	// , dbtest.PostgresDBType
 	for _, dbType := range []string{dbtest.YugaDBType} {
 		databaseType := dbType
 		t.Run(fmt.Sprintf("%s_tls", databaseType), func(t *testing.T) {
