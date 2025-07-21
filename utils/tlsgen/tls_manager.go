@@ -167,7 +167,7 @@ func writeCertificateFiles(
 	//nolint:gofumpt //Note: gofumpt reports this line as improperly formatted, but no actual formatting issue exists.
 	if sub := namingFunction(keySubDirectory); sub != "" {
 		dir = filepath.Join(dir, sub)
-		require.NoError(t, os.MkdirAll(dir, 0750))
+		require.NoError(t, os.MkdirAll(dir, 0700))
 	}
 
 	paths := make(map[string]string)
