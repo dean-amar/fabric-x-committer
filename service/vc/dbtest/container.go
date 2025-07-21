@@ -607,6 +607,60 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
 }
 
+//func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
+//	t.Helper()
+//
+//	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
+//	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
+//
+//	t.Log("cert---: ", certFile)
+//
+//	// Fix ownership
+//	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+//		Container: dc.containerID,
+//		Cmd: []string{
+//			"chown",
+//			"yugabyte:yugabyte",
+//			certFile,
+//			keyFile,
+//		},
+//		User: "root",
+//	})
+//	if err != nil {
+//		return err
+//	}
+//
+//	if err = dc.client.StartExec(exec.ID, docker.StartExecOptions{}); err != nil {
+//		return err
+//	}
+//
+//	// Fix certificate permissions (readable by owner and group)
+//	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+//		Container: dc.containerID,
+//		Cmd:       []string{"chmod", "644", certFile},
+//		User:      "root",
+//	})
+//	if err != nil {
+//		return err
+//	}
+//
+//	if err = dc.client.StartExec(exec.ID, docker.StartExecOptions{}); err != nil {
+//		return err
+//	}
+//
+//	// Fix key permissions (readable only by owner)
+//	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+//		Container: dc.containerID,
+//		Cmd:       []string{"chmod", "400", keyFile},
+//		User:      "root",
+//	})
+//	if err != nil {
+//		return err
+//	}
+//
+//	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+//}
+
 func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	t.Helper()
 
@@ -614,51 +668,60 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
 
 	t.Log("cert---: ", certFile)
+	// Fix ownership (including /creds itself)
+	if err := runExecAndCheck(dc, []string{
+		"chown", "-R", "root:root", "/creds",
+	}); err != nil {
+		return fmt.Errorf("chown failed: %w", err)
+	}
 
-	// Fix ownership
+	// Set permissions: cert readable by owner/group/others (safe for public cert)
+	if err := runExecAndCheck(dc, []string{
+		"chmod", "644", certFile,
+	}); err != nil {
+		return fmt.Errorf("chmod 644 cert failed: %w", err)
+	}
+
+	// Set permissions: key readable only by owner (private key)
+	if err := runExecAndCheck(dc, []string{
+		"chmod", "400", keyFile,
+	}); err != nil {
+		return fmt.Errorf("chmod 400 key failed: %w", err)
+	}
+
+	return nil
+}
+
+func runExecAndCheck(dc *DatabaseContainer, cmd []string) error {
 	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd: []string{
-			"chown",
-			"yugabyte:yugabyte",
-			certFile,
-			keyFile,
-		},
-		User: "root",
+		Container:    dc.containerID,
+		Cmd:          cmd,
+		User:         "root",
+		AttachStdout: true,
+		AttachStderr: true,
 	})
 	if err != nil {
 		return err
 	}
 
-	if err = dc.client.StartExec(exec.ID, docker.StartExecOptions{}); err != nil {
-		return err
+	var buf bytes.Buffer
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
+		OutputStream: &buf,
+		ErrorStream:  &buf,
+		RawTerminal:  false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start exec: %w\nOutput:\n%s", err, buf.String())
 	}
 
-	// Fix certificate permissions (readable by owner and group)
-	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chmod", "644", certFile},
-		User:      "root",
-	})
+	inspect, err := dc.client.InspectExec(exec.ID)
 	if err != nil {
 		return err
 	}
-
-	if err = dc.client.StartExec(exec.ID, docker.StartExecOptions{}); err != nil {
-		return err
+	if inspect.ExitCode != 0 {
+		return fmt.Errorf("exec failed: %s", buf.String())
 	}
-
-	// Fix key permissions (readable only by owner)
-	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chmod", "400", keyFile},
-		User:      "root",
-	})
-	if err != nil {
-		return err
-	}
-
-	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	return nil
 }
 
 // GetDockerClient instantiate a new docker client.

@@ -177,6 +177,7 @@ func writeCertificateFiles(
 		paths[key] = path
 	}
 
+	t.Logf("paths are: %v", paths)
 	return dir, paths
 }
 
