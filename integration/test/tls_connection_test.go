@@ -64,8 +64,7 @@ func TestOneSidedTLSConnection(t *testing.T) {
 
 func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
 	t.Parallel()
-	// , dbtest.PostgresDBType
-	for _, dbType := range []string{dbtest.YugaDBType} {
+	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType} {
 		databaseType := dbType
 		t.Run(fmt.Sprintf("%s_tls", databaseType), func(t *testing.T) {
 			t.Parallel()
@@ -90,4 +89,9 @@ func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
 			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
 		})
 	}
+}
+
+func TestSecuredNodeStartup(t *testing.T) {
+	conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, dbtest.PostgresDBType)
+	t.Logf("connection-details: %v", conn)
 }
