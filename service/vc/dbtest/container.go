@@ -582,7 +582,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 	return nil
 }
 
-// fixCertificatePermissions fixes the ownership and permissions of SSL certificates inside the container
+// fixCertificatePermissions fixes the ownership and permissions of SSL certificates inside the container.
 func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 	t.Helper()
 
