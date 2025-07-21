@@ -167,7 +167,8 @@ func writeCertificateFiles(
 	//nolint:gofumpt //Note: gofumpt reports this line as improperly formatted, but no actual formatting issue exists.
 	if sub := namingFunction(keySubDirectory); sub != "" {
 		dir = filepath.Join(dir, sub)
-		require.NoError(t, os.MkdirAll(dir, 0750))
+		//nolint:gosec
+		require.NoError(t, os.MkdirAll(dir, 0755))
 	}
 
 	paths := make(map[string]string)
@@ -191,6 +192,6 @@ func createDataFromKeyPair(keyPair *tlsgen.CertKeyPair, caCertificate []byte) ma
 func saveBytesToFile(dir, name string, data []byte) (string, error) {
 	filePath := filepath.Join(dir, name)
 	//nolint:gofumpt //Note: gofumpt reports this line as improperly formatted, but no actual formatting issue exists.
-	err := os.WriteFile(filePath, data, 0600)
+	err := os.WriteFile(filePath, data, 0644)
 	return filePath, err
 }

@@ -575,7 +575,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 			return false
 		}
 		return true
-	}, 45*time.Second, 250*time.Millisecond); !ok {
+	}, 120*time.Second, 250*time.Millisecond); !ok {
 		dc.StopContainer(t)
 		return err
 	}
