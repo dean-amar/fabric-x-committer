@@ -109,6 +109,10 @@ test-integration: build
 test-integration-db-resiliency: build
 	@$(go_test) ./integration/... -run "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
+# tryout test.
+test-tls: build
+	@$(go_test) ./integration/... -run "Secured.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
+
 # Tests the all-in-one docker image.
 test-container: build-test-node-image
 	$(go_cmd) test -v -timeout 30m ./docker/...
