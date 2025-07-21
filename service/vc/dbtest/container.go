@@ -683,9 +683,9 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 
 	// Set permissions: key readable only by owner (private key)
 	if err := runExecAndCheck(dc, []string{
-		"chmod", "400", keyFile,
+		"chmod", "600", keyFile,
 	}); err != nil {
-		return fmt.Errorf("chmod 400 key failed: %w", err)
+		return fmt.Errorf("chmod 600 key failed: %w", err)
 	}
 
 	return nil
