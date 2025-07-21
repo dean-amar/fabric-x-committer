@@ -136,12 +136,6 @@ func (dc *DatabaseContainer) StartContainer(ctx context.Context, t *testing.T) {
 		return
 	}
 	require.NoError(t, err)
-
-	// Fix certificate permissions for PostgreSQL with TLS
-	if dc.UseTLS && dc.DatabaseType == PostgresDBType {
-		require.NoError(t, dc.fixCertificatePermissions(t))
-		t.Log("Fixed certificate permissions for PostgreSQL")
-	}
 }
 
 func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
