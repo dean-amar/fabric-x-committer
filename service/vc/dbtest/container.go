@@ -570,7 +570,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 			return false
 		}
 		return true
-	}, 120*time.Second, 250*time.Millisecond); !ok {
+	}, 240*time.Second, 250*time.Millisecond); !ok {
 		dc.StopContainer(t)
 		return err
 	}
@@ -674,7 +674,6 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	}); err != nil {
 		return fmt.Errorf("chown failed: %w", err)
 	}
-
 	// Set permissions: cert readable by owner/group/others (safe for public cert)
 	if err := runExecAndCheck(dc, []string{
 		"chmod", "644", certFile,
