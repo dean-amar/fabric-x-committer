@@ -155,10 +155,10 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 		}
 		switch node.DatabaseType {
 		case YugaDBType:
-			node.WaitForNodeReadiness(t, YugabyteReadinessOutput)
+			require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
 			conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
 		case PostgresDBType:
-			node.WaitForNodeReadiness(t, PostgresReadinessOutput)
+			require.NoError(t, node.EnsureNodeReadiness(t, PostgresReadinessOutput))
 			node.ExecuteCommand(t, enforcePostgresSSLScript)
 			node.ExecuteCommand(t, reloadPostgresConfigScript)
 		default:

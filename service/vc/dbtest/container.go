@@ -136,6 +136,12 @@ func (dc *DatabaseContainer) StartContainer(ctx context.Context, t *testing.T) {
 		return
 	}
 	require.NoError(t, err)
+
+	// Fix certificate permissions for PostgreSQL with TLS
+	if dc.UseTLS && dc.DatabaseType == PostgresDBType {
+		require.NoError(t, dc.fixCertificatePermissions(t))
+		t.Log("Fixed certificate permissions for PostgreSQL")
+	}
 }
 
 func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
@@ -472,16 +478,6 @@ func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
 	return stdout.String()
 }
 
-// WaitForNodeReadiness checks the container's readiness by monitoring its logs.
-func (dc *DatabaseContainer) WaitForNodeReadiness(t *testing.T, requiredOutput string) {
-	t.Helper()
-	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		output := dc.GetContainerLogs(t)
-		t.Logf("\n\n\nthe output: %v\n\n\n", output)
-		require.Contains(ct, output, requiredOutput)
-	}, 90*time.Second, 1000*time.Millisecond, "Node %s readiness check failed", dc.Name)
-}
-
 // readPasswordFromContainer extracts the randomly generated password from a file inside the container.
 // This is required because YugabyteDB, when running in secure mode, doesn't allow default passwords
 // and instead generates a random one at startup.
@@ -584,6 +580,61 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 		return err
 	}
 	return nil
+}
+
+// fixCertificatePermissions fixes the ownership and permissions of SSL certificates inside the container
+func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
+	t.Helper()
+
+	// Fix ownership to postgres user
+	_, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chown", "postgres:postgres", "/creds/server.crt", "/creds/server.key"},
+		User:      "root", // Run as root to change ownership
+	})
+	if err != nil {
+		return err
+	}
+
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chown", "postgres:postgres", "/creds/server.crt", "/creds/server.key"},
+		User:      "root",
+	})
+	if err != nil {
+		return err
+	}
+
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Fix file permissions
+	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chmod", "600", "/creds/server.key"},
+		User:      "root",
+	})
+	if err != nil {
+		return err
+	}
+
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	if err != nil {
+		return err
+	}
+
+	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chmod", "644", "/creds/server.crt"},
+		User:      "root",
+	})
+	if err != nil {
+		return err
+	}
+
+	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
 }
 
 // GetDockerClient instantiate a new docker client.
