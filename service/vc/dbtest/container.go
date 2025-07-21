@@ -479,7 +479,7 @@ func (dc *DatabaseContainer) WaitForNodeReadiness(t *testing.T, requiredOutput s
 		output := dc.GetContainerLogs(t)
 		t.Logf("\n\n\nthe output: %v\n\n\n", output)
 		require.Contains(ct, output, requiredOutput)
-	}, 600*time.Second, 5000*time.Millisecond, "Node %s readiness check failed", dc.Name)
+	}, 90*time.Second, 1000*time.Millisecond, "Node %s readiness check failed", dc.Name)
 }
 
 // readPasswordFromContainer extracts the randomly generated password from a file inside the container.
