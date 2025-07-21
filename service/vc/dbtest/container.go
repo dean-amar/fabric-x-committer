@@ -610,8 +610,10 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	t.Helper()
 
-	certFile := fmt.Sprintf("/creds/node%s.crt", defaultYugabyteTLSContainerIP)
-	keyFile := fmt.Sprintf("/creds/node%s.key", defaultYugabyteTLSContainerIP)
+	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
+	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
+
+	t.Log("cert---: ", certFile)
 
 	// Fix ownership
 	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
