@@ -637,7 +637,7 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	// Fix certificate permissions (readable by owner and group)
 	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
 		Container: dc.containerID,
-		Cmd:       []string{"chmod", "600", certFile},
+		Cmd:       []string{"chmod", "400", certFile},
 		User:      "root",
 	})
 	if err != nil {
