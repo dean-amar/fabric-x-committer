@@ -564,6 +564,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 	var err error
 	if ok := assert.Eventually(t, func() bool {
 		output := dc.GetContainerLogs(t)
+		t.Logf("output: %v", output)
 		if !strings.Contains(output, requiredOutput) {
 			err = errors.Newf("Node %s readiness check failed", dc.Name)
 			return false
