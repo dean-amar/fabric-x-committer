@@ -130,8 +130,8 @@ func selectFileNames(style CertStyle, serverName string) func(string) string {
 				return "node" + suffix + ".crt"
 			case KeyCACert:
 				return caCertFileName
-			case keySubDirectory:
-				return serverName
+			//case keySubDirectory:
+			//	return serverName
 			default:
 				return ""
 			}
