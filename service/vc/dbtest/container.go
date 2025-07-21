@@ -586,35 +586,10 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 	t.Helper()
 
-	// Fix ownership to postgres user
-	_, err := dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chown", "postgres:postgres", "/creds/server.crt", "/creds/server.key"},
-		User:      "root", // Run as root to change ownership
-	})
-	if err != nil {
-		return err
-	}
-
 	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
 		Container: dc.containerID,
 		Cmd:       []string{"chown", "postgres:postgres", "/creds/server.crt", "/creds/server.key"},
-		User:      "root",
-	})
-	if err != nil {
-		return err
-	}
-
-	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{})
-	if err != nil {
-		return err
-	}
-
-	// Fix file permissions
-	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chmod", "600", "/creds/server.key"},
-		User:      "root",
+		User:      "root", // Run as root to change ownership
 	})
 	if err != nil {
 		return err
