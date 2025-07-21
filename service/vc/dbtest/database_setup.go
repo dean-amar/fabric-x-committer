@@ -155,6 +155,7 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 		}
 		switch node.DatabaseType {
 		case YugaDBType:
+			require.NoError(t, node.fixCertificatePermissionsYuga(t))
 			require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
 			conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
 		case PostgresDBType:

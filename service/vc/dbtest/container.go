@@ -606,6 +606,38 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
 }
 
+// fixCertificatePermissionsYuga fixes the ownership and permissions of SSL certificates inside the container.
+func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
+	t.Helper()
+
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd: []string{"chown", "yugabyte:yugabyte",
+			fmt.Sprintf("/creds/%s", "node"+defaultYugabyteTLSContainerIP+".crt"),
+			fmt.Sprintf("/creds/%s", "node"+defaultYugabyteTLSContainerIP+".key")},
+		User: "root", // Run as root to change ownership
+	})
+	if err != nil {
+		return err
+	}
+
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	if err != nil {
+		return err
+	}
+
+	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chmod", "644", fmt.Sprintf("/creds/%s", "node"+defaultYugabyteTLSContainerIP+".crt")},
+		User:      "root",
+	})
+	if err != nil {
+		return err
+	}
+
+	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+}
+
 // GetDockerClient instantiate a new docker client.
 func GetDockerClient(t *testing.T) *docker.Client {
 	t.Helper()
