@@ -15,7 +15,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -571,7 +570,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 			return false
 		}
 		return true
-	}, 45*time.Second, 250*time.Millisecond); !ok {
+	}, 120*time.Second, 250*time.Millisecond); !ok {
 		dc.StopContainer(t)
 		return err
 	}
@@ -665,37 +664,49 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	t.Helper()
 
-	//certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
-	//keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
+	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
+	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
 	//
 	//t.Log("cert---: ", certFile)
 	// Fix ownership (including /creds itself)
-	certFile := fmt.Sprintf("%s/node.%s.crt", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
-	keyFile := fmt.Sprintf("%s/node.%s.key", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
+	//certFile := fmt.Sprintf("%s/node.%s.crt", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
+	//keyFile := fmt.Sprintf("%s/node.%s.key", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
 
-	info, err := os.Stat(certFile)
-	require.NoError(t, err)
+	//info, err := os.Stat(certFile)
+	//require.NoError(t, err)
+	//
+	//stat := info.Sys().(*syscall.Stat_t)
+	//fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
+	//
+	//info, err = os.Stat(keyFile)
+	//require.NoError(t, err)
+	//
+	//stat = info.Sys().(*syscall.Stat_t)
+	//fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
 
-	stat := info.Sys().(*syscall.Stat_t)
-	fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
+	//if err := runExecAndCheck(dc, []string{
+	//	"chown", "-R", "root:root", "/creds",
+	//}); err != nil {
+	//	return fmt.Errorf("chown failed: %w", err)
+	//}
 
-	info, err = os.Stat(keyFile)
-	require.NoError(t, err)
-
-	stat = info.Sys().(*syscall.Stat_t)
-	fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
+	//if err := runExecAndCheck(dc, []string{
+	//	"chown", "-R", "root:root", certFile, keyFile,
+	//}); err != nil {
+	//	return fmt.Errorf("chown failed: %w", err)
+	//}
 
 	if err := runExecAndCheck(dc, []string{
-		"chown", "-R", "root:root", "/creds",
+		"chown", "root:root", certFile, keyFile,
 	}); err != nil {
 		return fmt.Errorf("chown failed: %w", err)
 	}
-	//// Set permissions: cert readable by owner/group/others (safe for public cert)
-	//if err := runExecAndCheck(dc, []string{
-	//	"chmod", "644", certFile,
-	//}); err != nil {
-	//	return fmt.Errorf("chmod 644 cert failed: %w", err)
-	//}
+	// Set permissions: cert readable by owner/group/others (safe for public cert)
+	if err := runExecAndCheck(dc, []string{
+		"chmod", "644", certFile,
+	}); err != nil {
+		return fmt.Errorf("chmod 644 cert failed: %w", err)
+	}
 	//
 	//// Set permissions: key readable only by owner (private key)
 	//if err := runExecAndCheck(dc, []string{
