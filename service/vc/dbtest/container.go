@@ -664,37 +664,37 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	t.Helper()
 
-	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
-	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
-
-	t.Log("cert---: ", certFile)
+	//certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
+	//keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
+	//
+	//t.Log("cert---: ", certFile)
 	// Fix ownership (including /creds itself)
 	if err := runExecAndCheck(dc, []string{
 		"chown", "-R", "root:root", "/creds",
 	}); err != nil {
 		return fmt.Errorf("chown failed: %w", err)
 	}
-	// Set permissions: cert readable by owner/group/others (safe for public cert)
-	if err := runExecAndCheck(dc, []string{
-		"chmod", "644", certFile,
-	}); err != nil {
-		return fmt.Errorf("chmod 644 cert failed: %w", err)
-	}
-
-	// Set permissions: key readable only by owner (private key)
-	if err := runExecAndCheck(dc, []string{
-		"chmod", "600", keyFile,
-	}); err != nil {
-		return fmt.Errorf("chmod 600 key failed: %w", err)
-	}
-
-	// Add cleanup to reset permissions for host cleanup
-	t.Cleanup(func() {
-		_ = os.Chmod(certFile, 0600)
-		_ = os.Chown(certFile, os.Getuid(), os.Getgid())
-		_ = os.Chmod(keyFile, 0600)
-		_ = os.Chown(keyFile, os.Getuid(), os.Getgid())
-	})
+	//// Set permissions: cert readable by owner/group/others (safe for public cert)
+	//if err := runExecAndCheck(dc, []string{
+	//	"chmod", "644", certFile,
+	//}); err != nil {
+	//	return fmt.Errorf("chmod 644 cert failed: %w", err)
+	//}
+	//
+	//// Set permissions: key readable only by owner (private key)
+	//if err := runExecAndCheck(dc, []string{
+	//	"chmod", "600", keyFile,
+	//}); err != nil {
+	//	return fmt.Errorf("chmod 600 key failed: %w", err)
+	//}
+	//
+	//// Add cleanup to reset permissions for host cleanup
+	//t.Cleanup(func() {
+	//	_ = os.Chmod(certFile, 0600)
+	//	_ = os.Chown(certFile, os.Getuid(), os.Getgid())
+	//	_ = os.Chmod(keyFile, 0600)
+	//	_ = os.Chown(keyFile, os.Getuid(), os.Getgid())
+	//})
 
 	return nil
 }
