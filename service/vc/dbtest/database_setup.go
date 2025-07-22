@@ -38,8 +38,8 @@ const (
 
 	defaultLocalDBPort = "5433"
 
-	DeploymentTypeEnv = "DB_DEPLOYMENT"
-	DatabaseTypeEnv   = "DB_TYPE"
+	deploymentTypeEnv = "DB_DEPLOYMENT"
+	databaseTypeEnv   = "DB_TYPE"
 )
 
 // randDbName generates random DB name.
@@ -60,7 +60,7 @@ func randDbName(t *testing.T) string {
 
 // getDBDeploymentFromEnv get the desired DB deployment type from the environment variable.
 func getDBDeploymentFromEnv() string {
-	val, found := os.LookupEnv(DeploymentTypeEnv)
+	val, found := os.LookupEnv(deploymentTypeEnv)
 	if found {
 		return strings.ToLower(val)
 	}
@@ -70,7 +70,7 @@ func getDBDeploymentFromEnv() string {
 
 // getDBTypeFromEnv get the desired DB type from the environment variable.
 func getDBTypeFromEnv() string {
-	val, found := os.LookupEnv(DatabaseTypeEnv)
+	val, found := os.LookupEnv(databaseTypeEnv)
 	if found {
 		return strings.ToLower(val)
 	}
@@ -90,7 +90,6 @@ func PrepareTestEnvWithConnection(t *testing.T, conn *Connection) *Connection {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), defaultStartTimeout)
 	t.Cleanup(cancel)
-
 	require.True(t, conn.waitForReady(ctx), errors.Wrapf(ctx.Err(), "database is not ready"))
 	t.Logf("connection nodes details: %s", conn.endpointsString())
 

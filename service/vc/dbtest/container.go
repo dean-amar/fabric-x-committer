@@ -136,6 +136,9 @@ func (dc *DatabaseContainer) StartContainer(ctx context.Context, t *testing.T) {
 		return
 	}
 	require.NoError(t, err)
+
+	// Stream logs to stdout/stderr
+	go dc.streamLogs(t)
 }
 
 func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
@@ -193,7 +196,6 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 			}},
 		}
 	}
-
 	if dc.client == nil {
 		dc.client = GetDockerClient(t)
 	}
@@ -363,14 +365,11 @@ func (dc *DatabaseContainer) getConnectionOptions(ctx context.Context, t *testin
 	endpoints := []*connection.Endpoint{
 		dc.GetContainerConnectionDetails(ctx, t),
 	}
-
 	for _, p := range container.NetworkSettings.Ports[dc.DbPort] {
 		endpoints = append(endpoints, connection.CreateEndpointHP(p.HostIP, p.HostPort))
 	}
 
-	dbConnection := NewConnection(endpoints...)
-
-	return dbConnection
+	return NewConnection(endpoints...)
 }
 
 // GetContainerConnectionDetails inspect the container and fetches its connection to an endpoint.
@@ -449,29 +448,6 @@ func (dc *DatabaseContainer) ContainerID() string {
 	return dc.containerID
 }
 
-// ExecuteCommand execute a given command in the container.
-func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
-	t.Helper()
-
-	var stdout bytes.Buffer
-	t.Logf("executing %s", strings.Join(cmd, " "))
-	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
-		Container:    dc.containerID,
-		Cmd:          cmd,
-		AttachStdout: true,
-		AttachStderr: true,
-		Tty:          false,
-	})
-	require.NoError(t, err, "failed to create exec for command")
-
-	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
-		OutputStream: &stdout,
-	})
-	require.NoError(t, err, "failed to start exec for command")
-
-	return stdout.String()
-}
-
 // readPasswordFromContainer extracts the randomly generated password from a file inside the container.
 // This is required because YugabyteDB, when running in secure mode, doesn't allow default passwords
 // and instead generates a random one at startup.
@@ -494,6 +470,29 @@ func (dc *DatabaseContainer) readPasswordFromContainer(t *testing.T, filePath st
 	t.Log("password not found in output, returning default password.")
 
 	return defaultPassword
+}
+
+// ExecuteCommand execute a given command in the container.
+func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	t.Logf("executing %s", strings.Join(cmd, " "))
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container:    dc.containerID,
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          false,
+	})
+	require.NoError(t, err, "failed to create exec for command")
+
+	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
+		OutputStream: &stdout,
+	})
+	require.NoError(t, err, "failed to start exec for command")
+
+	return stdout.String()
 }
 
 func stopContainerByIP(t *testing.T, targetIP string) {
@@ -576,7 +575,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 	return nil
 }
 
-// fixCertificatePermissions fixes the ownership and permissions of SSL certificates inside the container.
+// fixCertificatePermissions fixes the ownership of the TLS certificates inside the container.
 func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T,
 	user,
 	containerPublicKeyPath,
