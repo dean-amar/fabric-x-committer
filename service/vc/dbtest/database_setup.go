@@ -143,14 +143,13 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 	node := &DatabaseContainer{
 		DatabaseType: dbType,
 		UseTLS:       true,
-		User:         "postgres:root",
 	}
 
 	switch node.DatabaseType {
 	case YugaDBType:
-		node.User = "root:root"
+		node.User = "root"
 	case PostgresDBType:
-		node.User = "postgres:postgres"
+		node.User = "postgres"
 	default:
 		t.Fatalf("Unsupported database type: %s", node.DatabaseType)
 	}
