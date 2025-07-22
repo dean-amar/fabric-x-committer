@@ -135,7 +135,7 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 }
 
 // CreateAndStartSecuredDatabaseNode creates a containerized Yugabyte or PostgreSQL database instance in a secure mode.
-// This function shouldn't be number of times in parallel
+// This function shouldn't be called number of times in parallel
 // due to the need of Yugabyte's secure node credentials path convention.
 func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType string) *Connection {
 	t.Helper()
@@ -164,11 +164,11 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 		}
 		switch node.DatabaseType {
 		case YugaDBType:
-			//require.NoError(t, node.fixCertificatePermissionsYuga(t))
+			require.NoError(t, node.fixCertificatePermissionsYuga(t))
 			require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
 			conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
 		case PostgresDBType:
-			//require.NoError(t, node.fixCertificatePermissions(t))
+			require.NoError(t, node.fixCertificatePermissions(t))
 			require.NoError(t, node.EnsureNodeReadiness(t, PostgresReadinessOutput))
 			node.ExecuteCommand(t, enforcePostgresSSLScript)
 			node.ExecuteCommand(t, reloadPostgresConfigScript)

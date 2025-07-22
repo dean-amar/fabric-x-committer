@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -566,7 +567,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 	var err error
 	if ok := assert.Eventually(t, func() bool {
 		output := dc.GetContainerLogs(t)
-		t.Logf("output: %v", output)
+		//t.Logf("output: %v", output)
 		if !strings.Contains(output, requiredOutput) {
 			err = errors.Newf("Node %s readiness check failed", dc.Name)
 			return false
@@ -597,16 +598,18 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 		return err
 	}
 
-	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chmod", "644", "/creds/server.crt"},
-		User:      "root",
-	})
-	if err != nil {
-		return err
-	}
+	return nil
 
-	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	//exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+	//	Container: dc.containerID,
+	//	Cmd:       []string{"chmod", "644", "/creds/server.crt"},
+	//	User:      "root",
+	//})
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
 }
 
 //func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
@@ -666,11 +669,24 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	t.Helper()
 
-	//certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
-	//keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
+	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
+	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
 	//
 	//t.Log("cert---: ", certFile)
 	// Fix ownership (including /creds itself)
+
+	info, err := os.Stat(certFile)
+	require.NoError(t, err)
+
+	stat := info.Sys().(*syscall.Stat_t)
+	fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
+
+	info, err = os.Stat(keyFile)
+	require.NoError(t, err)
+
+	stat = info.Sys().(*syscall.Stat_t)
+	fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
+
 	if err := runExecAndCheck(dc, []string{
 		"chown", "-R", "root:root", "/creds",
 	}); err != nil {
