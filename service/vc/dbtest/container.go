@@ -594,17 +594,18 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 	if err != nil {
 		return err
 	}
-
-	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chmod", "644", "/creds/server.crt"},
-		User:      "root",
-	})
-	if err != nil {
-		return err
-	}
-
-	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	return nil
+	//
+	//exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+	//	Container: dc.containerID,
+	//	Cmd:       []string{"chmod", "644", "/creds/server.crt"},
+	//	User:      "root",
+	//})
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
 }
 
 //func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
@@ -701,12 +702,12 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	}); err != nil {
 		return fmt.Errorf("chown failed: %w", err)
 	}
-	// Set permissions: cert readable by owner/group/others (safe for public cert)
-	if err := runExecAndCheck(dc, []string{
-		"chmod", "644", certFile,
-	}); err != nil {
-		return fmt.Errorf("chmod 644 cert failed: %w", err)
-	}
+	//// Set permissions: cert readable by owner/group/others (safe for public cert)
+	//if err := runExecAndCheck(dc, []string{
+	//	"chmod", "644", certFile,
+	//}); err != nil {
+	//	return fmt.Errorf("chmod 644 cert failed: %w", err)
+	//}
 	//
 	//// Set permissions: key readable only by owner (private key)
 	//if err := runExecAndCheck(dc, []string{
