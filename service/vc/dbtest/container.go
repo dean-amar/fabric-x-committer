@@ -669,11 +669,11 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 
 	t.Log("cert---: ", certFile)
 	// Fix ownership (including /creds itself)
-	if err := runExecAndCheck(dc, []string{
-		"chown", "-R", "root:root", "/creds",
-	}); err != nil {
-		return fmt.Errorf("chown failed: %w", err)
-	}
+	//if err := runExecAndCheck(dc, []string{
+	//	"chown", "-R", "root:root", "/creds",
+	//}); err != nil {
+	//	return fmt.Errorf("chown failed: %w", err)
+	//}
 	// Set permissions: cert readable by owner/group/others (safe for public cert)
 	if err := runExecAndCheck(dc, []string{
 		"chmod", "644", certFile,
