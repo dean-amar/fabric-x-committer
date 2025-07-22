@@ -596,18 +596,16 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 		return err
 	}
 
-	return nil
+	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chmod", "644", "/creds/server.crt"},
+		User:      "root",
+	})
+	if err != nil {
+		return err
+	}
 
-	//exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-	//	Container: dc.containerID,
-	//	Cmd:       []string{"chmod", "644", "/creds/server.crt"},
-	//	User:      "root",
-	//})
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
+	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
 }
 
 //func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
@@ -667,11 +665,13 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
 func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 	t.Helper()
 
-	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
-	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
+	//certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
+	//keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
 	//
 	//t.Log("cert---: ", certFile)
 	// Fix ownership (including /creds itself)
+	certFile := fmt.Sprintf("%s/node.%s.crt", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
+	keyFile := fmt.Sprintf("%s/node.%s.key", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
 
 	info, err := os.Stat(certFile)
 	require.NoError(t, err)
