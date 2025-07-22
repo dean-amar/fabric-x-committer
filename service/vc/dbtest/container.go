@@ -96,6 +96,7 @@ type DatabaseContainer struct {
 	Network      string
 	DatabaseType string
 	Tag          string
+	User         string
 	Role         string
 	Cmd          []string
 	Env          []string
@@ -308,6 +309,7 @@ func (dc *DatabaseContainer) createContainer(ctx context.Context, t *testing.T) 
 				Image: dc.Image,
 				Cmd:   dc.Cmd,
 				Env:   dc.Env,
+				User:  dc.User,
 			},
 			HostConfig: &docker.HostConfig{
 				AutoRemove:   dc.AutoRm,

@@ -143,6 +143,7 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 	node := &DatabaseContainer{
 		DatabaseType: dbType,
 		UseTLS:       true,
+		User:         fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 	}
 
 	node.StartContainer(ctx, t)
@@ -155,11 +156,11 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 		}
 		switch node.DatabaseType {
 		case YugaDBType:
-			require.NoError(t, node.fixCertificatePermissionsYuga(t))
+			//require.NoError(t, node.fixCertificatePermissionsYuga(t))
 			require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
 			conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
 		case PostgresDBType:
-			require.NoError(t, node.fixCertificatePermissions(t))
+			//require.NoError(t, node.fixCertificatePermissions(t))
 			require.NoError(t, node.EnsureNodeReadiness(t, PostgresReadinessOutput))
 			node.ExecuteCommand(t, enforcePostgresSSLScript)
 			node.ExecuteCommand(t, reloadPostgresConfigScript)
