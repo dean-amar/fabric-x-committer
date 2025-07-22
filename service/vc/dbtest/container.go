@@ -564,13 +564,12 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 	var err error
 	if ok := assert.Eventually(t, func() bool {
 		output := dc.GetContainerLogs(t)
-		//t.Logf("output: %v", output)
 		if !strings.Contains(output, requiredOutput) {
 			err = errors.Newf("Node %s readiness check failed", dc.Name)
 			return false
 		}
 		return true
-	}, 120*time.Second, 250*time.Millisecond); !ok {
+	}, 90*time.Second, 250*time.Millisecond); !ok {
 		dc.StopContainer(t)
 		return err
 	}
@@ -578,185 +577,20 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 }
 
 // fixCertificatePermissions fixes the ownership and permissions of SSL certificates inside the container.
-func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T) error {
+func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T,
+	user,
+	containerPublicKeyPath,
+	containerPrivateKeyPath string,
+) {
 	t.Helper()
 
 	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
 		Container: dc.containerID,
-		Cmd:       []string{"chown", "postgres:postgres", "/creds/server.crt", "/creds/server.key"},
+		Cmd:       []string{"chown", user, containerPublicKeyPath, containerPrivateKeyPath},
 		User:      "root", // Run as root to change ownership
 	})
-	if err != nil {
-		return err
-	}
-
-	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-	//
-	//exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-	//	Container: dc.containerID,
-	//	Cmd:       []string{"chmod", "644", "/creds/server.crt"},
-	//	User:      "root",
-	//})
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
-}
-
-//func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
-//	t.Helper()
-//
-//	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
-//	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
-//
-//	t.Log("cert---: ", certFile)
-//
-//	// Fix ownership
-//	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
-//		Container: dc.containerID,
-//		Cmd: []string{
-//			"chown",
-//			"yugabyte:yugabyte",
-//			certFile,
-//			keyFile,
-//		},
-//		User: "root",
-//	})
-//	if err != nil {
-//		return err
-//	}
-//
-//	if err = dc.client.StartExec(exec.ID, docker.StartExecOptions{}); err != nil {
-//		return err
-//	}
-//
-//	// Fix certificate permissions (readable by owner and group)
-//	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-//		Container: dc.containerID,
-//		Cmd:       []string{"chmod", "644", certFile},
-//		User:      "root",
-//	})
-//	if err != nil {
-//		return err
-//	}
-//
-//	if err = dc.client.StartExec(exec.ID, docker.StartExecOptions{}); err != nil {
-//		return err
-//	}
-//
-//	// Fix key permissions (readable only by owner)
-//	exec, err = dc.client.CreateExec(docker.CreateExecOptions{
-//		Container: dc.containerID,
-//		Cmd:       []string{"chmod", "400", keyFile},
-//		User:      "root",
-//	})
-//	if err != nil {
-//		return err
-//	}
-//
-//	return dc.client.StartExec(exec.ID, docker.StartExecOptions{})
-//}
-
-func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
-	t.Helper()
-
-	certFile := fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP)
-	keyFile := fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP)
-	//
-	//t.Log("cert---: ", certFile)
-	// Fix ownership (including /creds itself)
-	//certFile := fmt.Sprintf("%s/node.%s.crt", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
-	//keyFile := fmt.Sprintf("%s/node.%s.key", dc.Creds.CredsPath, defaultYugabyteTLSContainerIP)
-
-	//info, err := os.Stat(certFile)
-	//require.NoError(t, err)
-	//
-	//stat := info.Sys().(*syscall.Stat_t)
-	//fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
-	//
-	//info, err = os.Stat(keyFile)
-	//require.NoError(t, err)
-	//
-	//stat = info.Sys().(*syscall.Stat_t)
-	//fmt.Printf("UID: %d, GID: %d\n", stat.Uid, stat.Gid)
-
-	//if err := runExecAndCheck(dc, []string{
-	//	"chown", "-R", "root:root", "/creds",
-	//}); err != nil {
-	//	return fmt.Errorf("chown failed: %w", err)
-	//}
-
-	//if err := runExecAndCheck(dc, []string{
-	//	"chown", "-R", "root:root", certFile, keyFile,
-	//}); err != nil {
-	//	return fmt.Errorf("chown failed: %w", err)
-	//}
-
-	if err := runExecAndCheck(dc, []string{
-		"chown", "root:root", certFile, keyFile,
-	}); err != nil {
-		return fmt.Errorf("chown failed: %w", err)
-	}
-	//// Set permissions: cert readable by owner/group/others (safe for public cert)
-	//if err := runExecAndCheck(dc, []string{
-	//	"chmod", "644", certFile,
-	//}); err != nil {
-	//	return fmt.Errorf("chmod 644 cert failed: %w", err)
-	//}
-	//
-	//// Set permissions: key readable only by owner (private key)
-	//if err := runExecAndCheck(dc, []string{
-	//	"chmod", "600", keyFile,
-	//}); err != nil {
-	//	return fmt.Errorf("chmod 600 key failed: %w", err)
-	//}
-	//
-	//// Add cleanup to reset permissions for host cleanup
-	//t.Cleanup(func() {
-	//	_ = os.Chmod(certFile, 0600)
-	//	_ = os.Chown(certFile, os.Getuid(), os.Getgid())
-	//	_ = os.Chmod(keyFile, 0600)
-	//	_ = os.Chown(keyFile, os.Getuid(), os.Getgid())
-	//})
-
-	return nil
-}
-
-func runExecAndCheck(dc *DatabaseContainer, cmd []string) error {
-	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
-		Container:    dc.containerID,
-		Cmd:          cmd,
-		User:         "root",
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return err
-	}
-
-	var buf bytes.Buffer
-	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
-		OutputStream: &buf,
-		ErrorStream:  &buf,
-		RawTerminal:  false,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to start exec: %w\nOutput:\n%s", err, buf.String())
-	}
-
-	inspect, err := dc.client.InspectExec(exec.ID)
-	if err != nil {
-		return err
-	}
-	if inspect.ExitCode != 0 {
-		return fmt.Errorf("exec failed: %s", buf.String())
-	}
-	return nil
+	require.NoError(t, err)
+	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{}))
 }
 
 // GetDockerClient instantiate a new docker client.

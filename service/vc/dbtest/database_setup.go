@@ -148,24 +148,31 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 	node.StartContainer(ctx, t)
 	conn := node.getConnectionOptions(ctx, t)
 
-	if node.UseTLS {
-		conn.Creds = connection.DatabaseCreds{
-			CAPaths:    []string{node.Creds.CACertPath},
-			ServerName: node.Creds.ServerName,
-		}
-		switch node.DatabaseType {
-		case YugaDBType:
-			require.NoError(t, node.fixCertificatePermissionsYuga(t))
-			require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
-			conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
-		case PostgresDBType:
-			require.NoError(t, node.fixCertificatePermissions(t))
-			require.NoError(t, node.EnsureNodeReadiness(t, PostgresReadinessOutput))
-			node.ExecuteCommand(t, enforcePostgresSSLScript)
-			node.ExecuteCommand(t, reloadPostgresConfigScript)
-		default:
-			t.Fatalf("Unsupported database type: %s", node.DatabaseType)
-		}
+	conn.Creds = connection.DatabaseCreds{
+		CAPaths:    []string{node.Creds.CACertPath},
+		ServerName: node.Creds.ServerName,
+	}
+
+	switch node.DatabaseType {
+	case YugaDBType:
+		node.fixCertificatePermissions(t,
+			"root:root",
+			fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP),
+			fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP),
+		)
+		require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
+		conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
+	case PostgresDBType:
+		node.fixCertificatePermissions(t,
+			"postgres:postgres",
+			"/creds/server.crt",
+			"/creds/server.key",
+		)
+		require.NoError(t, node.EnsureNodeReadiness(t, PostgresReadinessOutput))
+		node.ExecuteCommand(t, enforcePostgresSSLScript)
+		node.ExecuteCommand(t, reloadPostgresConfigScript)
+	default:
+		t.Fatalf("Unsupported database type: %s", node.DatabaseType)
 	}
 
 	t.Cleanup(
