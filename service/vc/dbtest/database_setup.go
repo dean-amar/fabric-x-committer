@@ -143,7 +143,7 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 	node := &DatabaseContainer{
 		DatabaseType: dbType,
 		UseTLS:       true,
-		User:         fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		User:         "root:root",
 	}
 
 	node.StartContainer(ctx, t)
