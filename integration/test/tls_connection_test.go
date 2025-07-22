@@ -92,8 +92,12 @@ func TestOneSidedTLSConnection(t *testing.T) {
 //}
 
 //nolint:paralleltest
-func TestSecuredNodeStartup(t *testing.T) {
+func TestSecuredNodeStartupPostgres(t *testing.T) {
 	conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, dbtest.PostgresDBType)
-	conn = dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, dbtest.YugaDBType)
+	t.Logf("connection-details: %v", conn)
+}
+
+func TestSecuredNodeStartupYugabyte(t *testing.T) {
+	conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, dbtest.YugaDBType)
 	t.Logf("connection-details: %v", conn)
 }
