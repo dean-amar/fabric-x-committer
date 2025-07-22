@@ -570,7 +570,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 			return false
 		}
 		return true
-	}, 240*time.Second, 250*time.Millisecond); !ok {
+	}, 45*time.Second, 250*time.Millisecond); !ok {
 		dc.StopContainer(t)
 		return err
 	}
@@ -669,11 +669,11 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 
 	t.Log("cert---: ", certFile)
 	// Fix ownership (including /creds itself)
-	//if err := runExecAndCheck(dc, []string{
-	//	"chown", "-R", "root:root", "/creds",
-	//}); err != nil {
-	//	return fmt.Errorf("chown failed: %w", err)
-	//}
+	if err := runExecAndCheck(dc, []string{
+		"chown", "-R", "root:root", "/creds",
+	}); err != nil {
+		return fmt.Errorf("chown failed: %w", err)
+	}
 	// Set permissions: cert readable by owner/group/others (safe for public cert)
 	if err := runExecAndCheck(dc, []string{
 		"chmod", "644", certFile,
@@ -690,11 +690,10 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 
 	// Add cleanup to reset permissions for host cleanup
 	t.Cleanup(func() {
-		// Reset permissions to allow host cleanup
-		_ = runExecAndCheck(dc, []string{"chmod", "755", "/creds"})
-		_ = runExecAndCheck(dc, []string{"chmod", "644", certFile})
-		_ = runExecAndCheck(dc, []string{"chmod", "644", keyFile})
-		_ = runExecAndCheck(dc, []string{"chmod", "644", "/creds/ca.crt"})
+		_ = os.Chmod(certFile, 0600)
+		_ = os.Chown(certFile, os.Getuid(), os.Getgid())
+		_ = os.Chmod(keyFile, 0600)
+		_ = os.Chown(keyFile, os.Getuid(), os.Getgid())
 	})
 
 	return nil
