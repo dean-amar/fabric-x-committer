@@ -688,6 +688,15 @@ func (dc *DatabaseContainer) fixCertificatePermissionsYuga(t *testing.T) error {
 		return fmt.Errorf("chmod 600 key failed: %w", err)
 	}
 
+	// Add cleanup to reset permissions for host cleanup
+	t.Cleanup(func() {
+		// Reset permissions to allow host cleanup
+		_ = runExecAndCheck(dc, []string{"chmod", "755", "/creds"})
+		_ = runExecAndCheck(dc, []string{"chmod", "644", certFile})
+		_ = runExecAndCheck(dc, []string{"chmod", "644", keyFile})
+		_ = runExecAndCheck(dc, []string{"chmod", "644", "/creds/ca.crt"})
+	})
+
 	return nil
 }
 
