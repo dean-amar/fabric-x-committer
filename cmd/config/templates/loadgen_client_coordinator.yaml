@@ -8,12 +8,11 @@
 coordinator-client:
   endpoints:
     - {{ .Endpoints.Coordinator.Server }}
-  client-creds:
-    tls-mode: {{ .ClientsCreds.Coordinator.Mode }}
-    server-name: {{ .ClientsCreds.Coordinator.ServerName }}
-    key-path: {{ .ClientsCreds.Coordinator.KeyPath }}
-    cert-path: {{ .ClientsCreds.Coordinator.CertPath }}
+  tls:
+    mode: {{ .ClientCreds.Mode }}
+    key-path: {{ .ClientCreds.KeyPath }}
+    cert-path: {{ .ClientCreds.CertPath }}
     ca-cert-paths:
-      {{- range .ClientsCreds.Coordinator.CACertPaths }}
+      {{- range .ClientCreds.CACertPaths }}
       - {{ . }}
       {{- end }}

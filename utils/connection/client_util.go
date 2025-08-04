@@ -34,8 +34,10 @@ const (
 
 	// defaultGrpcMaxAttempts is set to a high number to allow the timeout to dictate the retry end condition.
 	defaultGrpcMaxAttempts = 1024
-	maxMsgSize             = 100 * 1024 * 1024
-	scResolverSchema       = "sc.connection"
+	// TODO: All services including the orderer must use the same default maximum message size.
+	//       Hence, we need to move this constant to fabric-x-common.
+	maxMsgSize       = 100 * 1024 * 1024
+	scResolverSchema = "sc.connection"
 )
 
 type (
@@ -63,7 +65,7 @@ var knownConnectionIssues = regexp.MustCompile(`(?i)EOF|connection\s+refused|clo
 // NewLoadBalancedDialConfig creates a dial config with load balancing between the endpoints
 // in the given config.
 func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
-	tlsCredentials, err := config.Creds.ClientOption()
+	tlsCredentials, err := config.TLS.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func NewLoadBalancedDialConfig(config *ClientConfig) (*DialConfig, error) {
 
 // NewDialConfigPerEndpoint creates a list of dial configs; one for each endpoint in the given config.
 func NewDialConfigPerEndpoint(config *ClientConfig) ([]*DialConfig, error) {
-	tlsCreds, err := config.Creds.ClientOption()
+	tlsCreds, err := config.TLS.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +106,8 @@ func newLoadBalancedDialConfig(
 ) *DialConfig {
 	resolverEndpoints := make([]resolver.Endpoint, len(endpoint))
 	for i, e := range endpoint {
-		resolverEndpoints[i] = resolver.Endpoint{Addresses: []resolver.Address{{Addr: e.Address()}}}
+		// we're setting ServerName for each address because each service-instance has its own certificates.
+		resolverEndpoints[i] = resolver.Endpoint{Addresses: []resolver.Address{{Addr: e.Address(), ServerName: e.Host}}}
 	}
 	r := manual.NewBuilderWithScheme(scResolverSchema)
 	r.UpdateState(resolver.State{Endpoints: resolverEndpoints})

@@ -5,13 +5,12 @@
 # Configuration for the server
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
-  server-creds:
-    tls-mode: {{ .ServiceTLS.Mode }}
-    server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: {{ .ServiceTLS.CertPath }}
-    key-path: {{ .ServiceTLS.KeyPath }}
+  tls:
+    mode: {{ .ServiceCreds.Mode }}
+    cert-path: {{ .ServiceCreds.CertPath }}
+    key-path: {{ .ServiceCreds.KeyPath }}
     ca-cert-paths:
-      {{- range .ServiceTLS.CACertPaths }}
+      {{- range .ServiceCreds.CACertPaths }}
       - {{ . }}
       {{- end }}
 monitoring:

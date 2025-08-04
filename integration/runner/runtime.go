@@ -27,13 +27,13 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/connection/tlsgen"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
@@ -74,7 +74,7 @@ type (
 
 		LastReceivedBlockNumber uint64
 
-		TLSManager *tlsgen.SecureCommunicationManager
+		TLSManager *test.SecureCommunicationManager
 	}
 
 	// Crypto holds crypto material for a namespace.
@@ -98,7 +98,7 @@ type (
 		// DBCluster configures the cluster to operate in DB cluster mode.
 		DBCluster *dbtest.Connection
 		// TLS configures the secure level between the components: none | tls | mtls
-		TLS connection.TLSMode
+		TLS string
 	}
 )
 
@@ -187,59 +187,49 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		MetaNamespaceVerificationKey: metaCrypto.PubKey,
 	})
 
-	t.Log("create TLS manager")
-	c.TLSManager = tlsgen.NewSecureCommunicationManager(t)
-
-	t.Log("create clients certificates per service")
-	s.ClientsCreds.Vc = c.createClientConfigTLS(t, "validator-committer")
-	s.ClientsCreds.Verifier = c.createClientConfigTLS(t, "verifier")
-	s.ClientsCreds.Coordinator = c.createClientConfigTLS(t, "coordinator")
-	s.ClientsCreds.Query = c.createClientConfigTLS(t, "query-service")
-	s.ClientsCreds.Sidecar = c.createClientConfigTLS(t, "sidecar")
+	t.Log("create TLS manager and clients certificate")
+	c.TLSManager = test.NewSecureCommunicationManager(t)
+	s.ClientCreds = c.createClientTLSConfig(t)
 
 	t.Log("Create processes")
 	c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
 	for i, e := range s.Endpoints.Verifier {
 		p := cmdVerifier
 		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
-		c.Verifier = append(c.Verifier, newProcess(
-			t, p, c.createSystemConfigWithServerCerts(t, e, "verifier")))
+		// we generate different keys for each verifier.
+		verifierSystemConfig := c.createSystemConfigWithServerCerts(t, e)
+		c.Verifier = append(c.Verifier, newProcess(t, p, &verifierSystemConfig))
 	}
 
 	for i, e := range s.Endpoints.VCService {
 		p := cmdVC
 		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
-		c.VcService = append(c.VcService, newProcess(
-			t, p, c.createSystemConfigWithServerCerts(t, e, "validator-committer")))
+		// we generate different keys for each vc-service.
+		vcSystemConfig := c.createSystemConfigWithServerCerts(t, e)
+		c.VcService = append(c.VcService, newProcess(t, p, &vcSystemConfig))
 	}
 
-	c.Coordinator = newProcess(t,
-		cmdCoordinator,
-		c.createSystemConfigWithServerCerts(t, s.Endpoints.Coordinator, "coordinator"),
-	)
+	coordinatorServiceConfig := c.createSystemConfigWithServerCerts(t, s.Endpoints.Coordinator)
+	c.Coordinator = newProcess(t, cmdCoordinator, &coordinatorServiceConfig)
 
-	c.QueryService = newProcess(t,
-		cmdQuery,
-		c.createSystemConfigWithServerCerts(t, s.Endpoints.Query, "query-service"),
-	)
+	queryServiceConfig := c.createSystemConfigWithServerCerts(t, s.Endpoints.Query)
+	c.QueryService = newProcess(t, cmdQuery, &queryServiceConfig)
 
-	c.Sidecar = newProcess(t,
-		cmdSidecar,
-		c.createSystemConfigWithServerCerts(t, s.Endpoints.Sidecar, "sidecar"),
-	)
+	sidecarServiceConfig := c.createSystemConfigWithServerCerts(t, s.Endpoints.Sidecar)
+	c.Sidecar = newProcess(t, cmdSidecar, &sidecarServiceConfig)
 
 	t.Log("Create clients")
 	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
 		clientConnWithCreds(t,
 			s.Endpoints.Coordinator.Server,
-			c.SystemConfig.ClientsCreds.Coordinator,
+			c.SystemConfig.ClientCreds,
 		),
 	)
 
 	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
 		clientConnWithCreds(t,
 			s.Endpoints.Query.Server,
-			c.SystemConfig.ClientsCreds.Query,
+			c.SystemConfig.ClientCreds,
 		),
 	)
 
@@ -258,8 +248,8 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
 		ChannelID: s.ChannelID,
-		ClientConfig: test.MakeClientConfigWithCreds(
-			&c.SystemConfig.ClientsCreds.Sidecar,
+		Client: test.MakeClientConfigWithCreds(
+			&c.SystemConfig.ClientCreds,
 			s.Endpoints.Sidecar.Server,
 		),
 	})
@@ -376,9 +366,9 @@ func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
 }
 
 // clientConnWithCreds creates a service connection using its given server endpoint and TLS configuration.
-func clientConnWithCreds(t *testing.T, e *connection.Endpoint, tlsConfig connection.ConfigTLS) *grpc.ClientConn {
+func clientConnWithCreds(t *testing.T, e *connection.Endpoint, tlsConfig connection.TLSConfig) *grpc.ClientConn {
 	t.Helper()
-	clientCredentials, err := tlsConfig.ClientOption()
+	clientCredentials, err := tlsConfig.ClientCredentials()
 	require.NoError(t, err)
 	serviceConnection, err := connection.Connect(connection.NewDialConfigWithCreds(e, clientCredentials))
 	require.NoError(t, err)
@@ -579,27 +569,32 @@ func (c *CommitterRuntime) ValidateExpectedResultsInCommittedBlock(t *testing.T,
 
 	c.ensureLastCommittedBlockNumber(t, blk.Header.Number)
 
+	var persistedTxIDs []string
+	persistedTxIDsStatus := make(map[string]*protoblocktx.StatusWithHeight)
 	nonDuplicateTxIDsStatus := make(map[string]*protoblocktx.StatusWithHeight)
-	var nonDupTxIDs []string
 	duplicateTxIDsStatus := make(map[string]*protoblocktx.StatusWithHeight)
 	for i, tID := range expected.TxIDs {
 		s := types.CreateStatusWithHeight(expected.Statuses[i], blk.Header.Number, i)
-		if expected.Statuses[i] != protoblocktx.Status_ABORTED_DUPLICATE_TXID {
+		if s.Code == protoblocktx.Status_REJECTED_DUPLICATE_TX_ID {
+			duplicateTxIDsStatus[tID] = s
+		} else {
 			nonDuplicateTxIDsStatus[tID] = s
-			nonDupTxIDs = append(nonDupTxIDs, tID)
-			continue
 		}
-		duplicateTxIDsStatus[tID] = s
+
+		if sidecar.IsStatusStoredInDB(s.Code) {
+			persistedTxIDsStatus[tID] = s
+			persistedTxIDs = append(persistedTxIDs, tID)
+		}
 	}
 
-	c.dbEnv.StatusExistsForNonDuplicateTxID(t, nonDuplicateTxIDsStatus)
+	c.dbEnv.StatusExistsForNonDuplicateTxID(t, persistedTxIDsStatus)
 	// For the duplicate txID, neither the status nor the height would match the entry in the
 	// transaction status table.
 	c.dbEnv.StatusExistsWithDifferentHeightForDuplicateTxID(t, duplicateTxIDsStatus)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
-	test.EnsurePersistedTxStatus(ctx, t, c.CoordinatorClient, nonDupTxIDs, nonDuplicateTxIDsStatus)
+	test.EnsurePersistedTxStatus(ctx, t, c.CoordinatorClient, persistedTxIDs, persistedTxIDsStatus)
 }
 
 // CountStatus returns the number of transactions with a given tx status.
@@ -641,32 +636,20 @@ func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, b
 func (c *CommitterRuntime) createSystemConfigWithServerCerts(
 	t *testing.T,
 	endpoints config.ServiceEndpoints,
-	serverName string,
-) *config.SystemConfig {
+) config.SystemConfig {
 	t.Helper()
 	serviceCfg := c.SystemConfig
-	serviceCfg.ServiceTLS = c.createServerConfigTLS(t, serverName)
+	serviceCfg.ServiceCreds = test.CreateTLSConfigFromPaths(
+		c.config.TLS,
+		c.TLSManager.CreateServerCertificate(t, endpoints.Server.Host),
+	)
 	serviceCfg.ServiceEndpoints = endpoints
-	return &serviceCfg
+	return serviceCfg
 }
 
-func (c *CommitterRuntime) createServerConfigTLS(t *testing.T, asServer string) connection.ConfigTLS {
+func (c *CommitterRuntime) createClientTLSConfig(t *testing.T) connection.TLSConfig {
 	t.Helper()
-	// We pass asServer twice: first to generate the server's keys,
-	// and second to include the server name in the ConfigTLS.
-	// Note: the Server Name Indication (SNI) is not used when creating
-	// the server's transport credentials, so passing it during TLS config
-	// creation is not strictly necessary.
-	return c.createConfigTLS(c.TLSManager.CreateServerCertificate(t, asServer), asServer)
-}
-
-func (c *CommitterRuntime) createClientConfigTLS(t *testing.T, forServer string) connection.ConfigTLS {
-	t.Helper()
-	return c.createConfigTLS(c.TLSManager.CreateClientCertificate(t), forServer)
-}
-
-func (c *CommitterRuntime) createConfigTLS(paths map[string]string, serverName string) connection.ConfigTLS {
-	return test.CreateTLSConfigFromPaths(c.config.TLS, paths, serverName)
+	return test.CreateTLSConfigFromPaths(c.config.TLS, c.TLSManager.CreateClientCertificate(t))
 }
 
 func isMoreThanOneBitSet(bits int) bool {

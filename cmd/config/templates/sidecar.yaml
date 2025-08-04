@@ -4,13 +4,12 @@
 #
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
-  server-creds:
-    tls-mode: {{ .ServiceTLS.Mode }}
-    server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: {{ .ServiceTLS.CertPath }}
-    key-path: {{ .ServiceTLS.KeyPath }}
+  tls:
+    mode: {{ .ServiceCreds.Mode }}
+    cert-path: {{ .ServiceCreds.CertPath }}
+    key-path: {{ .ServiceCreds.KeyPath }}
     ca-cert-paths:
-      {{- range .ServiceTLS.CACertPaths }}
+      {{- range .ServiceCreds.CACertPaths }}
       - {{ . }}
       {{- end }}
   keep-alive:
@@ -33,18 +32,16 @@ orderer:
   channel-id: {{ .ChannelID }}
   consensus-type: BFT
 committer:
-  client:
-    endpoints:
-      - {{ .Endpoints.Coordinator.Server }}
-    client-creds:
-      tls-mode: {{ .ClientsCreds.Coordinator.Mode }}
-      server-name: {{ .ClientsCreds.Coordinator.ServerName }}
-      cert-path: {{ .ClientsCreds.Coordinator.CertPath }}
-      key-path: {{ .ClientsCreds.Coordinator.KeyPath }}
-      ca-cert-paths:
-        {{- range .ClientsCreds.Coordinator.CACertPaths }}
-        - {{ . }}
-        {{- end }}
+  endpoints:
+    - {{ .Endpoints.Coordinator.Server }}
+  tls:
+    mode: {{ .ClientCreds.Mode }}
+    cert-path: {{ .ClientCreds.CertPath }}
+    key-path: {{ .ClientCreds.KeyPath }}
+    ca-cert-paths:
+      {{- range .ClientCreds.CACertPaths }}
+      - {{ . }}
+      {{- end }}
 
 ledger:
   path: {{ .LedgerPath }}

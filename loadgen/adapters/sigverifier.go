@@ -43,7 +43,7 @@ func (c *SvAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWi
 	if err != nil {
 		return errors.Wrap(err, "failed creating verification policy")
 	}
-	clientsTransportCredentials, err := c.config.Client.Creds.ClientOption()
+	clientsTransportCredentials, err := c.config.Client.TLS.ClientCredentials()
 	if err != nil {
 		return errors.Wrapf(err, "could not get verifiers client credentials")
 	}

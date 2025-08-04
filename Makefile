@@ -100,14 +100,18 @@ test: build
 test-package-%: build
 	@$(go_test) ./$*/... | gotestfmt ${GO_TEST_FMT_FLAGS}
 
-# Integration tests excluding DB resiliency tests.
+# Integration tests excluding DB resiliency and secure communication tests.
 # Use `test-integration-db-resiliency`.
 test-integration: build
-	@$(go_test) ./integration/... -skip "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
+	@$(go_test) ./integration/... -skip 'DBResiliency.*|.*TLSConnection.*' | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # DB resiliency integration tests.
 test-integration-db-resiliency: build
 	@$(go_test) ./integration/... -run "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
+
+# Secure communication tests.
+test-integration-tls: build
+	@$(go_test) ./integration/... -run ".*TLSConnection.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests the all-in-one docker image.
 test-container: build-test-node-image
@@ -159,7 +163,7 @@ bench-loadgen: FORCE
 
 # Run dependency detector benchmarks with added op/sec column.
 bench-dep: FORCE
-	$(go_cmd) test ./service/coordinator/dependencygraph/... -bench "BenchmarkDependencyGraph.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
+	$(go_cmd) test ./service/coordinator/dependencygraph/... -timeout 60m -bench "BenchmarkDependencyGraph.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
 
 # Run dependency detector benchmarks with added op/sec column.
 bench-preparer: FORCE
@@ -169,9 +173,9 @@ bench-preparer: FORCE
 bench-sign: FORCE
 	$(go_cmd) test ./utils/signature/... -bench ".*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
 
-# Run verifier benchmarks with added op/sec column.
-bench-verify: FORCE
-	$(go_cmd) test ./service/verifier/... -bench "BenchmarkVerifyForm.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
+# Run sidecar benchmarks with added op/sec column.
+bench-sidecar: FORCE
+	$(go_cmd) test ./service/sidecar/... -bench "Benchmark.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
 
 #########################
 # Generate protos

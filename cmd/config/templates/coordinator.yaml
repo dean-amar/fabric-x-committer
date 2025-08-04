@@ -4,16 +4,14 @@
 #
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
-  server-creds:
-    tls-mode: {{ .ServiceTLS.Mode }}
-    server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: {{ .ServiceTLS.CertPath }}
-    key-path: {{ .ServiceTLS.KeyPath }}
+  tls:
+    mode: {{ .ServiceCreds.Mode }}
+    cert-path: {{ .ServiceCreds.CertPath }}
+    key-path: {{ .ServiceCreds.KeyPath }}
     ca-cert-paths:
-      {{- range .ServiceTLS.CACertPaths }}
+      {{- range .ServiceCreds.CACertPaths }}
       - {{ . }}
       {{- end }}
-
 monitoring:
   server:
     endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
@@ -23,35 +21,25 @@ verifier:
     {{- range .Endpoints.Verifier }}
     - {{ .Server }}
     {{- end }}
-  client-creds:
-    tls-mode: {{ .ClientsCreds.Verifier.Mode }}
-    server-name: {{ .ClientsCreds.Verifier.ServerName }}
-    key-path: {{ .ClientsCreds.Verifier.KeyPath }}
-    cert-path: {{ .ClientsCreds.Verifier.CertPath }}
+  tls: &ClientCreds
+    mode: {{ .ClientCreds.Mode }}
+    key-path: {{ .ClientCreds.KeyPath }}
+    cert-path: {{ .ClientCreds.CertPath }}
     ca-cert-paths:
-      {{- range .ClientsCreds.Verifier.CACertPaths }}
+      {{- range .ClientCreds.CACertPaths }}
       - {{ . }}
       {{- end }}
-
 validator-committer:
   endpoints:
-    {{- range .Endpoints.VCService }}
+   {{- range .Endpoints.VCService }}
     - {{ .Server }}
-    {{- end }}
-  client-creds:
-    tls-mode: {{ .ClientsCreds.Vc.Mode }}
-    server-name: {{ .ClientsCreds.Vc.ServerName }}
-    key-path: {{ .ClientsCreds.Vc.KeyPath }}
-    cert-path: {{ .ClientsCreds.Vc.CertPath }}
-    ca-cert-paths:
-      {{- range .ClientsCreds.Vc.CACertPaths }}
-      - {{ . }}
-      {{- end }}
+   {{- end }}
+  tls:
+    *ClientCreds
 
 dependency-graph:
   num-of-local-dep-constructors: 1
-  waiting-txs-limit: 10_000
-  num-of-workers-for-global-dep-manager: 1
+  waiting-txs-limit: 100_000
   # Add monitoring configuration here if applicable
 per-channel-buffer-size-per-goroutine: 10
 

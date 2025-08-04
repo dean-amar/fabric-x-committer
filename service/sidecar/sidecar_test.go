@@ -8,6 +8,7 @@ package sidecar
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"fmt"
 	"path/filepath"
@@ -19,13 +20,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/hyperledger/fabric/common/ledger/blkstorage"
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
@@ -84,32 +83,36 @@ func (c *sidecarTestConfig) String() string {
 func TestSidecarSecureConnection(t *testing.T) {
 	t.Parallel()
 	var env *sidecarTestEnv
-	test.RunSecureConnectionTest(t,
-		test.SecureConnectionFunctionArguments{
-			ServerCN: "sidecar",
-			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
-				t.Helper()
-				env = newSidecarTestEnvWithCreds(
-					t,
-					sidecarTestConfig{NumService: 1},
-					tlsCfg,
-				)
-				env.startSidecarService(t.Context(), t)
-				return env.config.Server.Endpoint
-			},
-			ClientStarter: func(t *testing.T, _ *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-				t.Helper()
-				return func(ctx context.Context) error {
-					env.startSidecarClient(ctx, t, 0, cfg)
-					if _, ok := channel.NewReader(ctx, env.committedBlock).Read(); !ok {
-						return errors.New("failed to read committed block")
+	for _, TLSMode := range test.ServerModes {
+		test.RunSecureConnectionTest(t,
+			test.SecureConnectionParameters{
+				Service:       "sidecar",
+				ServerTLSMode: TLSMode,
+				TestCases:     test.BuildTestCases(t, TLSMode),
+				ServerStarter: func(t *testing.T, tlsCfg *connection.TLSConfig) connection.Endpoint {
+					t.Helper()
+					env = newSidecarTestEnvWithCreds(
+						t,
+						sidecarTestConfig{NumService: 1},
+						tlsCfg,
+					)
+					env.startSidecarService(t.Context(), t)
+					return env.config.Server.Endpoint
+				},
+				ClientStarter: func(t *testing.T, _ *connection.Endpoint, cfg *connection.TLSConfig) test.RequestFunc {
+					t.Helper()
+					return func(ctx context.Context) error {
+						env.startSidecarClient(ctx, t, 0, cfg)
+						if _, ok := channel.NewReader(ctx, env.committedBlock).Read(); !ok {
+							return errors.New("failed to read committed block")
+						}
+						return nil
 					}
-					return nil
-				}
+				},
+				Parallel: false,
 			},
-			Parallel: false,
-		},
-	)
+		)
+	}
 }
 
 func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
@@ -120,7 +123,7 @@ func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
 func newSidecarTestEnvWithCreds(
 	t *testing.T,
 	conf sidecarTestConfig,
-	serverCreds *connection.ConfigTLS,
+	serverCreds *connection.TLSConfig,
 ) *sidecarTestEnv {
 	t.Helper()
 	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t)
@@ -160,9 +163,7 @@ func newSidecarTestEnvWithCreds(
 				Endpoints: initOrdererEndpoints,
 			},
 		},
-		Committer: CoordinatorConfig{
-			Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
-		},
+		Committer: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
 		Ledger: LedgerConfig{
 			Path: t.TempDir(),
 		},
@@ -198,7 +199,7 @@ func (env *sidecarTestEnv) startWithSidecarClientCreds(
 	ctx context.Context,
 	t *testing.T,
 	startBlkNum int64,
-	sidecarClientCreds *connection.ConfigTLS,
+	sidecarClientCreds *connection.TLSConfig,
 ) {
 	t.Helper()
 	env.startSidecarService(ctx, t)
@@ -207,21 +208,19 @@ func (env *sidecarTestEnv) startWithSidecarClientCreds(
 
 func (env *sidecarTestEnv) startSidecarService(ctx context.Context, t *testing.T) {
 	t.Helper()
-	test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server, func(server *grpc.Server) {
-		peer.RegisterDeliverServer(server, env.sidecar.GetLedgerService())
-	})
+	test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server)
 }
 
 func (env *sidecarTestEnv) startSidecarClient(
 	ctx context.Context,
 	t *testing.T,
 	startBlkNum int64,
-	sidecarClientCreds *connection.ConfigTLS,
+	sidecarClientCreds *connection.TLSConfig,
 ) {
 	t.Helper()
 	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
-		ChannelID:    env.config.Orderer.ChannelID,
-		ClientConfig: test.MakeClientConfigWithCreds(sidecarClientCreds, &env.config.Server.Endpoint),
+		ChannelID: env.config.Orderer.ChannelID,
+		Client:    test.MakeClientConfigWithCreds(sidecarClientCreds, &env.config.Server.Endpoint),
 	}, startBlkNum)
 }
 
@@ -469,7 +468,7 @@ func TestSidecarRecoveryAfterCoordinatorFailure(t *testing.T) {
 	)
 
 	t.Log("3. Send transactions to ordering service to create block 11 after stopping the coordinator")
-	txs := env.sendTransactions(ctx, t)
+	txs := env.sendTransactionsForBlock(ctx, t)
 
 	t.Log("4. Restart the coordinator and validate processing block 11")
 	env.coordinatorServer = mock.StartMockCoordinatorServiceFromListWithConfig(t, env.coordinator,
@@ -521,9 +520,39 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	}
 }
 
+func TestSidecarVerifyBadTxForm(t *testing.T) {
+	t.Parallel()
+	env := newSidecarTestEnv(t, sidecarTestConfig{WithConfigBlock: true})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	env.start(ctx, t, 0)
+	env.requireBlock(ctx, t, 0)
+	testSize := len(MalformedTxTestCases)
+	txs := make([]*protoblocktx.Tx, testSize)
+	status := make([]protoblocktx.Status, testSize)
+	t.Logf("sending %d malformed txs", testSize)
+	for i, tt := range MalformedTxTestCases {
+		txs[i] = tt.Tx
+		if tt.ExpectedStatus != protoblocktx.Status_NOT_VALIDATED {
+			status[i] = tt.ExpectedStatus
+		} else {
+			status[i] = protoblocktx.Status_COMMITTED
+		}
+		_, err := env.ordererEnv.Orderer.SubmitPayload(ctx, env.ordererEnv.TestConfig.ChanID, tt.Tx)
+		require.NoErrorf(t, err, "tx %s", tt.Tx.Id)
+	}
+	t.Logf("sending %d good txs", blockSize-testSize)
+	extraTxs := env.sendTransactions(ctx, t, blockSize-testSize)
+	txs = append(txs, extraTxs...)
+	for range extraTxs {
+		status = append(status, protoblocktx.Status_COMMITTED)
+	}
+	env.requireBlockWithTXsAndStatus(ctx, t, 1, txs, status)
+}
+
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	dialConfig, err := connection.NewLoadBalancedDialConfig(env.config.Committer.Config)
+	dialConfig, err := connection.NewLoadBalancedDialConfig(env.config.Committer)
 	require.NoError(t, err)
 	conn, err := connection.Connect(dialConfig)
 	require.NoError(t, err)
@@ -537,23 +566,30 @@ func (env *sidecarTestEnv) sendTransactionsAndEnsureCommitted(
 	expectedBlockNumber uint64,
 ) {
 	t.Helper()
-	txs := env.sendTransactions(ctx, t)
+	txs := env.sendTransactionsForBlock(ctx, t)
 	env.requireBlockWithTXs(ctx, t, expectedBlockNumber, txs)
+}
+
+func (env *sidecarTestEnv) sendTransactionsForBlock(
+	ctx context.Context,
+	t *testing.T,
+) []*protoblocktx.Tx {
+	t.Helper()
+	// mock-orderer expects <blockSize> txs to create the next block.
+	return env.sendTransactions(ctx, t, blockSize)
 }
 
 func (env *sidecarTestEnv) sendTransactions(
 	ctx context.Context,
 	t *testing.T,
+	count int,
 ) []*protoblocktx.Tx {
 	t.Helper()
 	txIDPrefix := uuid.New().String()
 	// mock-orderer expects <blockSize> txs to create the next block.
-	txs := make([]*protoblocktx.Tx, blockSize)
+	txs := make([]*protoblocktx.Tx, count)
 	for i := range txs {
-		txs[i] = &protoblocktx.Tx{
-			Id:         txIDPrefix + strconv.Itoa(i),
-			Namespaces: []*protoblocktx.TxNamespace{{NsId: strconv.Itoa(i)}},
-		}
+		txs[i] = makeValidTx(t, txIDPrefix+"."+strconv.Itoa(i))
 		_, err := env.ordererEnv.Orderer.SubmitPayload(ctx, env.ordererEnv.TestConfig.ChanID, txs[i])
 		require.NoErrorf(t, err, "tx %d", i)
 	}
@@ -567,6 +603,23 @@ func (env *sidecarTestEnv) requireBlockWithTXs(
 	txs []*protoblocktx.Tx,
 ) {
 	t.Helper()
+	allValid := make([]protoblocktx.Status, len(txs))
+	for i := range allValid {
+		allValid[i] = protoblocktx.Status_COMMITTED
+	}
+	env.requireBlockWithTXsAndStatus(ctx, t, expectedBlockNumber, txs, allValid)
+}
+
+//nolint:revive // 5 arguments.
+func (env *sidecarTestEnv) requireBlockWithTXsAndStatus(
+	ctx context.Context,
+	t *testing.T,
+	expectedBlockNumber uint64,
+	txs []*protoblocktx.Tx,
+	status []protoblocktx.Status,
+) {
+	t.Helper()
+	require.Len(t, status, len(txs))
 	block := env.requireBlock(ctx, t, expectedBlockNumber)
 	require.NotNil(t, block.Data)
 	require.Len(t, block.Data.Data, blockSize)
@@ -582,8 +635,8 @@ func (env *sidecarTestEnv) requireBlockWithTXs(
 	require.NotNil(t, block.Metadata)
 	require.Len(t, block.Metadata.Metadata, 3)
 	require.Len(t, block.Metadata.Metadata[2], blockSize)
-	for _, status := range block.Metadata.Metadata[2] {
-		require.Equal(t, valid, status)
+	for i, actualStatus := range block.Metadata.Metadata[2] {
+		require.Equal(t, byte(status[i]), actualStatus)
 	}
 }
 
@@ -618,7 +671,7 @@ func TestConstructStatuses(t *testing.T) {
 			TxNumber:    3,
 		},
 		"tx3": {
-			Code:        protoblocktx.Status_ABORTED_BLIND_WRITES_NOT_ALLOWED,
+			Code:        protoblocktx.Status_MALFORMED_BLIND_WRITES_NOT_ALLOWED,
 			BlockNumber: 2,
 			TxNumber:    3,
 		},
@@ -635,18 +688,18 @@ func TestConstructStatuses(t *testing.T) {
 		"tx4": types.NewHeight(1, 6),
 	}
 
-	expectedFinalStatuses := []byte{
-		byte(peer.TxValidationCode_VALID),
-		byte(protoblocktx.Status_COMMITTED),
-		byte(peer.TxValidationCode_VALID),
-		byte(protoblocktx.Status_ABORTED_SIGNATURE_INVALID),
-		byte(peer.TxValidationCode_VALID),
-		byte(protoblocktx.Status_ABORTED_DUPLICATE_TXID),
-		byte(protoblocktx.Status_COMMITTED),
+	expectedFinalStatuses := []protoblocktx.Status{
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_ABORTED_SIGNATURE_INVALID,
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_REJECTED_DUPLICATE_TX_ID,
+		protoblocktx.Status_COMMITTED,
 	}
-	actualFinalStatuses := newValidationCodes(7)
+	actualFinalStatuses := make([]protoblocktx.Status, 7)
 	for _, skippedIdx := range []int{0, 2, 4} {
-		actualFinalStatuses[skippedIdx] = byte(peer.TxValidationCode_VALID)
+		actualFinalStatuses[skippedIdx] = protoblocktx.Status_COMMITTED
 	}
 	require.NoError(t, fillStatuses(actualFinalStatuses, statuses, expectedHeight))
 	require.Equal(t, expectedFinalStatuses, actualFinalStatuses)
@@ -665,4 +718,20 @@ func checkLastCommittedBlock(
 		require.NotNil(ct, lastCommittedBlock.Block)
 		require.Equal(ct, expectedBlockNumber, lastCommittedBlock.Block.Number)
 	}, expectedProcessingTime, 50*time.Millisecond)
+}
+
+func makeValidTx(t *testing.T, txID string) *protoblocktx.Tx {
+	t.Helper()
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+	return &protoblocktx.Tx{
+		Id: txID,
+		Namespaces: []*protoblocktx.TxNamespace{{
+			NsId:        strings.ReplaceAll(uuid.New().String(), "-", "")[:32],
+			NsVersion:   0,
+			BlindWrites: []*protoblocktx.Write{{Key: key}},
+		}},
+		Signatures: make([][]byte, 1),
+	}
 }

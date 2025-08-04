@@ -50,25 +50,29 @@ type queryServiceTestEnv struct {
 // under various client TLS configurations.
 func TestQuerySecureConnection(t *testing.T) {
 	t.Parallel()
-	test.RunSecureConnectionTest(t,
-		test.SecureConnectionFunctionArguments{
-			ServerCN: "query",
-			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
-				t.Helper()
-				env := newQueryServiceTestEnvWithServerAndClientCreds(t, tlsCfg, nil)
-				return env.qs.config.Server.Endpoint
+	for _, TLSMode := range test.ServerModes {
+		test.RunSecureConnectionTest(t,
+			test.SecureConnectionParameters{
+				Service:       "query",
+				ServerTLSMode: TLSMode,
+				TestCases:     test.BuildTestCases(t, TLSMode),
+				ServerStarter: func(t *testing.T, tlsCfg *connection.TLSConfig) connection.Endpoint {
+					t.Helper()
+					env := newQueryServiceTestEnvWithServerAndClientCreds(t, tlsCfg, nil)
+					return env.qs.config.Server.Endpoint
+				},
+				ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.TLSConfig) test.RequestFunc {
+					t.Helper()
+					client := createQueryServiceClientWithTLS(t, ep, cfg)
+					return func(ctx context.Context) error {
+						_, err := client.GetConfigTransaction(ctx, nil)
+						return err
+					}
+				},
+				Parallel: true,
 			},
-			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-				t.Helper()
-				client := createQueryServiceClientWithTLS(t, ep, cfg)
-				return func(ctx context.Context) error {
-					_, err := client.GetConfigTransaction(ctx, nil)
-					return err
-				}
-			},
-			Parallel: true,
-		},
-	)
+		)
+	}
 }
 
 func TestQuery(t *testing.T) {
@@ -104,6 +108,17 @@ func TestQuery(t *testing.T) {
 		ret, err := client.GetRows(t.Context(), query)
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
+	})
+
+	t.Run("Query GetRows bad namespace ID", func(t *testing.T) {
+		t.Parallel()
+		badQuery, _, _ := makeQuery(requiredItems)
+		badQuery.Namespaces[0].NsId = "$1"
+		client := protoqueryservice.NewQueryServiceClient(env.clientConn)
+		ret, err := client.GetRows(t.Context(), badQuery)
+		require.Error(t, err)
+		require.Nil(t, ret)
+		require.Contains(t, err.Error(), policy.ErrInvalidNamespaceID.Error())
 	})
 
 	t.Run("Query GetRows client with view", func(t *testing.T) {
@@ -326,7 +341,7 @@ func newQueryServiceTestEnv(t *testing.T) *queryServiceTestEnv {
 
 func newQueryServiceTestEnvWithServerAndClientCreds(
 	t *testing.T,
-	serverTLS, clientTLS *connection.ConfigTLS,
+	serverTLS, clientTLS *connection.TLSConfig,
 ) *queryServiceTestEnv {
 	t.Helper()
 	t.Log("generating config and namespaces")
@@ -344,7 +359,7 @@ func newQueryServiceTestEnvWithServerAndClientCreds(
 				Host: "localhost",
 				Port: 0,
 			},
-			ServerCreds: serverTLS,
+			TLS: serverTLS,
 		},
 		Database: dbConf,
 		Monitoring: monitoring.Config{
@@ -353,13 +368,11 @@ func newQueryServiceTestEnvWithServerAndClientCreds(
 	}
 
 	qs := NewQueryService(config)
-	test.RunServiceAndGrpcForTest(t.Context(), t, qs, qs.config.Server, func(server *grpc.Server) {
-		protoqueryservice.RegisterQueryServiceServer(server, qs)
-	})
+	test.RunServiceAndGrpcForTest(t.Context(), t, qs, qs.config.Server)
 
-	clientOpts, err := clientTLS.ClientOption()
+	clientCreds, err := clientTLS.ClientCredentials()
 	require.NoError(t, err)
-	clientConn, err := connection.Connect(connection.NewDialConfigWithCreds(&qs.config.Server.Endpoint, clientOpts))
+	clientConn, err := connection.Connect(connection.NewDialConfigWithCreds(&qs.config.Server.Endpoint, clientCreds))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		assert.NoError(t, clientConn.Close())
@@ -573,7 +586,7 @@ func defaultViewParams(timeout time.Duration) *protoqueryservice.ViewParameters 
 func createQueryServiceClientWithTLS(
 	t *testing.T,
 	ep *connection.Endpoint,
-	tlsCfg *connection.ConfigTLS,
+	tlsCfg *connection.TLSConfig,
 ) protoqueryservice.QueryServiceClient {
 	t.Helper()
 	return test.CreateClientWithTLS(t, ep, tlsCfg, protoqueryservice.NewQueryServiceClient)

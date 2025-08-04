@@ -58,7 +58,7 @@ func (c *VcAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWi
 	} else {
 		c.nextBlockNum.Store(0)
 	}
-	clientsTransportCredentials, err := c.config.Client.Creds.ClientOption()
+	clientsTransportCredentials, err := c.config.Client.TLS.ClientCredentials()
 	if err != nil {
 		return errors.Wrapf(err, "could not get verifiers client credentials")
 	}

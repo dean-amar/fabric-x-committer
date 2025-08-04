@@ -64,7 +64,7 @@ func TestLoadGen(t *testing.T) {
 				NumVCService: 2,
 				BlockTimeout: 2 * time.Second,
 				BlockSize:    500,
-				TLS:          connection.TLSMutual,
+				TLS:          connection.MutualTLSMode,
 			})
 			c.Start(t, serviceFlags)
 

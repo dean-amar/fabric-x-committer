@@ -14,7 +14,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
@@ -31,25 +30,29 @@ const testTimeout = 3 * time.Second
 
 func TestVerifierSecureConnection(t *testing.T) {
 	t.Parallel()
-	test.RunSecureConnectionTest(t,
-		test.SecureConnectionFunctionArguments{
-			ServerCN: "verifier",
-			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
-				t.Helper()
-				env := newTestState(t, defaultConfigWithCreds(tlsCfg))
-				return env.Service.config.Server.Endpoint
+	for _, TLSMode := range test.ServerModes {
+		test.RunSecureConnectionTest(t,
+			test.SecureConnectionParameters{
+				Service:       "verifier",
+				ServerTLSMode: TLSMode,
+				TestCases:     test.BuildTestCases(t, TLSMode),
+				ServerStarter: func(t *testing.T, tlsCfg *connection.TLSConfig) connection.Endpoint {
+					t.Helper()
+					env := newTestState(t, defaultConfigWithCreds(tlsCfg))
+					return env.Service.config.Server.Endpoint
+				},
+				ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.TLSConfig) test.RequestFunc {
+					t.Helper()
+					client := createVerifierClientWithTLS(t, ep, cfg)
+					return func(ctx context.Context) error {
+						_, err := client.StartStream(ctx)
+						return err
+					}
+				},
+				Parallel: true,
 			},
-			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-				t.Helper()
-				client := createVerifierClientWithTLS(t, ep, cfg)
-				return func(ctx context.Context) error {
-					_, err := client.StartStream(ctx)
-					return err
-				}
-			},
-			Parallel: true,
-		},
-	)
+		)
+	}
 }
 
 func TestNoVerificationKeySet(t *testing.T) {
@@ -143,31 +146,33 @@ func TestMinimalInput(t *testing.T) {
 	require.Len(t, ret, 3)
 }
 
-func TestBadTxFormat(t *testing.T) {
+func TestBadSignature(t *testing.T) {
 	t.Parallel()
-	test.FailHandler(t)
 	c := newTestState(t, defaultConfigQuickCutoff())
 
-	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
-	t.Cleanup(cancel)
-	stream, _ := c.Client.StartStream(ctx)
-
-	update, _ := defaultUpdate(t)
-	err := stream.Send(&protosigverifierservice.RequestBatch{Update: update})
+	stream, err := c.Client.StartStream(t.Context())
 	require.NoError(t, err)
 
-	blockNumber := uint64(1)
-	for _, tt := range BadTxFormatTestCases { //nolint:paralleltest
-		t.Run(tt.Tx.Id, func(t *testing.T) {
-			requireTestCase(t, stream, &testCase{
-				blkNum:         blockNumber,
-				txNum:          0,
-				tx:             tt.Tx,
-				expectedStatus: tt.ExpectedStatus,
-			})
-			blockNumber++
-		})
-	}
+	update, _ := defaultUpdate(t)
+	err = stream.Send(&protosigverifierservice.RequestBatch{Update: update})
+	require.NoError(t, err)
+
+	requireTestCase(t, stream, &testCase{
+		blkNum: 1,
+		txNum:  0,
+		tx: &protoblocktx.Tx{
+			Id: "1",
+			Namespaces: []*protoblocktx.TxNamespace{{
+				NsId:      "1",
+				NsVersion: 0,
+				ReadWrites: []*protoblocktx.ReadWrite{
+					{Key: make([]byte, 0)},
+				},
+			}},
+			Signatures: [][]byte{{0, 1, 2}},
+		},
+		expectedStatus: protoblocktx.Status_ABORTED_SIGNATURE_INVALID,
+	})
 }
 
 func TestUpdatePolicies(t *testing.T) {
@@ -412,9 +417,7 @@ type State struct {
 func newTestState(t *testing.T, config *Config) *State {
 	t.Helper()
 	service := New(config)
-	test.RunServiceAndGrpcForTest(t.Context(), t, service, config.Server, func(grpcServer *grpc.Server) {
-		protosigverifierservice.RegisterVerifierServer(grpcServer, service)
-	})
+	test.RunServiceAndGrpcForTest(t.Context(), t, service, config.Server)
 
 	clientConnection, err := connection.Connect(connection.NewInsecureDialConfig(&config.Server.Endpoint))
 	require.NoError(t, err)
@@ -467,7 +470,7 @@ func defaultConfig() *Config {
 	return defaultConfigWithCreds(nil)
 }
 
-func defaultConfigWithCreds(creds *connection.ConfigTLS) *Config {
+func defaultConfigWithCreds(creds *connection.TLSConfig) *Config {
 	return &Config{
 		Server: connection.NewLocalHostServerWithCreds(creds),
 		ParallelExecutor: ExecutorConfig{
@@ -492,7 +495,7 @@ func defaultConfigQuickCutoff() *Config {
 func createVerifierClientWithTLS(
 	t *testing.T,
 	ep *connection.Endpoint,
-	tlsCfg *connection.ConfigTLS,
+	tlsCfg *connection.TLSConfig,
 ) protosigverifierservice.VerifierClient {
 	t.Helper()
 	return test.CreateClientWithTLS(t, ep, tlsCfg, protosigverifierservice.NewVerifierClient)

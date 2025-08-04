@@ -48,9 +48,7 @@ func TestReadConfigSidecar(t *testing.T) {
 				},
 				ChannelID: "mychannel",
 			},
-			Committer: sidecar.CoordinatorConfig{
-				Config: makeClientConfig("localhost", 9001),
-			},
+			Committer: makeClientConfig("localhost", 9001),
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
 			},
@@ -83,9 +81,7 @@ func TestReadConfigSidecar(t *testing.T) {
 				},
 				ChannelID: "mychannel",
 			},
-			Committer: sidecar.CoordinatorConfig{
-				Config: makeClientConfig("coordinator", 9001),
-			},
+			Committer: makeClientConfig("coordinator", 9001),
 			Ledger: sidecar.LedgerConfig{
 				Path: "/root/sc/ledger",
 			},
@@ -118,9 +114,8 @@ func TestReadConfigCoordinator(t *testing.T) {
 			Server:     makeServer("localhost", 9001),
 			Monitoring: makeMonitoring("localhost", 2119),
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
-				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 100_000,
-				NumOfWorkersForGlobalDepManager: 1,
+				NumOfLocalDepConstructors: 1,
+				WaitingTxsLimit:           100_000,
 			},
 			ChannelBufferSizePerGoroutine: 10,
 		},
@@ -133,9 +128,8 @@ func TestReadConfigCoordinator(t *testing.T) {
 			VerifierConfig:           *makeClientConfig("signature-verifier", 5001),
 			ValidatorCommitterConfig: *makeClientConfig("validator-persister", 6001),
 			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
-				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 10_000,
-				NumOfWorkersForGlobalDepManager: 1,
+				NumOfLocalDepConstructors: 1,
+				WaitingTxsLimit:           100_000,
 			},
 			ChannelBufferSizePerGoroutine: 10,
 		},
@@ -330,7 +324,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarConfig: makeClientConfig("sidecar", 4001),
+					SidecarClient: makeClientConfig("sidecar", 4001),
 					Orderer: broadcastdeliver.Config{
 						Connection: broadcastdeliver.ConnectionConfig{
 							Endpoints: connection.NewOrdererEndpoints(

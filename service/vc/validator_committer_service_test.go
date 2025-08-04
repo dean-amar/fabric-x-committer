@@ -36,25 +36,29 @@ type validatorAndCommitterServiceTestEnvWithClient struct {
 
 func TestVCSecureConnection(t *testing.T) {
 	t.Parallel()
-	test.RunSecureConnectionTest(t,
-		test.SecureConnectionFunctionArguments{
-			ServerCN: "validator-committer",
-			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
-				t.Helper()
-				env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, tlsCfg)
-				return env.Configs[0].Server.Endpoint
+	for _, TLSMode := range test.ServerModes {
+		test.RunSecureConnectionTest(t,
+			test.SecureConnectionParameters{
+				Service:       "validator-committer",
+				ServerTLSMode: TLSMode,
+				TestCases:     test.BuildTestCases(t, TLSMode),
+				ServerStarter: func(t *testing.T, cfg *connection.TLSConfig) connection.Endpoint {
+					t.Helper()
+					env := newValidatorAndCommitServiceTestEnvWithTLS(t, 1, cfg)
+					return env.Configs[0].Server.Endpoint
+				},
+				ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.TLSConfig) test.RequestFunc {
+					t.Helper()
+					client := createVcClientWithTLS(t, ep, cfg)
+					return func(ctx context.Context) error {
+						_, err := client.SetupSystemTablesAndNamespaces(ctx, nil)
+						return err
+					}
+				},
+				Parallel: true,
 			},
-			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-				t.Helper()
-				client := createVcClientWithTLS(t, ep, cfg)
-				return func(ctx context.Context) error {
-					_, err := client.SetupSystemTablesAndNamespaces(ctx, nil)
-					return err
-				}
-			},
-			Parallel: true,
-		},
-	)
+		)
+	}
 }
 
 func newValidatorAndCommitServiceTestEnvWithClient(
@@ -403,7 +407,7 @@ func TestValidatorAndCommitterService(t *testing.T) {
 				{
 					ID: "prelim invalid tx",
 					PrelimInvalidTxStatus: &protovcservice.InvalidTxStatus{
-						Code: protoblocktx.Status_ABORTED_DUPLICATE_NAMESPACE,
+						Code: protoblocktx.Status_MALFORMED_DUPLICATE_NAMESPACE,
 					},
 					BlockNumber: 5,
 					TxNum:       2,
@@ -426,6 +430,14 @@ func TestValidatorAndCommitterService(t *testing.T) {
 					BlockNumber: 2,
 					TxNum:       6,
 				},
+				{
+					ID:          "Rejected TX",
+					BlockNumber: 2,
+					TxNum:       7,
+					PrelimInvalidTxStatus: &protovcservice.InvalidTxStatus{
+						Code: protoblocktx.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD,
+					},
+				},
 			},
 		}
 
@@ -435,8 +447,9 @@ func TestValidatorAndCommitterService(t *testing.T) {
 
 		expectedStatus := []protoblocktx.Status{
 			protoblocktx.Status_ABORTED_MVCC_CONFLICT,
-			protoblocktx.Status_ABORTED_DUPLICATE_NAMESPACE,
+			protoblocktx.Status_MALFORMED_DUPLICATE_NAMESPACE,
 			protoblocktx.Status_ABORTED_MVCC_CONFLICT,
+			protoblocktx.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD,
 		}
 
 		expectedTxStatus := make(map[string]*protoblocktx.StatusWithHeight, len(txBatch.Transactions))
@@ -651,12 +664,12 @@ func TestTransactionResubmission(t *testing.T) {
 			tx: &protovcservice.Transaction{
 				ID: "duplicate namespace",
 				PrelimInvalidTxStatus: &protovcservice.InvalidTxStatus{
-					Code: protoblocktx.Status_ABORTED_DUPLICATE_NAMESPACE,
+					Code: protoblocktx.Status_MALFORMED_DUPLICATE_NAMESPACE,
 				},
 				BlockNumber: 3,
 				TxNum:       7,
 			},
-			expectedStatus: protoblocktx.Status_ABORTED_DUPLICATE_NAMESPACE,
+			expectedStatus: protoblocktx.Status_MALFORMED_DUPLICATE_NAMESPACE,
 		},
 		{
 			tx: &protovcservice.Transaction{
