@@ -9,7 +9,10 @@ package test
 import (
 	"context"
 	_ "embed"
+	docker "github.com/fsouza/go-dockerclient"
+	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"io"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -35,6 +38,23 @@ const (
 	monitoredMetric    = "loadgen_transaction_committed_total"
 )
 
+// GetContainerIP returns the IP address of a container on the given network.
+func GetContainerIP(t *testing.T, containerName, networkName string) string {
+	t.Helper()
+
+	cli, err := docker.NewClientFromEnv()
+	require.NoError(t, err)
+
+	c, err := cli.InspectContainer(containerName)
+	require.NoError(t, err)
+
+	net := c.NetworkSettings.Networks[networkName]
+	require.NotNil(t, net, "container %q has no network %q", containerName, networkName)
+	require.NotEmpty(t, net.IPAddress, "container %q has no IP on network %q", containerName, networkName)
+
+	return net.IPAddress + ":"
+}
+
 // TestStartTestNode spawns an all-in-one instance of the committer using docker
 // to verify that the committer container starts as expected.
 func TestStartTestNode(t *testing.T) {
@@ -45,10 +65,23 @@ func TestStartTestNode(t *testing.T) {
 	require.NoError(t, err)
 	defer connection.CloseConnectionsLog(dockerClient)
 
-	stopAndRemoveContainersByName(ctx, t, dockerClient, "committer")
-	startCommitter(ctx, t, dockerClient, "committer")
+	stopAndRemoveContainersByName(ctx, t, dockerClient, "orderer", "db", "vc-service", "verifier", "query", "coordinator", "sidecar", "loadgen")
+	startCommitterWithNodes(ctx, t, dockerClient, "db")
+	startCommitterWithNodes(ctx, t, dockerClient, "verifier")
+	startCommitterWithNodes(ctx, t, dockerClient, "vc-service")
+	startCommitterWithNodes(ctx, t, dockerClient, "query")
+	startCommitterWithNodes(ctx, t, dockerClient, "coordinator")
+	startCommitterWithNodes(ctx, t, dockerClient, "sidecar")
+
+	startCommitterWithNodes(ctx, t, dockerClient, "orderer")
+	startCommitterWithNodes(ctx, t, dockerClient, "loadgen")
 
 	t.Log("Try to fetch the first block")
+
+	t.Logf("sidecar container ep: %s", GetContainerIP(t, "sidecar", "test-net"))
+
+	sidecarIP := GetContainerIP(t, "sidecar", "test-net")
+	t.Logf("sidecar-endpoint: %s", sidecarIP)
 	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort)
 	require.NoError(t, err)
 	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
@@ -67,6 +100,7 @@ func TestStartTestNode(t *testing.T) {
 	// We log only if there are changes to avoid spamming the log.
 	prevCount := -1
 	require.Eventually(t, func() bool {
+		t.Log("logging")
 		count := test.GetMetricValueFromURL(t, metricsURL, monitoredMetric)
 		if prevCount != count {
 			t.Logf("%s: %d", monitoredMetric, count)
@@ -74,6 +108,64 @@ func TestStartTestNode(t *testing.T) {
 		prevCount = count
 		return count > 1_000
 	}, 15*time.Minute, 100*time.Millisecond)
+}
+
+//nolint:revive
+func startCommitterWithNodes(ctx context.Context, t *testing.T, dockerClient *client.Client, nodeName string) {
+	t.Helper()
+	containerCfg := &container.Config{
+		Image: testNodeImage,
+		Cmd:   []string{"run", nodeName},
+		Tty:   true,
+	}
+
+	hostCfg := &container.HostConfig{
+		NetworkMode: container.NetworkMode("test-net"),
+	}
+
+	if nodeName == "sidecar" {
+
+		containerCfg.ExposedPorts = nat.PortSet{
+			nat.Port(sidecarPort + "/tcp"):        struct{}{},
+			nat.Port(loadGenMetricsPort + "/tcp"): struct{}{},
+		}
+
+		hostCfg.PortBindings = nat.PortMap{
+			// sidecar port binding
+			nat.Port(sidecarPort + "/tcp"): []nat.PortBinding{{
+				HostIP:   "localhost",
+				HostPort: sidecarPort,
+			}},
+			// loadgen service port bindings
+			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
+				HostIP:   "localhost",
+				HostPort: loadGenMetricsPort,
+			}},
+		}
+	}
+
+	resp, err := dockerClient.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, nodeName)
+	require.NoError(t, err)
+
+	//nolint:contextcheck // We want to ensure cleanup when the test is done.
+	t.Cleanup(func() {
+		stopAndRemoveID(context.Background(), t, dockerClient, resp.ID)
+	})
+
+	require.NoError(t, dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}))
+
+	logs, err := dockerClient.ContainerLogs(ctx, resp.ID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	})
+	require.NoError(t, err)
+	go func() {
+		_, err = io.Copy(os.Stdout, logs)
+		if err != nil {
+			t.Logf("[%s] logs ended with: %v", nodeName, err)
+		}
+	}()
 }
 
 //nolint:revive
@@ -166,4 +258,34 @@ func stopAndRemoveID(ctx context.Context, t *testing.T, dockerClient *client.Cli
 	if err != nil {
 		t.Logf("unable to remove container: %s", err)
 	}
+}
+
+type portAllocator struct {
+	listeners []net.Listener
+}
+
+// allocatePorts finds a range of available ports.
+func (p *portAllocator) allocatePorts(t *testing.T, count int) []config.ServiceEndpoints {
+	t.Helper()
+	endpoints := make([]config.ServiceEndpoints, count)
+	for i := range endpoints {
+		endpoints[i].Server = p.allocate(t)
+		endpoints[i].Metrics = p.allocate(t)
+	}
+	return endpoints
+}
+
+func (p *portAllocator) allocate(t *testing.T) *connection.Endpoint {
+	t.Helper()
+	s := connection.NewLocalHostServer()
+	listener, err := s.Listener()
+	require.NoError(t, err)
+	p.listeners = append(p.listeners, listener)
+	return &s.Endpoint
+}
+
+// close releases the ports to be used for their intended purpose.
+func (p *portAllocator) close() {
+	connection.CloseConnectionsLog(p.listeners...)
+	p.listeners = nil
 }

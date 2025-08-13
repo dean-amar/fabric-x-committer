@@ -4,10 +4,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-
 set -e
 
-ops="${*:-db orderer committer loadgen}"
+ops="${*:-db orderer committer loadgen sigservice vc query coordinator sidecar}"
 
 if [[ $ops == *"db"* ]]; then
   export POSTGRES_PASSWORD=yugabyte
@@ -24,6 +23,26 @@ if [[ $ops == *"committer"* ]]; then
   "$BINS_PATH/committer" start-vc          --config "$CONFIGS_PATH/vcservice.yaml" &
   "$BINS_PATH/committer" start-query       --config "$CONFIGS_PATH/queryservice.yaml" &
   "$BINS_PATH/committer" start-coordinator --config "$CONFIGS_PATH/coordinator.yaml" &
+  "$BINS_PATH/committer" start-sidecar     --config "$CONFIGS_PATH/sidecar.yaml" &
+fi
+
+if [[ $ops == *"verifier"* ]]; then
+  "$BINS_PATH/committer" start-verifier    --config "$CONFIGS_PATH/sigservice.yaml" &
+fi
+
+if [[ $ops == *"vc"* ]]; then
+  "$BINS_PATH/committer" start-vc    --config "$CONFIGS_PATH/vcservice.yaml" &
+fi
+
+if [[ $ops == *"query"* ]]; then
+  "$BINS_PATH/committer" start-query       --config "$CONFIGS_PATH/queryservice.yaml" &
+fi
+
+if [[ $ops == *"coordinator"* ]]; then
+  "$BINS_PATH/committer" start-coordinator --config "$CONFIGS_PATH/coordinator.yaml" &
+fi
+
+if [[ $ops == *"sidecar"* ]]; then
   "$BINS_PATH/committer" start-sidecar     --config "$CONFIGS_PATH/sidecar.yaml" &
 fi
 
