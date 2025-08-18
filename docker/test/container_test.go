@@ -9,13 +9,13 @@ package test
 import (
 	"context"
 	_ "embed"
+	docker "github.com/fsouza/go-dockerclient"
 	"io"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
@@ -45,20 +45,36 @@ func TestStartTestNode(t *testing.T) {
 	require.NoError(t, err)
 	defer connection.CloseConnectionsLog(dockerClient)
 
-	stopAndRemoveContainersByName(ctx, t, dockerClient, "committer")
-	startCommitter(ctx, t, dockerClient, "committer")
+	stopAndRemoveContainersByName(ctx, t, dockerClient, "orderer", "db", "vc-service", "verifier", "query", "coordinator", "sidecar", "loadgen")
+	startCommitterWithNodes(ctx, t, dockerClient, "db")
+	startCommitterWithNodes(ctx, t, dockerClient, "verifier")
+	startCommitterWithNodes(ctx, t, dockerClient, "vc-service")
+	startCommitterWithNodes(ctx, t, dockerClient, "query")
+	startCommitterWithNodes(ctx, t, dockerClient, "coordinator")
+	startCommitterWithNodes(ctx, t, dockerClient, "sidecar")
+
+	startCommitterWithNodes(ctx, t, dockerClient, "orderer")
+	startCommitterWithNodes(ctx, t, dockerClient, "loadgen")
 
 	t.Log("Try to fetch the first block")
+
+	sidecarContainerEndpoint := GetContainerIP(t, "sidecar", "test-net")
+	t.Logf("sidecar-container-endpoint: %s", sidecarContainerEndpoint)
 	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort)
 	require.NoError(t, err)
 	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
 		ChannelID: channelName,
-		Client:    test.MakeInsecureClientConfig(sidecarEndpoint),
+		Client: test.MakeTLSClientConfig(&connection.TLSConfig{
+			Mode:        "mtls",
+			KeyPath:     "/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/client/private-key",
+			CertPath:    "/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/client/public-key",
+			CACertPaths: []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/client/ca-certificate"},
+		}, sidecarEndpoint),
 	}, 0)
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
-
+	t.Logf("After-sidecar-connection.")
 	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + loadGenMetricsPort)
 	require.NoError(t, err)
 
@@ -77,35 +93,63 @@ func TestStartTestNode(t *testing.T) {
 }
 
 //nolint:revive
-func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Client, name string) {
+func startCommitterWithNodes(ctx context.Context, t *testing.T, dockerClient *client.Client, nodeName string) {
 	t.Helper()
 	containerCfg := &container.Config{
 		Image: testNodeImage,
-		Cmd:   []string{"run", "db", "committer", "orderer", "loadgen"},
-		ExposedPorts: nat.PortSet{
-			nat.Port(sidecarPort + "/tcp"):        struct{}{},
-			nat.Port(loadGenMetricsPort + "/tcp"): struct{}{},
-		},
-		Tty: true,
+		Cmd:   []string{"run", nodeName},
+		Tty:   true,
 	}
 
 	hostCfg := &container.HostConfig{
-		NetworkMode: network.NetworkDefault,
-		PortBindings: nat.PortMap{
+		NetworkMode: container.NetworkMode("test-net"),
+	}
+
+	// Bind mounts based on nodeName
+	switch nodeName {
+	case "query":
+		hostCfg.Binds = []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/query:/certs"}
+	case "vc-service":
+		hostCfg.Binds = []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/vc-service:/certs"}
+	case "verifier":
+		hostCfg.Binds = []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/verifier:/certs"}
+	case "sidecar":
+		hostCfg.Binds = []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/sidecar:/certs",
+			"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/client:/client_certs"}
+	case "coordinator":
+		hostCfg.Binds = []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/coordinator:/certs",
+			"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/client:/client_certs"}
+	case "loadgen":
+		hostCfg.Binds = []string{"/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates/client:/client_certs"}
+	}
+
+	if nodeName == "sidecar" {
+		containerCfg.ExposedPorts = nat.PortSet{
+			sidecarPort + "/tcp": struct{}{},
+		}
+		hostCfg.PortBindings = nat.PortMap{
 			// sidecar port binding
-			nat.Port(sidecarPort + "/tcp"): []nat.PortBinding{{
+			sidecarPort + "/tcp": []nat.PortBinding{{
 				HostIP:   "localhost",
 				HostPort: sidecarPort,
 			}},
+		}
+	}
+
+	if nodeName == "loadgen" {
+		containerCfg.ExposedPorts = nat.PortSet{
+			loadGenMetricsPort + "/tcp": struct{}{},
+		}
+		hostCfg.PortBindings = nat.PortMap{
 			// loadgen service port bindings
-			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
+			loadGenMetricsPort + "/tcp": []nat.PortBinding{{
 				HostIP:   "localhost",
 				HostPort: loadGenMetricsPort,
 			}},
-		},
+		}
 	}
 
-	resp, err := dockerClient.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, name)
+	resp, err := dockerClient.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, nodeName)
 	require.NoError(t, err)
 
 	//nolint:contextcheck // We want to ensure cleanup when the test is done.
@@ -124,9 +168,26 @@ func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Clie
 	go func() {
 		_, err = io.Copy(os.Stdout, logs)
 		if err != nil {
-			t.Logf("[%s] logs ended with: %v", name, err)
+			t.Logf("[%s] logs ended with: %v", nodeName, err)
 		}
 	}()
+}
+
+// GetContainerIP returns the IP address of a container on the given network.
+func GetContainerIP(t *testing.T, containerName, networkName string) string {
+	t.Helper()
+
+	cli, err := docker.NewClientFromEnv()
+	require.NoError(t, err)
+
+	c, err := cli.InspectContainer(containerName)
+	require.NoError(t, err)
+
+	net := c.NetworkSettings.Networks[networkName]
+	require.NotNil(t, net, "container %q has no network %q", containerName, networkName)
+	require.NotEmpty(t, net.IPAddress, "container %q has no IP on network %q", containerName, networkName)
+
+	return net.IPAddress + ":"
 }
 
 func stopAndRemoveContainersByName(ctx context.Context, t *testing.T, dockerClient *client.Client, names ...string) {

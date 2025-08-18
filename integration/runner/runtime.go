@@ -8,7 +8,6 @@ package runner
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -196,79 +195,110 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	t.Log("create TLS manager and clients certificate")
 	c.TLSManager = test.NewSecureCommunicationManager(t)
-	s.ClientTLS = test.CreateTLSConfigFromPaths(c.config.TLS, c.TLSManager.CreateClientCertificate(t))
-
-	t.Log("Create processes")
-	c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
-	for i, e := range s.Endpoints.Verifier {
-		p := cmdVerifier
-		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
-		// we generate different keys for each verifier.
-		verifierSystemConfig := c.createSystemConfigWithServerTLS(t, e)
-		c.Verifier = append(c.Verifier, newProcess(t, p, &verifierSystemConfig))
-	}
-
-	for i, e := range s.Endpoints.VCService {
-		p := cmdVC
-		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
-		// we generate different keys for each vc-service.
-		vcSystemConfig := c.createSystemConfigWithServerTLS(t, e)
-		c.VcService = append(c.VcService, newProcess(t, p, &vcSystemConfig))
-	}
-
-	coordinatorServiceConfig := c.createSystemConfigWithServerTLS(t, s.Endpoints.Coordinator)
-	c.Coordinator = newProcess(t, cmdCoordinator, &coordinatorServiceConfig)
-
-	queryServiceConfig := c.createSystemConfigWithServerTLS(t, s.Endpoints.Query)
-	c.QueryService = newProcess(t, cmdQuery, &queryServiceConfig)
-
-	sidecarServiceConfig := c.createSystemConfigWithServerTLS(t, s.Endpoints.Sidecar)
-	c.Sidecar = newProcess(t, cmdSidecar, &sidecarServiceConfig)
-
-	t.Log("Create clients")
-	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
-		clientConnWithTLS(t,
-			s.Endpoints.Coordinator.Server,
-			c.SystemConfig.ClientTLS,
-		),
-	)
-
-	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
-		clientConnWithTLS(t,
-			s.Endpoints.Query.Server,
-			c.SystemConfig.ClientTLS,
-		),
-	)
-
-	c.notifyClient = protonotify.NewNotifierClient(
-		clientConnWithTLS(t,
-			s.Endpoints.Sidecar.Server,
-			c.SystemConfig.ClientTLS,
-		),
-	)
-
-	var err error
-	c.ordererClient, err = broadcastdeliver.New(&broadcastdeliver.Config{
-		Connection: broadcastdeliver.ConnectionConfig{
-			Endpoints: c.ordererEndpoints,
+	c.createSystemConfigWithServerTLS(t, config.ServiceEndpoints{
+		Server: &connection.Endpoint{
+			Host: "vc-service",
+			Port: 5433,
 		},
-		ChannelID:     s.ChannelID,
-		ConsensusType: broadcastdeliver.Bft,
-	})
-	require.NoError(t, err)
-
-	c.ordererStream, err = c.ordererClient.Broadcast(t.Context())
-	require.NoError(t, err)
-
-	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
-		ChannelID: s.ChannelID,
-		Client: test.MakeTLSClientConfig(
-			&c.SystemConfig.ClientTLS,
-			s.Endpoints.Sidecar.Server,
-		),
-	})
-	require.NoError(t, err)
-	return c
+	}, "")
+	c.createSystemConfigWithServerTLS(t, config.ServiceEndpoints{
+		Server: &connection.Endpoint{
+			Host: "verifier",
+			Port: 5433,
+		},
+	}, "")
+	c.createSystemConfigWithServerTLS(t, config.ServiceEndpoints{
+		Server: &connection.Endpoint{
+			Host: "sidecar",
+			Port: 5433,
+		},
+	}, "localhost")
+	c.createSystemConfigWithServerTLS(t, config.ServiceEndpoints{
+		Server: &connection.Endpoint{
+			Host: "query",
+			Port: 5433,
+		},
+	}, "")
+	c.createSystemConfigWithServerTLS(t, config.ServiceEndpoints{
+		Server: &connection.Endpoint{
+			Host: "coordinator",
+			Port: 5433,
+		},
+	}, "")
+	s.ClientTLS = test.CreateTLSConfigFromPaths(c.config.TLS, c.TLSManager.CreateClientCertificate(t))
+	return nil
+	//
+	//t.Log("Create processes")
+	//c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
+	//for i, e := range s.Endpoints.Verifier {
+	//	p := cmdVerifier
+	//	p.Name = fmt.Sprintf("%s-%d", p.Name, i)
+	//	// we generate different keys for each verifier.
+	//	verifierSystemConfig := c.createSystemConfigWithServerTLS(t, e)
+	//	c.Verifier = append(c.Verifier, newProcess(t, p, &verifierSystemConfig))
+	//}
+	//
+	//for i, e := range s.Endpoints.VCService {
+	//	p := cmdVC
+	//	p.Name = fmt.Sprintf("%s-%d", p.Name, i)
+	//	// we generate different keys for each vc-service.
+	//	vcSystemConfig := c.createSystemConfigWithServerTLS(t, e)
+	//	c.VcService = append(c.VcService, newProcess(t, p, &vcSystemConfig))
+	//}
+	//
+	//coordinatorServiceConfig := c.createSystemConfigWithServerTLS(t, s.Endpoints.Coordinator)
+	//c.Coordinator = newProcess(t, cmdCoordinator, &coordinatorServiceConfig)
+	//
+	//queryServiceConfig := c.createSystemConfigWithServerTLS(t, s.Endpoints.Query)
+	//c.QueryService = newProcess(t, cmdQuery, &queryServiceConfig)
+	//
+	//sidecarServiceConfig := c.createSystemConfigWithServerTLS(t, s.Endpoints.Sidecar)
+	//c.Sidecar = newProcess(t, cmdSidecar, &sidecarServiceConfig)
+	//
+	//t.Log("Create clients")
+	//c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
+	//	clientConnWithTLS(t,
+	//		s.Endpoints.Coordinator.Server,
+	//		c.SystemConfig.ClientTLS,
+	//	),
+	//)
+	//
+	//c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
+	//	clientConnWithTLS(t,
+	//		s.Endpoints.Query.Server,
+	//		c.SystemConfig.ClientTLS,
+	//	),
+	//)
+	//
+	//c.notifyClient = protonotify.NewNotifierClient(
+	//	clientConnWithTLS(t,
+	//		s.Endpoints.Sidecar.Server,
+	//		c.SystemConfig.ClientTLS,
+	//	),
+	//)
+	//
+	//var err error
+	//c.ordererClient, err = broadcastdeliver.New(&broadcastdeliver.Config{
+	//	Connection: broadcastdeliver.ConnectionConfig{
+	//		Endpoints: c.ordererEndpoints,
+	//	},
+	//	ChannelID:     s.ChannelID,
+	//	ConsensusType: broadcastdeliver.Bft,
+	//})
+	//require.NoError(t, err)
+	//
+	//c.ordererStream, err = c.ordererClient.Broadcast(t.Context())
+	//require.NoError(t, err)
+	//
+	//c.sidecarClient, err = sidecarclient.New(&sidecarclient.Config{
+	//	ChannelID: s.ChannelID,
+	//	Client: test.MakeTLSClientConfig(
+	//		&c.SystemConfig.ClientTLS,
+	//		s.Endpoints.Sidecar.Server,
+	//	),
+	//})
+	//require.NoError(t, err)
+	//return c
 }
 
 // Start runs all services and load generator as configured by the serviceFlags.
@@ -674,12 +704,13 @@ func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, b
 func (c *CommitterRuntime) createSystemConfigWithServerTLS(
 	t *testing.T,
 	endpoints config.ServiceEndpoints,
+	names string,
 ) config.SystemConfig {
 	t.Helper()
 	serviceCfg := c.SystemConfig
 	serviceCfg.ServiceTLS = test.CreateTLSConfigFromPaths(
 		c.config.TLS,
-		c.TLSManager.CreateServerCertificate(t, endpoints.Server.Host),
+		c.TLSManager.CreateServerCertificate(t, endpoints.Server.Host, names),
 	)
 	serviceCfg.ServiceEndpoints = endpoints
 	return serviceCfg

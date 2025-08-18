@@ -19,10 +19,21 @@ orderer-client:
   sidecar-client:
     endpoints:
       - sidecar:4001
+    tls:
+      mode: mtls
+      cert-path: /client_certs/public-key
+      key-path: /client_certs/private-key
+      ca-cert-paths:
+        - /client_certs/ca-certificate
+    reconnect:
+      lb-policy: round_robin
+
   orderer:
     connection:
       endpoints:
         - broadcast,deliver,ordering-service:7050
+      reconnect:
+        lb-policy: round_robin
     consensus-type: BFT
     channel-id: mychannel
   # We set low values to reduce the CPU load during tests.

@@ -72,12 +72,23 @@ func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
 // Writing it to a temp testing folder and returns a map with the credential paths.
 func (scm *SecureCommunicationManager) CreateServerCertificate(
 	t *testing.T,
-	san string,
+	sans ...string,
 ) map[string]string {
 	t.Helper()
-	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san)
+	sans = filterEmptyStrings(sans)
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(sans...)
 	require.NoError(t, err)
-	return createCertificatesPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
+	return createCertificatesPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()), sans[0])
+}
+
+func filterEmptyStrings(input []string) []string {
+	var result []string
+	for _, s := range input {
+		if s != "" {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // CreateClientCertificate creates a client key pair,
@@ -86,10 +97,10 @@ func (scm *SecureCommunicationManager) CreateClientCertificate(t *testing.T) map
 	t.Helper()
 	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
 	require.NoError(t, err)
-	return createCertificatesPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()))
+	return createCertificatesPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()), "client")
 }
 
-func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]string {
+func createCertificatesPaths(t *testing.T, data map[string][]byte, name string) map[string]string {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Cleanup(func() {
@@ -97,9 +108,11 @@ func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]st
 	})
 
 	paths := make(map[string]string)
-
+	certPaths := "/Users/deanamar/Work/fabric-x-committer/cmd/tls-certificates"
+	dir := fmt.Sprintf("%s/%s", certPaths, name)
+	require.NoError(t, os.Mkdir(dir, 0700))
 	for key, value := range data {
-		dataPath, err := saveBytesToFile(tmpDir, key, value)
+		dataPath, err := saveBytesToFile(dir, key, value)
 		require.NoError(t, err)
 		paths[key] = dataPath
 	}
