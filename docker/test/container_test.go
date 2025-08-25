@@ -37,13 +37,15 @@ type startNodeParameters struct {
 }
 
 const (
-	testNodeImage      = "icr.io/cbdc/committer-test-node:0.0.2"
-	tlsTestNodeImage   = "icr.io/cbdc/committer-tls-test-node:0.0.2"
-	sidecarPort        = "4001"
-	loadGenMetricsPort = "2118"
-	channelName        = "mychannel"
-	monitoredMetric    = "loadgen_transaction_committed_total"
-	networkPrefix      = "sc_network_"
+	testNodeImage       = "icr.io/cbdc/committer-test-node:0.0.2"
+	tlsTestNodeImage    = "icr.io/cbdc/committer-tls-test-node:0.0.2"
+	sidecarPort         = "4001"
+	loadGenMetricsPort  = "2118"
+	sidecarPort2        = "4002"
+	loadGenMetricsPort2 = "2119"
+	channelName         = "mychannel"
+	monitoredMetric     = "loadgen_transaction_committed_total"
+	networkPrefix       = "sc_network_"
 )
 
 // TestCommitterNodesWithTLS spawns an all-in-one instance of the committer using docker
@@ -79,10 +81,10 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	}
 
 	t.Log("Try to fetch the first block")
-	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort)
+	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort2)
 	require.NoError(t, err)
 	fetchFirstBlock(ctx, t, test.MakeTLSClientConfig(&clientTLSConfig, sidecarEndpoint))
-	monitorMetrics(t)
+	monitorMetrics(t, loadGenMetricsPort2)
 }
 
 // TestStartTestNode spawns an all-in-one instance of the committer using docker
@@ -99,7 +101,7 @@ func TestStartTestNode(t *testing.T) {
 	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort)
 	require.NoError(t, err)
 	fetchFirstBlock(ctx, t, test.MakeInsecureClientConfig(sidecarEndpoint))
-	monitorMetrics(t)
+	monitorMetrics(t, loadGenMetricsPort)
 }
 
 func createDockerClient(t *testing.T) *client.Client {
@@ -111,6 +113,7 @@ func createDockerClient(t *testing.T) *client.Client {
 }
 
 func fetchFirstBlock(ctx context.Context, t *testing.T, clientCfg *connection.ClientConfig) {
+	t.Helper()
 	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
 		ChannelID: channelName,
 		Client:    clientCfg,
@@ -120,8 +123,9 @@ func fetchFirstBlock(ctx context.Context, t *testing.T, clientCfg *connection.Cl
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
 }
 
-func monitorMetrics(t *testing.T) {
-	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + loadGenMetricsPort)
+func monitorMetrics(t *testing.T, metricsPort string) {
+	t.Helper()
+	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + metricsPort)
 	require.NoError(t, err)
 
 	t.Logf("Check the load generator metrics from: %s", metricsURL)
@@ -159,24 +163,24 @@ func startCommitterNode(ctx context.Context, t *testing.T, dockerClient *client.
 	case "sidecar":
 		_, serverCredsPath = tManager.CreateServerCertificate(t, name, "localhost")
 		containerCfg.ExposedPorts = nat.PortSet{
-			sidecarPort + "/tcp": struct{}{},
+			sidecarPort2 + "/tcp": struct{}{},
 		}
 		hostCfg.PortBindings = nat.PortMap{
 			// sidecar port binding
-			sidecarPort + "/tcp": []nat.PortBinding{{
+			sidecarPort2 + "/tcp": []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: sidecarPort,
+				HostPort: sidecarPort2,
 			}},
 		}
 	case "loadgen":
 		containerCfg.ExposedPorts = nat.PortSet{
-			loadGenMetricsPort + "/tcp": struct{}{},
+			loadGenMetricsPort2 + "/tcp": struct{}{},
 		}
 		hostCfg.PortBindings = nat.PortMap{
 			// loadgen service port bindings
-			loadGenMetricsPort + "/tcp": []nat.PortBinding{{
+			loadGenMetricsPort2 + "/tcp": []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: loadGenMetricsPort,
+				HostPort: loadGenMetricsPort2,
 			}},
 		}
 		fallthrough
@@ -222,7 +226,14 @@ func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Clie
 	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
 }
 
-func createContainerAndItsLogs(ctx context.Context, t *testing.T, dockerClient *client.Client, containerConfig *container.Config, hostConfig *container.HostConfig, name string) {
+func createContainerAndItsLogs(
+	ctx context.Context,
+	t *testing.T,
+	dockerClient *client.Client,
+	containerConfig *container.Config,
+	hostConfig *container.HostConfig,
+	name string,
+) {
 	resp, err := dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
 	require.NoError(t, err)
 

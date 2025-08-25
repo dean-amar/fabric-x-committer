@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 server:
-  endpoint: :4001
+  endpoint: :4002
   tls:
     mode: mtls
     cert-path: /certs/public-key

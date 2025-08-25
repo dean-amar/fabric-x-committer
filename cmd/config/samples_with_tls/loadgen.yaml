@@ -17,7 +17,7 @@ monitoring:
 
 orderer-client:
   sidecar-client:
-    endpoint: sidecar:4001
+    endpoint: sidecar:4002
     tls:
       mode: mtls
       cert-path: /client_certs/public-key
