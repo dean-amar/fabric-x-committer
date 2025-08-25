@@ -1,0 +1,17 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+server:
+  endpoint: :7050
+
+block-size: 1024
+block-timeout: 30s
+send-config-block: true
+config-block-path: /root/config/sc-genesis-block.proto.bin
+
+logging:
+  development: true
+  enabled: true
+  level: INFO
+  name: orderer

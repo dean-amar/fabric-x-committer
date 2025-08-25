@@ -72,24 +72,24 @@ func NewSecureCommunicationManager(t *testing.T) *SecureCommunicationManager {
 // Writing it to a temp testing folder and returns a map with the credential paths.
 func (scm *SecureCommunicationManager) CreateServerCertificate(
 	t *testing.T,
-	san string,
-) map[string]string {
+	san ...string,
+) (map[string]string, string) {
 	t.Helper()
-	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san)
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san...)
 	require.NoError(t, err)
 	return createCertificatesPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
 }
 
 // CreateClientCertificate creates a client key pair,
 // Writing it to a temp testing folder and returns a map with the credential paths.
-func (scm *SecureCommunicationManager) CreateClientCertificate(t *testing.T) map[string]string {
+func (scm *SecureCommunicationManager) CreateClientCertificate(t *testing.T) (map[string]string, string) {
 	t.Helper()
 	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
 	require.NoError(t, err)
 	return createCertificatesPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()))
 }
 
-func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]string {
+func createCertificatesPaths(t *testing.T, data map[string][]byte) (map[string]string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Cleanup(func() {
@@ -103,7 +103,7 @@ func createCertificatesPaths(t *testing.T, data map[string][]byte) map[string]st
 		require.NoError(t, err)
 		paths[key] = dataPath
 	}
-	return paths
+	return paths, tmpDir
 }
 
 func createDataFromKeyPair(keyPair *tlsgen.CertKeyPair, caCertificate []byte) map[string][]byte {
@@ -166,8 +166,8 @@ func RunSecureConnectionTest(
 	t.Helper()
 	// create server and client credentials
 	tlsMgr := NewSecureCommunicationManager(t)
-	serverCreds := tlsMgr.CreateServerCertificate(t, defaultHostName)
-	clientCreds := tlsMgr.CreateClientCertificate(t)
+	serverCreds, _ := tlsMgr.CreateServerCertificate(t, defaultHostName)
+	clientCreds, _ := tlsMgr.CreateClientCertificate(t)
 	// create a base TLS configuration for the client
 	baseClientTLS := CreateTLSConfigFromPaths(connection.NoneTLSMode, clientCreds)
 

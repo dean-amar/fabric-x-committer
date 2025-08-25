@@ -1,0 +1,79 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Configuration for the server
+server:
+  # The server's endpoint configuration
+  endpoint: :7001
+  tls:
+    mode: mtls
+    cert-path: /certs/public-key
+    key-path: /certs/private-key
+    ca-cert-paths:
+      - /certs/ca-certificate
+  # Credentials for the server
+monitoring:
+  server:
+    endpoint: :2117
+
+database:
+  endpoints:
+    - db:5433
+  username: "yugabyte" # The username for the database
+  # TODO: pass password via environment variable
+  password: "yugabyte" # The password for the database
+  database: "yugabyte" # The database name
+  max-connections: 10 # The maximum size of the connection pool
+  min-connections: 5 # The minimum size of the connection pool
+  load-balance: false # Should be enabled for DB cluster
+  retry: # The exponential backoff retry strategy for database operation.
+    # This strategy increases the delay between retry attempts exponentially.
+    # When using YugabyteDB as the backend, it is needed to handle retryable errors.
+    # https://support.yugabyte.com/hc/en-us/articles/4409627048461-How-to-Troubleshoot-Database-Transaction-Retryable-Errors
+
+    # initial-interval: Specifies the duration of the first backoff interval.
+    # This is the time to wait before the first retry attempt.
+    # Format: string representing a duration (e.g., "500ms", "1s", "2.5s").
+    initial-interval: 500ms
+
+    # randomization-factor: Controls the amount of randomness (jitter) applied to each backoff interval.
+    # The actual backoff duration for an attempt will be randomly selected from the range:
+    # [current_interval * (1 - randomization_factor), current_interval * (1 + randomization_factor)]
+    # A factor of 0 means no randomization. A factor of 0.5 means the actual interval
+    # can vary by +/- 50% of the calculated interval.
+    # Must be between 0 and 1.
+    randomization-factor: 0.5
+
+    # multiplier: The factor by which the backoff interval increases after each failed attempt.
+    # The next interval (before randomization) is calculated as: current_interval * multiplier.
+    # A value of 1.5 means each subsequent interval will be 50% longer than the previous one.
+    # Must be >= 1.
+    multiplier: 1.5
+
+    # max-interval: Sets the absolute maximum duration for any single backoff interval.
+    # Even if the calculated interval (initial_interval * multiplier^n) exceeds this value,
+    # the interval used (before randomization) will be capped at max-interval.
+    # Format: string representing a duration (e.g., "60s", "1m", "5m").
+    max-interval: 60s
+
+    # max-elapsed-time: The maximum total time allowed for retries since the operation first began.
+    # If the total time spent (including execution time of attempts and backoff waits)
+    # exceeds this duration, the retry mechanism will stop, even if other limits haven't been reached.
+    # Setting this to "0" means there is no time limit, and retries will continue
+    # indefinitely until successful.
+    # Format: string representing a duration (e.g., "15m", "1h").
+    max-elapsed-time: 15m
+
+# Resource limit configurations
+min-batch-keys: 1024             # A batch will execute once it accumulated this number of keys.
+max-batch-wait: 100ms            # A batch will execute once it waited this much time.
+view-aggregation-window: 100ms   # A new view will be created if the previous view was created before this much time.
+max-aggregated-views: 1024       # A new view will be created if the previous view aggregated this number of views.
+max-view-timeout: 10s            # A view will be closed if it was opened for longer than this time.
+
+logging:
+  enabled: true
+  development: false
+  level: INFO
+  name: query

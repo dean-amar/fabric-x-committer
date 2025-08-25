@@ -1,0 +1,87 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+server:
+  endpoint: :8001
+monitoring:
+  server:
+    endpoint: :2118
+  latency:
+    sampler:
+      portion: 0.01
+    buckets:
+      distribution: uniform
+      max-latency: 5s
+      bucket-count: 1000
+
+orderer-client:
+  sidecar-client:
+    endpoint: sidecar:4001
+    tls:
+      mode: mtls
+      cert-path: /client_certs/public-key
+      key-path: /client_certs/private-key
+      ca-cert-paths:
+        - /client_certs/ca-certificate
+  orderer:
+    connection:
+      endpoints:
+        - broadcast,deliver,ordering-service:7050
+    consensus-type: BFT
+    channel-id: mychannel
+  # We set low values to reduce the CPU load during tests.
+  broadcast-parallelism: 1
+
+load-profile:
+  key:
+    size: 32
+  block:
+    size: 500
+  transaction:
+    read-write-count:
+      const: 2
+    policy:
+      namespace-policies:
+        0:
+          scheme: ECDSA
+          seed: 10
+        _meta:
+          scheme: ECDSA
+          seed: 11
+      orderer-endpoints:
+        - id=0,msp-id=org,broadcast,deliver,ordering-service:7050
+  conflicts:
+    invalid-signatures: 0.1
+  seed: 12345
+  # We set low values to reduce the CPU load during tests.
+  workers: 1
+
+stream:
+  rate-limit:
+    endpoint: :6997
+    initial-limit: 10_000
+  # We set low values to reduce the CPU load during tests.
+  buffers-size: 10
+  gen-batch: 10
+generate:
+  namespaces: true
+  load: true
+
+# The stopping condition for generating load according to the collected metrics.
+# Zero value indicate no limit.
+# The limit on the number of TXs is applied at block granularity. I.e., more TXs might be created than expected
+# if a block overshot.
+# The load generator stops when both requirements are met, i.e., one of them might overshoot.
+# For the orderer adapter, the blocks limit is ignored for broadcasting as we don't track submitted blocks.
+# For adapters that use concurrent submitters, we cannot enforce exact limits.
+# The sidecar and coordinator adapters are sequential, so they don't have these issues.
+limit:
+  blocks: 0
+  transactions: 50_000
+
+logging:
+  enabled: true
+  development: false
+  level: INFO
+  name: loadgen
