@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 server:
-  endpoint: :4002
+  endpoint: :4001
   tls:
     mode: mtls
     cert-path: /certs/public-key
@@ -24,7 +24,7 @@ monitoring:
 orderer:
   connection:
     endpoints:
-      - broadcast,deliver,ordering-service:7050
+      - broadcast,deliver,orderer:7050
   channel-id: mychannel
   # identity:
   #   root-ca-paths:

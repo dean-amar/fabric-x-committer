@@ -17,7 +17,7 @@ monitoring:
 
 orderer-client:
   sidecar-client:
-    endpoint: sidecar:4002
+    endpoint: sidecar:4001
     tls:
       mode: mtls
       cert-path: /client_certs/public-key
@@ -27,7 +27,7 @@ orderer-client:
   orderer:
     connection:
       endpoints:
-        - broadcast,deliver,ordering-service:7050
+        - broadcast,deliver,orderer:7050
     consensus-type: BFT
     channel-id: mychannel
   # We set low values to reduce the CPU load during tests.
@@ -50,7 +50,7 @@ load-profile:
           scheme: ECDSA
           seed: 11
       orderer-endpoints:
-        - id=0,msp-id=org,broadcast,deliver,ordering-service:7050
+        - id=0,msp-id=org,broadcast,deliver,orderer:7050
   conflicts:
     invalid-signatures: 0.1
   seed: 12345
