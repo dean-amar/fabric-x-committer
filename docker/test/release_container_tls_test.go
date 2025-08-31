@@ -22,11 +22,8 @@ type startNodeParameters struct {
 }
 
 const (
-	tlsTestNodeImage      = "icr.io/cbdc/committer-tls-test-node:0.0.2"
 	committerReleaseImage = "icr.io/cbdc/committer:0.0.2"
 	loadgenReleaseImage   = "icr.io/cbdc/loadgen:0.0.2"
-	sidecarPort2          = "4002" //comment
-	loadGenMetricsPort2   = "2119"
 	networkPrefix         = "sc_network"
 )
 
@@ -185,7 +182,7 @@ func startWithTestNode(ctx context.Context, t *testing.T, dockerClient *client.C
 		params.secureConnManager, params.nodeName, params.clientCredsDir, params.network
 
 	containerCfg := &container.Config{
-		Image: tlsTestNodeImage,
+		Image: testNodeImage,
 		Cmd:   []string{"run", name},
 		Tty:   true,
 	}
@@ -193,24 +190,8 @@ func startWithTestNode(ctx context.Context, t *testing.T, dockerClient *client.C
 	hostCfg := &container.HostConfig{
 		NetworkMode: container.NetworkMode(netName),
 	}
+	_, serverCredsPath := tManager.CreateServerCertificate(t, name)
 
-	var serverCredsPath string
-	switch name {
-	case "loadgen":
-		containerCfg.ExposedPorts = nat.PortSet{
-			loadGenMetricsPort + "/tcp": struct{}{},
-		}
-		hostCfg.PortBindings = nat.PortMap{
-			// loadgen service port bindings
-			loadGenMetricsPort + "/tcp": []nat.PortBinding{{
-				HostIP:   "localhost",
-				HostPort: loadGenMetricsPort,
-			}},
-		}
-		fallthrough
-	default:
-		_, serverCredsPath = tManager.CreateServerCertificate(t, name)
-	}
 	require.NotEmpty(t, serverCredsPath)
 	hostCfg.Binds = []string{fmt.Sprintf("%s:/certs", serverCredsPath), fmt.Sprintf("%s:/client_certs", clientCertsDir)}
 
