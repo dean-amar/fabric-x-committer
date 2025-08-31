@@ -65,30 +65,26 @@ func NewCredentialsFactory(t *testing.T) *CredentialsFactory {
 func (scm *CredentialsFactory) CreateServerCredentials(
 	t *testing.T,
 	tlsMode string,
-	san string,
-) connection.TLSConfig {
+	san ...string,
+) (connection.TLSConfig, string) {
 	t.Helper()
-	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san)
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san...)
 	require.NoError(t, err)
-	return CreateTLSConfigFromPaths(
-		tlsMode,
-		createCredentialsPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes())),
-	)
+	pathMap, credPath := createCredentialsPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
+	return CreateTLSConfigFromPaths(tlsMode, pathMap), credPath
 }
 
 // CreateClientCredentials creates a client key pair,
 // Writing it to a temp testing folder and returns a map with the credential paths.
-func (scm *CredentialsFactory) CreateClientCredentials(t *testing.T, tlsMode string) connection.TLSConfig {
+func (scm *CredentialsFactory) CreateClientCredentials(t *testing.T, tlsMode string) (connection.TLSConfig, string) {
 	t.Helper()
 	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
 	require.NoError(t, err)
-	return CreateTLSConfigFromPaths(
-		tlsMode,
-		createCredentialsPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes())),
-	)
+	pathMap, credPath := createCredentialsPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()))
+	return CreateTLSConfigFromPaths(tlsMode, pathMap), credPath
 }
 
-func createCredentialsPaths(t *testing.T, data map[string][]byte) map[string]string {
+func createCredentialsPaths(t *testing.T, data map[string][]byte) (map[string]string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Cleanup(func() {
@@ -102,7 +98,7 @@ func createCredentialsPaths(t *testing.T, data map[string][]byte) map[string]str
 		require.NoError(t, err)
 		paths[key] = dataPath
 	}
-	return paths
+	return paths, tmpDir
 }
 
 func createDataFromKeyPair(keyPair *tlsgen.CertKeyPair, caCertificate []byte) map[string][]byte {
@@ -169,10 +165,10 @@ func RunSecureConnectionTest(
 	// create server and client credentials
 	tlsMgr := NewCredentialsFactory(t)
 	// create a base TLS configuration for the client
-	baseClientTLS := tlsMgr.CreateClientCredentials(t, connection.NoneTLSMode)
+	baseClientTLS, _ := tlsMgr.CreateClientCredentials(t, connection.NoneTLSMode)
 	for _, serverSecureMode := range ServerModes {
 		// create server's tls config and start it according to the serverSecureMode.
-		serverTLS := tlsMgr.CreateServerCredentials(t, serverSecureMode, defaultHostName)
+		serverTLS, _ := tlsMgr.CreateServerCredentials(t, serverSecureMode, defaultHostName)
 		rpcAttemptFunc := starter(t, serverTLS)
 		// for each server secure mode, build the client's test cases.
 		for _, tc := range BuildTestCases(t, serverSecureMode) {
