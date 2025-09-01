@@ -159,7 +159,6 @@ func startLoadgenNodeWithReleaseImage(
 		Tty: true,
 		// Set the monitoring server endpoint to match the exposed port.
 		Env: []string{
-			//"SC_LOADGEN_LOAD_PROFILE_TRANSACTION_POLICY_ORDERER_ENDPOINTS=id=0,msp-id=org,broadcast,deliver,orderer:7050",
 			fmt.Sprintf("SC_LOADGEN_MONITORING_SERVER_ENDPOINT=:%s", loadGenMetricsReleaseImagePort),
 		},
 	}
