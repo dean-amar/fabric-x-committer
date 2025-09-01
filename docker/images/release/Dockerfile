@@ -11,5 +11,3 @@ ARG TARGETARCH
 
 COPY ${ARCHBIN_PATH}/${TARGETOS}-${TARGETARCH}/${BIN} /bin/${BIN}
 EXPOSE ${PORTS}
-
-COPY ./bin/sc-genesis-block.proto.bin /root/config/

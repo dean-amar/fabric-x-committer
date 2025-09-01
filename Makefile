@@ -32,7 +32,6 @@ golang_image    ?= golang:$(go_version)-bookworm
 
 dockerfile_base_dir       ?= $(project_dir)/docker/images
 dockerfile_test_node_dir  ?= $(dockerfile_base_dir)/test_node
-dockerfile_tls_test_node_dir  ?= $(dockerfile_base_dir)/tls_test_node
 dockerfile_release_dir    ?= $(dockerfile_base_dir)/release
 
 # Set this parameter when running docker-builder-run
@@ -111,7 +110,7 @@ test-integration-db-resiliency: build
 	@$(go_test) ./integration/... -run "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
 # Tests the all-in-one docker image.
-test-container: build-test-node-image build-release-image
+test-container: build-test-node-image
 	$(go_cmd) test -v -timeout 30m ./docker/...
 
 # Tests for components that directly talk to the DB, where different DBs might affect behaviour.
@@ -240,14 +239,6 @@ build-test-node-image: build-arch build-test-genesis-block
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		. $(docker_push_arg)
 
-build-tls-test-node-image: build-arch build-tls-test-genesis-block
-	${docker_cmd} build $(docker_build_flags) \
-		-f $(dockerfile_tls_test_node_dir)/Dockerfile \
-		-t ${image_namespace}/committer-tls-test-node:${version} \
-		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
-		. $(docker_push_arg)
-
-
 build-release-image: build-arch
 	./scripts/build-release-image.sh \
 		$(docker_cmd) $(version) $(image_namespace) $(dockerfile_release_dir) $(multiplatform) $(arch_output_dir_rel)
@@ -257,13 +248,6 @@ build-test-genesis-block: $(output_dir) build-cli-loadgen
 	env -v $(shell grep '^ENV' $(dockerfile_test_node_dir)/Dockerfile | cut -d' ' -f2- | xargs) \
 		bin/loadgen make-genesis-block \
 		-c "$(project_dir)/cmd/config/samples/loadgen.yaml" \
-		>"$(output_dir)/sc-genesis-block.proto.bin"
-
-build-tls-test-genesis-block: $(output_dir) build-cli-loadgen
-	@# We load the env from the Dockerfile to use them to generate the config block.
-	env -v $(shell grep '^ENV' $(dockerfile_tls_test_node_dir)/Dockerfile | cut -d' ' -f2- | xargs) \
-		bin/loadgen make-genesis-block \
-		-c "$(project_dir)/cmd/config/samples_with_tls/loadgen.yaml" \
 		>"$(output_dir)/sc-genesis-block.proto.bin"
 
 #########################

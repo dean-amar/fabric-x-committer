@@ -4,14 +4,18 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	testUtils "github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 type startNodeParameters struct {
@@ -22,13 +26,22 @@ type startNodeParameters struct {
 }
 
 const (
-	tlsTestNodeImage      = "icr.io/cbdc/committer-tls-test-node:0.0.2"
 	committerReleaseImage = "icr.io/cbdc/committer:0.0.2"
 	loadgenReleaseImage   = "icr.io/cbdc/loadgen:0.0.2"
 	sidecarPort2          = "4002" //comment
 	loadGenMetricsPort2   = "2119"
 	networkPrefix         = "sc_network"
+
+	// containerConfigPath is the path to the config in the docker container.
+	containerConfigPath = "/root/config"
+	localConfigPath     = "../../cmd/config/samples_with_tls"
 )
+
+func getConfigPath(t *testing.T) (configPath string) {
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	return filepath.Join(wd, localConfigPath)
+}
 
 // TestCommitterNodesWithTLS spawns an all-in-one instance of the committer using docker
 // to verify that the committer container starts as expected.
@@ -61,17 +74,17 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 		}
 		switch node {
 		case "db", "orderer":
-			startWithTestNode(ctx, t, dockerClient, nodeParams)
+			startNodeWithTestImage(ctx, t, dockerClient, nodeParams)
 		case "loadgen":
-			startReleaseLoadgenNode(ctx, t, dockerClient, nodeParams)
+			startLoadgenNodeWithReleaseImage(ctx, t, dockerClient, nodeParams)
 		default:
-			startReleaseCommitterNode(ctx, t, dockerClient, nodeParams)
+			startCommitterNodeWithReleaseImage(ctx, t, dockerClient, nodeParams)
 		}
 	}
 	monitorMetrics(t, loadGenMetricsPort)
 }
 
-func startReleaseCommitterNode(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
+func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
 	t.Helper()
 
 	tManager, name, clientCertsDir, netName :=
@@ -79,7 +92,7 @@ func startReleaseCommitterNode(ctx context.Context, t *testing.T, dockerClient *
 
 	containerCfg := &container.Config{
 		Image: committerReleaseImage,
-		Cmd:   []string{"committer", fmt.Sprintf("start-%s", name), "--config", fmt.Sprintf("root/config/%s.yaml", name)},
+		Cmd:   []string{"committer", fmt.Sprintf("start-%s", name), "--config", fmt.Sprintf("%s/%s.yaml", containerConfigPath, name)},
 		Tty:   true,
 	}
 
@@ -90,7 +103,7 @@ func startReleaseCommitterNode(ctx context.Context, t *testing.T, dockerClient *
 	var serverCredsPath string
 	switch name {
 	case "sidecar":
-		_, serverCredsPath = tManager.CreateServerCredentials(t, name, "localhost")
+		_, serverCredsPath = tManager.CreateServerCredentials(t, connection.MutualTLSMode, name, "localhost")
 		containerCfg.ExposedPorts = nat.PortSet{
 			sidecarPort + "/tcp": struct{}{},
 		}
@@ -102,7 +115,7 @@ func startReleaseCommitterNode(ctx context.Context, t *testing.T, dockerClient *
 			}},
 		}
 	default:
-		_, serverCredsPath = tManager.CreateServerCredentials(t, name)
+		_, serverCredsPath = tManager.CreateServerCredentials(t, connection.MutualTLSMode, name)
 	}
 
 	// bind the credential paths.
@@ -110,42 +123,13 @@ func startReleaseCommitterNode(ctx context.Context, t *testing.T, dockerClient *
 	hostCfg.Binds = []string{
 		fmt.Sprintf("%s:/certs", serverCredsPath),
 		fmt.Sprintf("%s:/client_certs", clientCertsDir),
-	}
-
-	switch name {
-	case "verifier":
-		hostCfg.Binds = append(
-			hostCfg.Binds,
-			fmt.Sprintf("/Users/deanamar/Work/fabric-x-committer/cmd/config/samples_with_tls/sigservice.yaml:/root/config/%s.yaml", name),
-		)
-	case "vc":
-		hostCfg.Binds = append(
-			hostCfg.Binds,
-			fmt.Sprintf("/Users/deanamar/Work/fabric-x-committer/cmd/config/samples_with_tls/vcservice.yaml:/root/config/%s.yaml", name),
-		)
-	case "coordinator":
-		hostCfg.Binds = append(
-			hostCfg.Binds,
-			fmt.Sprintf("/Users/deanamar/Work/fabric-x-committer/cmd/config/samples_with_tls/coordinator.yaml:/root/config/%s.yaml", name),
-		)
-	case "query":
-		hostCfg.Binds = append(
-			hostCfg.Binds,
-			fmt.Sprintf("/Users/deanamar/Work/fabric-x-committer/cmd/config/samples_with_tls/queryservice.yaml:/root/config/%s.yaml", name),
-		)
-	case "sidecar":
-		hostCfg.Binds = append(
-			hostCfg.Binds,
-			fmt.Sprintf("/Users/deanamar/Work/fabric-x-committer/cmd/config/samples_with_tls/sidecar.yaml:/root/config/%s.yaml", name),
-		)
-	default:
-		//donothing
+		fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", getConfigPath(t), name, containerConfigPath, name),
 	}
 
 	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
 }
 
-func startReleaseLoadgenNode(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
+func startLoadgenNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
 	t.Helper()
 
 	tManager, name, clientCertsDir, netName :=
@@ -153,7 +137,7 @@ func startReleaseLoadgenNode(ctx context.Context, t *testing.T, dockerClient *cl
 
 	containerCfg := &container.Config{
 		Image: loadgenReleaseImage,
-		Cmd:   []string{name, "start", "--config", "root/config/loadgen.yaml"},
+		Cmd:   []string{name, "start", "--config", fmt.Sprintf("%s/%s.yaml", containerConfigPath, name)},
 		ExposedPorts: nat.PortSet{
 			nat.Port(loadGenMetricsPort + "/tcp"): struct{}{},
 		},
@@ -162,6 +146,7 @@ func startReleaseLoadgenNode(ctx context.Context, t *testing.T, dockerClient *cl
 
 	_, serverCredsPath := tManager.CreateServerCredentials(t, name)
 	require.NotEmpty(t, serverCredsPath)
+
 	hostCfg := &container.HostConfig{
 		NetworkMode: container.NetworkMode(netName),
 		PortBindings: nat.PortMap{
@@ -171,48 +156,36 @@ func startReleaseLoadgenNode(ctx context.Context, t *testing.T, dockerClient *cl
 			}},
 		},
 		Binds: []string{
-			"/Users/deanamar/Work/fabric-x-committer/cmd/config/samples_with_tls/loadgen.yaml:/root/config/loadgen.yaml",
-			fmt.Sprintf("%s:/certs", serverCredsPath), fmt.Sprintf("%s:/client_certs", clientCertsDir),
+			fmt.Sprintf("%s:/certs", serverCredsPath),
+			fmt.Sprintf("%s:/client_certs", clientCertsDir),
+			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", getConfigPath(t), name, containerConfigPath, name),
 		},
 	}
 
 	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
 }
 
-func startWithTestNode(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
+func startNodeWithTestImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
 	t.Helper()
 	tManager, name, clientCertsDir, netName :=
 		params.secureConnManager, params.nodeName, params.clientCredsDir, params.network
 
+	_, serverCredsPath := tManager.CreateServerCredentials(t, name)
+	require.NotEmpty(t, serverCredsPath)
+
 	containerCfg := &container.Config{
-		Image: tlsTestNodeImage,
+		Image: testNodeImage,
 		Cmd:   []string{"run", name},
 		Tty:   true,
 	}
 
 	hostCfg := &container.HostConfig{
 		NetworkMode: container.NetworkMode(netName),
+		Binds: []string{
+			fmt.Sprintf("%s:/certs", serverCredsPath),
+			fmt.Sprintf("%s:/client_certs", clientCertsDir),
+		},
 	}
-
-	var serverCredsPath string
-	switch name {
-	case "loadgen":
-		containerCfg.ExposedPorts = nat.PortSet{
-			loadGenMetricsPort + "/tcp": struct{}{},
-		}
-		hostCfg.PortBindings = nat.PortMap{
-			// loadgen service port bindings
-			loadGenMetricsPort + "/tcp": []nat.PortBinding{{
-				HostIP:   "localhost",
-				HostPort: loadGenMetricsPort,
-			}},
-		}
-		fallthrough
-	default:
-		_, serverCredsPath = tManager.CreateServerCredentials(t, name)
-	}
-	require.NotEmpty(t, serverCredsPath)
-	hostCfg.Binds = []string{fmt.Sprintf("%s:/certs", serverCredsPath), fmt.Sprintf("%s:/client_certs", clientCertsDir)}
 
 	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
 }
