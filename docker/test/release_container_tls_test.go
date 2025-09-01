@@ -28,19 +28,16 @@ type startNodeParameters struct {
 const (
 	committerReleaseImage = "icr.io/cbdc/committer:0.0.2"
 	loadgenReleaseImage   = "icr.io/cbdc/loadgen:0.0.2"
-	sidecarPort2          = "4002" //comment
-	loadGenMetricsPort2   = "2119"
-	networkPrefix         = "sc_network"
+
+	// To support parallel run of the two container images, we need to use different port for the Loadgen
+	// These ports are used in the test-image test.
+	loadGenMetricReleaseImagePort = "2119"
+	networkPrefix                 = "sc_network"
 
 	// containerConfigPath is the path to the config in the docker container.
 	containerConfigPath = "/root/config"
-	localConfigPath     = "../../cmd/config/samples_with_tls"
+	localConfigPath     = "../../cmd/config/samples"
 )
-
-// @TODO: change the sidecar and loadgen ports.
-// @TODO: add env to set the original test to work with tls paths.
-// @TODO: fix code to suit production levels.
-// @TODO: change comments.
 
 func getConfigPath(t *testing.T) (configPath string) {
 	wd, err := os.Getwd()
@@ -48,8 +45,8 @@ func getConfigPath(t *testing.T) (configPath string) {
 	return filepath.Join(wd, localConfigPath)
 }
 
-// TestCommitterNodesWithTLS spawns an all-in-one instance of the committer using docker
-// to verify that the committer container starts as expected.
+// TestCommitterNodesWithTLS spawns each committer's component instance using docker
+// to verify that the committer container connects with TLS and starts as expected.
 func TestCommitterNodesWithTLS(t *testing.T) {
 	ctx := t.Context()
 	dockerClient := createDockerClient(t)
@@ -86,9 +83,10 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 			startCommitterNodeWithReleaseImage(ctx, t, dockerClient, nodeParams)
 		}
 	}
-	monitorMetrics(t, loadGenMetricsPort)
+	monitorMetrics(t, loadGenMetricReleaseImagePort)
 }
 
+// startCommitterNodeWithReleaseImage starts a committer's node using the release image.
 func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
 	t.Helper()
 
@@ -105,23 +103,7 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, docke
 		NetworkMode: container.NetworkMode(netName),
 	}
 
-	var serverCredsPath string
-	switch name {
-	case "sidecar":
-		_, serverCredsPath = tManager.CreateServerCredentials(t, connection.MutualTLSMode, name, "localhost")
-		containerCfg.ExposedPorts = nat.PortSet{
-			sidecarPort + "/tcp": struct{}{},
-		}
-		hostCfg.PortBindings = nat.PortMap{
-			// sidecar port binding
-			sidecarPort + "/tcp": []nat.PortBinding{{
-				HostIP:   "localhost",
-				HostPort: sidecarPort,
-			}},
-		}
-	default:
-		_, serverCredsPath = tManager.CreateServerCredentials(t, connection.MutualTLSMode, name)
-	}
+	_, serverCredsPath := tManager.CreateServerCredentials(t, connection.MutualTLSMode, name)
 
 	// bind the credential paths.
 	require.NotEmpty(t, serverCredsPath)
@@ -134,6 +116,7 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, docke
 	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
 }
 
+// startLoadgenNodeWithReleaseImage starts a loadgen instance
 func startLoadgenNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
 	t.Helper()
 
@@ -144,9 +127,13 @@ func startLoadgenNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerC
 		Image: loadgenReleaseImage,
 		Cmd:   []string{name, "start", "--config", fmt.Sprintf("%s/%s.yaml", containerConfigPath, name)},
 		ExposedPorts: nat.PortSet{
-			nat.Port(loadGenMetricsPort + "/tcp"): struct{}{},
+			nat.Port(loadGenMetricReleaseImagePort + "/tcp"): struct{}{},
 		},
 		Tty: true,
+		// set the monitoring server endpoint to match the exposed port.
+		Env: []string{
+			"SC_LOADGEN_MONITORING_SERVER_ENDPOINT=:2119",
+		},
 	}
 
 	_, serverCredsPath := tManager.CreateServerCredentials(t, name)
@@ -155,9 +142,9 @@ func startLoadgenNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerC
 	hostCfg := &container.HostConfig{
 		NetworkMode: container.NetworkMode(netName),
 		PortBindings: nat.PortMap{
-			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
+			nat.Port(loadGenMetricReleaseImagePort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: loadGenMetricsPort,
+				HostPort: loadGenMetricReleaseImagePort,
 			}},
 		},
 		Binds: []string{
