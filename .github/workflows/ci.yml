@@ -119,5 +119,5 @@ jobs:
         with:
           go-version-file: go.mod
       - run: scripts/install-dev-dependencies.sh
-      - run: scripts/build-release-image.sh
+      - run: make build-release-image
       - run: make test-container
