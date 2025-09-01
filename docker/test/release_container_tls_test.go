@@ -1,8 +1,13 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package test
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,14 +20,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	testUtils "github.com/hyperledger/fabric-x-committer/utils/test"
+	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 type startNodeParameters struct {
-	secureConnManager *testUtils.CredentialsFactory
-	nodeName          string
-	clientCredsDir    string
-	network           string
+	credsFactory    *testutils.CredentialsFactory
+	nodeName        string
+	clientCredsPath string
+	networkName     string
 }
 
 const (
@@ -31,153 +36,201 @@ const (
 
 	// To support parallel run of the two container images, we need to use different port for the Loadgen
 	// These ports are used in the test-image test.
-	loadGenMetricReleaseImagePort = "2119"
-	networkPrefix                 = "sc_network"
+	loadGenMetricsReleaseImagePort = "2119"
 
-	// containerConfigPath is the path to the config in the docker container.
+	networkPrefix = "sc_network"
+
+	// containerConfigPath is the path to the config directory inside the container.
 	containerConfigPath = "/root/config"
-	localConfigPath     = "../../cmd/config/samples"
+	// localConfigPath is the path for the sample YAML configurations per service.
+	localConfigPath = "../../cmd/config/samples"
 )
 
-func getConfigPath(t *testing.T) (configPath string) {
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	return filepath.Join(wd, localConfigPath)
-}
-
-// TestCommitterNodesWithTLS spawns each committer's component instance using docker
-// to verify that the committer container connects with TLS and starts as expected.
+// TestCommitterNodesWithTLS runs each committer component in Docker and verifies
+// it starts with TLS enabled and connects successfully.
 func TestCommitterNodesWithTLS(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	dockerClient := createDockerClient(t)
 
 	serviceNames := []string{"db", "verifier", "vc", "query", "coordinator", "sidecar", "orderer", "loadgen"}
 	stopAndRemoveContainersByName(ctx, t, dockerClient, serviceNames...)
 
-	// create docker network for committer's components to run in.
-	netName := fmt.Sprintf("%s_%s", networkPrefix, uuid.NewString())
-	testUtils.CreateDockerNetwork(t, netName)
+	// Create an isolated network for the test run.
+	networkName := fmt.Sprintf("%s_%s", networkPrefix, uuid.NewString())
+	testutils.CreateDockerNetwork(t, networkName)
 	t.Cleanup(func() {
-		testUtils.RemoveDockerNetwork(t, netName)
+		testutils.RemoveDockerNetwork(t, networkName)
 	})
 
-	// creating tls manager and creates client creds.
-	tlsManager := testUtils.NewCredentialsFactory(t)
-	clientTLSConfig, clientCredsDir := tlsManager.CreateClientCredentials(t, connection.MutualTLSMode)
+	// one factory per test and client credentials for mutual TLS.
+	credsFactory := testutils.NewCredentialsFactory(t)
+	_, clientCredsPath := credsFactory.CreateClientCredentials(t, connection.MutualTLSMode)
 
-	t.Logf("client-tls-config: %v", clientTLSConfig)
-
-	for _, node := range serviceNames {
-		nodeParams := startNodeParameters{
-			secureConnManager: tlsManager,
-			nodeName:          node,
-			clientCredsDir:    clientCredsDir,
-			network:           netName,
+	for _, name := range serviceNames {
+		params := startNodeParameters{
+			credsFactory:    credsFactory,
+			nodeName:        name,
+			clientCredsPath: clientCredsPath,
+			networkName:     networkName,
 		}
-		switch node {
+
+		switch name {
 		case "db", "orderer":
-			startNodeWithTestImage(ctx, t, dockerClient, nodeParams)
+			startNodeWithTestImage(ctx, t, dockerClient, params)
 		case "loadgen":
-			startLoadgenNodeWithReleaseImage(ctx, t, dockerClient, nodeParams)
+			startLoadgenNodeWithReleaseImage(ctx, t, dockerClient, params)
 		default:
-			startCommitterNodeWithReleaseImage(ctx, t, dockerClient, nodeParams)
+			startCommitterNodeWithReleaseImage(ctx, t, dockerClient, params)
 		}
 	}
-	monitorMetrics(t, loadGenMetricReleaseImagePort)
+
+	monitorMetrics(t, loadGenMetricsReleaseImagePort)
 }
 
-// startCommitterNodeWithReleaseImage starts a committer's node using the release image.
-func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
+// startCommitterNodeWithReleaseImage starts a committer node using the release image.
+func startCommitterNodeWithReleaseImage(
+	ctx context.Context,
+	t *testing.T,
+	dockerClient *client.Client,
+	params startNodeParameters,
+) {
 	t.Helper()
 
-	tManager, name, clientCertsDir, netName :=
-		params.secureConnManager, params.nodeName, params.clientCredsDir, params.network
+	cfgPath := filepath.Join(mustGetWD(t), localConfigPath)
+	serverName := params.nodeName
 
 	containerCfg := &container.Config{
 		Image: committerReleaseImage,
-		Cmd:   []string{"committer", fmt.Sprintf("start-%s", name), "--config", fmt.Sprintf("%s/%s.yaml", containerConfigPath, name)},
-		Tty:   true,
+		Cmd: []string{
+			"committer",
+			fmt.Sprintf("start-%s", serverName),
+			"--config",
+			fmt.Sprintf("%s/%s.yaml", containerConfigPath, serverName),
+		},
+		Tty: true,
 	}
 
 	hostCfg := &container.HostConfig{
-		NetworkMode: container.NetworkMode(netName),
+		NetworkMode: container.NetworkMode(params.networkName),
 	}
 
-	_, serverCredsPath := tManager.CreateServerCredentials(t, connection.MutualTLSMode, name)
-
-	// bind the credential paths.
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, serverName)
 	require.NotEmpty(t, serverCredsPath)
-	hostCfg.Binds = []string{
-		fmt.Sprintf("%s:/certs", serverCredsPath),
-		fmt.Sprintf("%s:/client_certs", clientCertsDir),
-		fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", getConfigPath(t), name, containerConfigPath, name),
-	}
 
-	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
+	hostCfg.Binds = assembleBinds(t,
+		serverCredsPath,
+		params.clientCredsPath,
+		fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", cfgPath, serverName, containerConfigPath, serverName),
+	)
+
+	createContainerAndItsLogs(ctx, t, createContainerParameters{
+		dockerClient:    dockerClient,
+		containerConfig: containerCfg,
+		hostConfig:      hostCfg,
+		name:            serverName,
+	})
 }
 
-// startLoadgenNodeWithReleaseImage starts a loadgen instance
-func startLoadgenNodeWithReleaseImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
+// startLoadgenNodeWithReleaseImage starts a load generator instance using the release image.
+func startLoadgenNodeWithReleaseImage(
+	ctx context.Context,
+	t *testing.T,
+	dockerClient *client.Client,
+	params startNodeParameters,
+) {
 	t.Helper()
 
-	tManager, name, clientCertsDir, netName :=
-		params.secureConnManager, params.nodeName, params.clientCredsDir, params.network
+	cfgPath := filepath.Join(mustGetWD(t), localConfigPath)
+	serverName := params.nodeName
 
 	containerCfg := &container.Config{
 		Image: loadgenReleaseImage,
-		Cmd:   []string{name, "start", "--config", fmt.Sprintf("%s/%s.yaml", containerConfigPath, name)},
+		Cmd: []string{
+			serverName,
+			"start",
+			"--config",
+			fmt.Sprintf("%s/%s.yaml", containerConfigPath, serverName),
+		},
 		ExposedPorts: nat.PortSet{
-			nat.Port(loadGenMetricReleaseImagePort + "/tcp"): struct{}{},
+			nat.Port(loadGenMetricsReleaseImagePort + "/tcp"): {},
 		},
 		Tty: true,
-		// set the monitoring server endpoint to match the exposed port.
+		// Set the monitoring server endpoint to match the exposed port.
 		Env: []string{
-			"SC_LOADGEN_MONITORING_SERVER_ENDPOINT=:2119",
+			fmt.Sprintf("SC_LOADGEN_MONITORING_SERVER_ENDPOINT=:%s", loadGenMetricsReleaseImagePort),
 		},
 	}
 
-	_, serverCredsPath := tManager.CreateServerCredentials(t, name)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, serverName)
 	require.NotEmpty(t, serverCredsPath)
 
 	hostCfg := &container.HostConfig{
-		NetworkMode: container.NetworkMode(netName),
+		NetworkMode: container.NetworkMode(params.networkName),
 		PortBindings: nat.PortMap{
-			nat.Port(loadGenMetricReleaseImagePort + "/tcp"): []nat.PortBinding{{
+			nat.Port(loadGenMetricsReleaseImagePort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: loadGenMetricReleaseImagePort,
+				HostPort: loadGenMetricsReleaseImagePort,
 			}},
 		},
-		Binds: []string{
-			fmt.Sprintf("%s:/certs", serverCredsPath),
-			fmt.Sprintf("%s:/client_certs", clientCertsDir),
-			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", getConfigPath(t), name, containerConfigPath, name),
-		},
+		Binds: assembleBinds(t,
+			serverCredsPath,
+			params.clientCredsPath,
+			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", cfgPath, serverName, containerConfigPath, serverName),
+		),
 	}
 
-	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
+	createContainerAndItsLogs(ctx, t, createContainerParameters{
+		dockerClient:    dockerClient,
+		containerConfig: containerCfg,
+		hostConfig:      hostCfg,
+		name:            serverName,
+	})
 }
 
-func startNodeWithTestImage(ctx context.Context, t *testing.T, dockerClient *client.Client, params startNodeParameters) {
+// startNodeWithTestImage starts a basic test node (e.g., DB, orderer) using the test image.
+func startNodeWithTestImage(
+	ctx context.Context,
+	t *testing.T,
+	dockerClient *client.Client,
+	params startNodeParameters,
+) {
 	t.Helper()
-	tManager, name, clientCertsDir, netName :=
-		params.secureConnManager, params.nodeName, params.clientCredsDir, params.network
 
-	_, serverCredsPath := tManager.CreateServerCredentials(t, name)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.nodeName)
 	require.NotEmpty(t, serverCredsPath)
 
 	containerCfg := &container.Config{
 		Image: testNodeImage,
-		Cmd:   []string{"run", name},
+		Cmd:   []string{"run", params.nodeName},
 		Tty:   true,
 	}
 
 	hostCfg := &container.HostConfig{
-		NetworkMode: container.NetworkMode(netName),
-		Binds: []string{
-			fmt.Sprintf("%s:/certs", serverCredsPath),
-			fmt.Sprintf("%s:/client_certs", clientCertsDir),
-		},
+		NetworkMode: container.NetworkMode(params.networkName),
+		Binds:       assembleBinds(t, serverCredsPath, params.clientCredsPath),
 	}
 
-	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
+	createContainerAndItsLogs(ctx, t, createContainerParameters{
+		dockerClient:    dockerClient,
+		containerConfig: containerCfg,
+		hostConfig:      hostCfg,
+		name:            params.nodeName,
+	})
+}
+
+func assembleBinds(t *testing.T, serverCredsPath, clientCredsPath string, additionalBinds ...string) []string {
+	t.Helper()
+	return append([]string{
+		fmt.Sprintf("%s:/certs", serverCredsPath),
+		fmt.Sprintf("%s:/client_certs", clientCredsPath),
+	}, additionalBinds...)
+}
+
+// mustGetWD returns the current working directory.
+func mustGetWD(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	return wd
 }

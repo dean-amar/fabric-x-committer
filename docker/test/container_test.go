@@ -9,14 +9,18 @@ package test
 import (
 	"context"
 	_ "embed"
+	"testing"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	testUtils "github.com/hyperledger/fabric-x-committer/utils/test"
 	"github.com/stretchr/testify/require"
-	"testing"
+
+	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
+	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 const (
@@ -38,7 +42,14 @@ func TestStartTestNode(t *testing.T) {
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort)
 	require.NoError(t, err)
-	fetchFirstBlock(ctx, t, testUtils.NewInsecureClientConfig(sidecarEndpoint))
+	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
+		ChannelID: channelName,
+		Client:    testutils.NewInsecureClientConfig(sidecarEndpoint),
+	}, 0)
+	b, ok := channel.NewReader(ctx, committedBlock).Read()
+	require.True(t, ok)
+	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
+
 	monitorMetrics(t, loadGenMetricsPort)
 }
 
@@ -70,5 +81,10 @@ func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Clie
 		},
 	}
 
-	createContainerAndItsLogs(ctx, t, dockerClient, containerCfg, hostCfg, name)
+	createContainerAndItsLogs(ctx, t, createContainerParameters{
+		dockerClient:    dockerClient,
+		containerConfig: containerCfg,
+		hostConfig:      hostCfg,
+		name:            name,
+	})
 }

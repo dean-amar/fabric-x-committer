@@ -70,7 +70,9 @@ func (scm *CredentialsFactory) CreateServerCredentials(
 	t.Helper()
 	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san...)
 	require.NoError(t, err)
-	pathMap, credPath := createCredentialsPaths(t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()))
+	pathMap, credPath := createCredentialsPaths(
+		t, createDataFromKeyPair(serverKeypair, scm.CertificateAuthority.CertBytes()),
+	)
 	return CreateTLSConfigFromPaths(tlsMode, pathMap), credPath
 }
 
@@ -80,7 +82,9 @@ func (scm *CredentialsFactory) CreateClientCredentials(t *testing.T, tlsMode str
 	t.Helper()
 	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
 	require.NoError(t, err)
-	pathMap, credPath := createCredentialsPaths(t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()))
+	pathMap, credPath := createCredentialsPaths(
+		t, createDataFromKeyPair(clientKeypair, scm.CertificateAuthority.CertBytes()),
+	)
 	return CreateTLSConfigFromPaths(tlsMode, pathMap), credPath
 }
 

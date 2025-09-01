@@ -1,20 +1,33 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
 package test
 
 import (
 	"context"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+	"github.com/stretchr/testify/require"
+
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
+
+type createContainerParameters struct {
+	dockerClient    *client.Client
+	containerConfig *container.Config
+	hostConfig      *container.HostConfig
+	name            string
+}
 
 const (
 	channelName     = "mychannel"
@@ -24,12 +37,13 @@ const (
 func createContainerAndItsLogs(
 	ctx context.Context,
 	t *testing.T,
-	dockerClient *client.Client,
-	containerConfig *container.Config,
-	hostConfig *container.HostConfig,
-	name string,
+	params createContainerParameters,
 ) {
-	resp, err := dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
+	t.Helper()
+	dockerClient := params.dockerClient
+	resp, err := dockerClient.ContainerCreate(
+		ctx, params.containerConfig, params.hostConfig, nil, nil, params.name,
+	)
 	require.NoError(t, err)
 
 	//nolint:contextcheck // We want to ensure cleanup when the test is done.
@@ -48,7 +62,7 @@ func createContainerAndItsLogs(
 	go func() {
 		_, err = io.Copy(os.Stdout, logs)
 		if err != nil {
-			t.Logf("[%s] logs ended with: %v", name, err)
+			t.Logf("[%s] logs ended with: %v", params.name, err)
 		}
 	}()
 }
@@ -98,17 +112,6 @@ func createDockerClient(t *testing.T) *client.Client {
 	require.NoError(t, err)
 	defer connection.CloseConnectionsLog(dockerClient)
 	return dockerClient
-}
-
-func fetchFirstBlock(ctx context.Context, t *testing.T, clientCfg *connection.ClientConfig) {
-	t.Helper()
-	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
-		ChannelID: channelName,
-		Client:    clientCfg,
-	}, 0)
-	b, ok := channel.NewReader(ctx, committedBlock).Read()
-	require.True(t, ok)
-	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
 }
 
 func monitorMetrics(t *testing.T, metricsPort string) {
