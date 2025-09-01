@@ -37,6 +37,11 @@ const (
 	localConfigPath     = "../../cmd/config/samples_with_tls"
 )
 
+// @TODO: change the sidecar and loadgen ports.
+// @TODO: add env to set the original test to work with tls paths.
+// @TODO: fix code to suit production levels.
+// @TODO: change comments.
+
 func getConfigPath(t *testing.T) (configPath string) {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
