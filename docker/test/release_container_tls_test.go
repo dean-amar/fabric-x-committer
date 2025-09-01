@@ -44,6 +44,8 @@ const (
 	containerConfigPath = "/root/config"
 	// localConfigPath is the path for the sample YAML configurations per service.
 	localConfigPath = "../../cmd/config/samples"
+	// binPath is the path to the binary files.
+	binPath = "../../bin"
 )
 
 // TestCommitterNodesWithTLS runs each committer component in Docker and verifies
@@ -111,18 +113,17 @@ func startCommitterNodeWithReleaseImage(
 		Tty: true,
 	}
 
-	hostCfg := &container.HostConfig{
-		NetworkMode: container.NetworkMode(params.networkName),
-	}
-
 	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, serverName)
 	require.NotEmpty(t, serverCredsPath)
 
-	hostCfg.Binds = assembleBinds(t,
-		serverCredsPath,
-		params.clientCredsPath,
-		fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", cfgPath, serverName, containerConfigPath, serverName),
-	)
+	hostCfg := &container.HostConfig{
+		NetworkMode: container.NetworkMode(params.networkName),
+		Binds: assembleBinds(t,
+			serverCredsPath,
+			params.clientCredsPath,
+			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", cfgPath, serverName, containerConfigPath, serverName),
+		),
+	}
 
 	createContainerAndItsLogs(ctx, t, createContainerParameters{
 		dockerClient:    dockerClient,
@@ -158,6 +159,7 @@ func startLoadgenNodeWithReleaseImage(
 		Tty: true,
 		// Set the monitoring server endpoint to match the exposed port.
 		Env: []string{
+			//"SC_LOADGEN_LOAD_PROFILE_TRANSACTION_POLICY_ORDERER_ENDPOINTS=id=0,msp-id=org,broadcast,deliver,orderer:7050",
 			fmt.Sprintf("SC_LOADGEN_MONITORING_SERVER_ENDPOINT=:%s", loadGenMetricsReleaseImagePort),
 		},
 	}
@@ -208,7 +210,13 @@ func startNodeWithTestImage(
 
 	hostCfg := &container.HostConfig{
 		NetworkMode: container.NetworkMode(params.networkName),
-		Binds:       assembleBinds(t, serverCredsPath, params.clientCredsPath),
+		Binds: assembleBinds(t,
+			serverCredsPath,
+			params.clientCredsPath,
+			fmt.Sprintf("%s/sc-genesis-block-release.proto.bin:/%s/sc-genesis-block.proto.bin",
+				filepath.Join(mustGetWD(t), binPath), containerConfigPath,
+			),
+		),
 	}
 
 	createContainerAndItsLogs(ctx, t, createContainerParameters{
