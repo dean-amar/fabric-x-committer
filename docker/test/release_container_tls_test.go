@@ -39,7 +39,7 @@ const (
 	loadGenMetricsReleaseImagePort = "2119"
 
 	networkPrefix = "sc_network"
-
+	genBlock      = "sc-genesis-block"
 	// containerConfigPath is the path to the config directory inside the container.
 	containerConfigPath = "/root/config"
 	// localConfigPath is the path for the sample YAML configurations per service.
@@ -212,8 +212,8 @@ func startNodeWithTestImage(
 		Binds: assembleBinds(t,
 			serverCredsPath,
 			params.clientCredsPath,
-			fmt.Sprintf("%s/sc-genesis-block-release.proto.bin:/%s/sc-genesis-block.proto.bin",
-				filepath.Join(mustGetWD(t), binPath), containerConfigPath,
+			fmt.Sprintf("%s/%s-release.proto.bin:/%s/%s.proto.bin",
+				filepath.Join(mustGetWD(t), binPath), genBlock, containerConfigPath, genBlock,
 			),
 		),
 	}
