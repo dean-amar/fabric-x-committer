@@ -491,6 +491,12 @@ func defaultSampleDBConfig() *vc.DatabaseConfig {
 	}
 }
 
+func newMonitoringConfig(host string, port int) monitoring.Config {
+	return monitoring.Config{
+		Server: newServerConfig(host, port),
+	}
+}
+
 func newServerConfig(host string, port int) *connection.ServerConfig {
 	return &connection.ServerConfig{
 		Endpoint: *newEndpoint(host, port),
@@ -502,10 +508,6 @@ func newEndpoint(host string, port int) *connection.Endpoint {
 		Host: host,
 		Port: port,
 	}
-}
-
-func newMonitoringConfig(host string, port int) monitoring.Config {
-	return monitoring.Config{Server: newServerConfig(host, port)}
 }
 
 func emptyConfig(t *testing.T) string {

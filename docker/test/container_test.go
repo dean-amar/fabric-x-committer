@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	testNodeImage      = "icr.io/cbdc/committer-test-node:0.0.2"
 	sidecarPort        = "4001"
 	loadGenMetricsPort = "2118"
 )

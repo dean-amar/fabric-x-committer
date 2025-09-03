@@ -30,6 +30,7 @@ type createContainerParameters struct {
 }
 
 const (
+	testNodeImage   = "icr.io/cbdc/committer-test-node:0.0.2"
 	channelName     = "mychannel"
 	monitoredMetric = "loadgen_transaction_committed_total"
 )
