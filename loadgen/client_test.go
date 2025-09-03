@@ -48,7 +48,7 @@ func TestLoadGenForLoadGen(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode, defaultServerSAN)
+		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			for _, limit := range defaultLimits {
@@ -64,7 +64,9 @@ func TestLoadGenForLoadGen(t *testing.T) {
 					require.NoError(t, err)
 
 					subClientConf := DefaultClientConf()
-					subClientConf.Adapter.LoadGenClient = test.NewTLSClientConfig(clientCreds, &clientConf.Server.Endpoint)
+					subClientConf.Adapter.LoadGenClient = test.NewTLSClientConfig(
+						clientCreds, &clientConf.Server.Endpoint,
+					)
 					subClient, err := NewLoadGenClient(subClientConf)
 					require.NoError(t, err)
 
@@ -81,7 +83,7 @@ func TestLoadGenForVCService(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode, defaultServerSAN)
+		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			for _, limit := range defaultLimits {
@@ -102,7 +104,7 @@ func TestLoadGenForSigVerifier(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode, defaultServerSAN)
+		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			for _, limit := range defaultLimits {
@@ -144,13 +146,15 @@ func TestLoadGenForCoordinator(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode, defaultServerSAN)
+		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			for _, limit := range append(
 				defaultLimits,
 				&adapters.GenerateLimit{Blocks: 5},
-				&adapters.GenerateLimit{Transactions: 5*defaultBlockSize + 2}, // +2 for the config and meta namespace TXs.
+				&adapters.GenerateLimit{
+					Transactions: 5*defaultBlockSize + 2, // +2 for the config and meta namespace TXs.
+				},
 			) {
 				clientConf := DefaultClientConf()
 				clientConf.Limit = limit
@@ -189,7 +193,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 		mode := mode
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
-			serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode, defaultServerSAN)
+			serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 			for _, limit := range append(
 				defaultLimits,
 				&adapters.GenerateLimit{Blocks: 5},
@@ -227,8 +231,10 @@ func TestLoadGenForSidecar(t *testing.T) {
 						},
 						LastCommittedBlockSetInterval: 100 * time.Millisecond,
 						WaitingTxsLimit:               5000,
-						Committer:                     test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
-						Monitoring:                    defaultMonitoring(),
+						Committer: test.NewInsecureClientConfig(
+							&coordinatorServer.Configs[0].Endpoint,
+						),
+						Monitoring: defaultMonitoring(),
 						Ledger: sidecar.LedgerConfig{
 							Path: t.TempDir(),
 						},
@@ -444,7 +450,11 @@ func limitToString(m *adapters.GenerateLimit) string {
 }
 
 // createServerAndClientTLSCerts creates a tls configuration using the credential factory.
-func createServerAndClientTLSCerts(t *testing.T, tlsMode, serverSan string) (serverCreds, clientCreds connection.TLSConfig) {
+func createServerAndClientTLSCerts(t *testing.T, tlsMode string) (
+	serverCreds, clientCreds connection.TLSConfig,
+) {
+	t.Helper()
 	credsFactory := test.NewCredentialsFactory(t)
-	return credsFactory.CreateServerCredentials(t, tlsMode, serverSan), credsFactory.CreateClientCredentials(t, tlsMode)
+	return credsFactory.CreateServerCredentials(t, tlsMode, defaultServerSAN),
+		credsFactory.CreateClientCredentials(t, tlsMode)
 }
