@@ -489,10 +489,6 @@ func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
 		RawTerminal:  false,
 	}))
 
-	//inspect, err := dc.client.InspectExec(exec.ID)
-	//require.NoError(t, err)
-	//require.Equal(t, 0, inspect.ExitCode)
-
 	return stdout.String()
 }
 
