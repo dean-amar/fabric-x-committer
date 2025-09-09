@@ -109,10 +109,6 @@ test-integration: build
 test-integration-db-resiliency: build
 	@$(go_test) ./integration/... -run "DBResiliency.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
 
-# tryout test.
-test-tls: build
-	@$(go_test) ./integration/... -run "Secured.*" | gotestfmt ${GO_TEST_FMT_FLAGS}
-
 # Tests the all-in-one docker image.
 test-container: build-test-node-image
 	$(go_cmd) test -v -timeout 30m ./docker/...
@@ -163,7 +159,7 @@ bench-loadgen: FORCE
 
 # Run dependency detector benchmarks with added op/sec column.
 bench-dep: FORCE
-	$(go_cmd) test ./service/coordinator/dependencygraph/... -bench "BenchmarkDependencyGraph.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
+	$(go_cmd) test ./service/coordinator/dependencygraph/... -timeout 60m -bench "BenchmarkDependencyGraph.*" -run="^$$" | awk -f scripts/bench-tx-per-sec.awk
 
 # Run dependency detector benchmarks with added op/sec column.
 bench-preparer: FORCE
@@ -173,9 +169,9 @@ bench-preparer: FORCE
 bench-sign: FORCE
 	$(go_cmd) test ./utils/signature/... -bench ".*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
 
-# Run verifier benchmarks with added op/sec column.
-bench-verify: FORCE
-	$(go_cmd) test ./service/verifier/... -bench "BenchmarkVerifyForm.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
+# Run sidecar benchmarks with added op/sec column.
+bench-sidecar: FORCE
+	$(go_cmd) test ./service/sidecar/... -bench "Benchmark.*" -run "^$$" | awk -f scripts/bench-tx-per-sec.awk
 
 #########################
 # Generate protos
@@ -192,6 +188,7 @@ proto: $(PROTO_TARGETS)
 proto-%: FORCE
 	@echo "Compiling: $*"
 	@protoc --proto_path="${PWD}" \
+          --proto_path="/usr/include" \
           --go-grpc_out=. --go-grpc_opt=paths=source_relative \
           --go_out=paths=source_relative:. ${PWD}/api/proto$*/*.proto
 

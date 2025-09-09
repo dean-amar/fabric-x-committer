@@ -3,23 +3,21 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # This is a partial template. It contains only the sidecar client configurations.
-# It should be complimented by the common load generator configuration.
+# It should be complemented by the common load generator configuration.
 
 sidecar-client:
-  sidecar-client-config:
-    endpoints:
-      - {{ .Endpoints.Sidecar.Server }}
-    client-creds:
-      tls-mode: {{ .ClientsCreds.Sidecar.Mode }}
-      server-name: {{ .ClientsCreds.Sidecar.ServerName }}
-      cert-path: {{ .ClientsCreds.Sidecar.CertPath }}
-      key-path: {{ .ClientsCreds.Sidecar.KeyPath }}
+  sidecar-client:
+    endpoint: {{ .Endpoints.Sidecar.Server }}
+    tls:
+      mode: {{ .ClientTLS.Mode }}
+      key-path: {{ .ClientTLS.KeyPath }}
+      cert-path: {{ .ClientTLS.CertPath }}
       ca-cert-paths:
-        {{- range .ClientsCreds.Sidecar.CACertPaths }}
+        {{- range .ClientTLS.CACertPaths }}
         - {{ . }}
         {{- end }}
   orderer-servers:
     {{- range .Endpoints.Orderer }}
     - endpoint: {{ .Server }}
     {{- end }}
-  channel-id: {{ .ChannelID }}
+  channel-id: {{ .Policy.ChannelID }}

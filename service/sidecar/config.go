@@ -16,9 +16,9 @@ import (
 	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 
-	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 )
 
 type (
@@ -27,14 +27,17 @@ type (
 	// and the config of ledger service, and the orderer setup.
 	// It may contain the orderer endpoint from which the sidecar pulls blocks.
 	Config struct {
-		Server                        *connection.ServerConfig `mapstructure:"server"`
-		Committer                     CoordinatorConfig        `mapstructure:"committer"`
-		Ledger                        LedgerConfig             `mapstructure:"ledger"`
-		Orderer                       broadcastdeliver.Config  `mapstructure:"orderer"`
-		LastCommittedBlockSetInterval time.Duration            `mapstructure:"last-committed-block-set-interval"`
-		WaitingTxsLimit               int                      `mapstructure:"waiting-txs-limit"`
-		Monitoring                    monitoring.Config        `mapstructure:"monitoring"`
-		Bootstrap                     Bootstrap                `mapstructure:"bootstrap"`
+		Server                        *connection.ServerConfig  `mapstructure:"server"`
+		Monitoring                    monitoring.Config         `mapstructure:"monitoring"`
+		Committer                     *connection.ClientConfig  `mapstructure:"committer"`
+		Orderer                       ordererconn.Config        `mapstructure:"orderer"`
+		Ledger                        LedgerConfig              `mapstructure:"ledger"`
+		Notification                  NotificationServiceConfig `mapstructure:"notification"`
+		LastCommittedBlockSetInterval time.Duration             `mapstructure:"last-committed-block-set-interval"`
+		WaitingTxsLimit               int                       `mapstructure:"waiting-txs-limit"`
+		// ChannelBufferSize is the buffer size that will be used to queue blocks, requests, and statuses.
+		ChannelBufferSize int       `mapstructure:"channel-buffer-size"`
+		Bootstrap         Bootstrap `mapstructure:"bootstrap"`
 	}
 	// Bootstrap configures how to obtain the bootstrap configuration.
 	Bootstrap struct {
@@ -43,16 +46,22 @@ type (
 		GenesisBlockFilePath string `mapstructure:"genesis-block-file-path" yaml:"genesis-block-file-path,omitempty"`
 	}
 
-	// CoordinatorConfig holds the endpoint of the coordinator component in the
-	// committer service.
-	CoordinatorConfig struct {
-		Config *connection.ClientConfig `mapstructure:"client"`
-	}
-
 	// LedgerConfig holds the ledger path.
 	LedgerConfig struct {
 		Path string `mapstructure:"path"`
 	}
+
+	// NotificationServiceConfig holds the parameters for notifications.
+	NotificationServiceConfig struct {
+		// MaxTimeout is an upper limit on the request's timeout to prevent resource exhaustion.
+		// If a request doesn't specify a timeout, this value will be used.
+		MaxTimeout time.Duration `mapstructure:"max-timeout"`
+	}
+)
+
+const (
+	defaultNotificationMaxTimeout = time.Minute
+	defaultBufferSize             = 100
 )
 
 // LoadBootstrapConfig loads the bootstrap config according to the bootstrap method.
@@ -97,17 +106,17 @@ func OverwriteConfigFromEnvelope(conf *Config, envelope *common.Envelope) error 
 	return nil
 }
 
-func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*connection.OrdererEndpoint, error) {
+func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*ordererconn.Endpoint, error) {
 	oc, ok := bundle.OrdererConfig()
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
 
-	var endpoints []*connection.OrdererEndpoint
+	var endpoints []*ordererconn.Endpoint
 	for orgID, org := range oc.Organizations() {
 		endpointsStr := org.Endpoints()
 		for _, eStr := range endpointsStr {
-			e, err := connection.ParseOrdererEndpoint(eStr)
+			e, err := ordererconn.ParseEndpoint(eStr)
 			if err != nil {
 				return nil, err
 			}

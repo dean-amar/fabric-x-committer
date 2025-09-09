@@ -4,16 +4,14 @@
 #
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
-  server-creds:
-    tls-mode: {{ .ServiceTLS.Mode }}
-    server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: {{ .ServiceTLS.CertPath }}
+  tls:
+    mode: {{ .ServiceTLS.Mode }}
     key-path: {{ .ServiceTLS.KeyPath }}
+    cert-path: {{ .ServiceTLS.CertPath }}
     ca-cert-paths:
       {{- range .ServiceTLS.CACertPaths }}
       - {{ . }}
       {{- end }}
-
 monitoring:
   server:
     endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}

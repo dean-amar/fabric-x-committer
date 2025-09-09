@@ -21,12 +21,14 @@ import (
 	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/protoutil"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
-	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 )
 
 type (
@@ -53,6 +55,7 @@ type (
 		inBlocks    chan *common.Block
 		cutBlock    chan any
 		cache       *blockCache
+		healthcheck *health.Server
 	}
 
 	// HoldingOrderer allows holding a block.
@@ -139,6 +142,7 @@ func NewMockOrderer(config *OrdererConfig) (*Orderer, error) {
 		inBlocks:    make(chan *common.Block, config.BlockSize*config.OutBlockCapacity),
 		cutBlock:    make(chan any),
 		cache:       newBlockCache(config.OutBlockCapacity),
+		healthcheck: connection.DefaultHealthCheckService(),
 	}, nil
 }
 
@@ -211,6 +215,12 @@ func (o *HoldingOrderer) Deliver(stream ab.AtomicBroadcast_DeliverServer) error 
 // Release blocks.
 func (o *HoldingOrderer) Release() {
 	o.HoldFromBlock.Store(math.MaxUint64)
+}
+
+// RegisterService registers for the orderer's GRPC services.
+func (o *HoldingOrderer) RegisterService(server *grpc.Server) {
+	ab.RegisterAtomicBroadcastServer(server, o)
+	healthgrpc.RegisterHealthServer(server, o.healthcheck)
 }
 
 func (s *holdingStream) Send(msg *ab.DeliverResponse) error {
@@ -315,27 +325,24 @@ func (*Orderer) WaitForReady(context.Context) bool {
 	return true
 }
 
+// RegisterService registers for the orderer's GRPC services.
+func (o *Orderer) RegisterService(server *grpc.Server) {
+	ab.RegisterAtomicBroadcastServer(server, o)
+	healthgrpc.RegisterHealthServer(server, o.healthcheck)
+}
+
 // SubmitBlock allows submitting blocks directly for testing other packages.
 // The block header will be replaced with a generated header.
-func (o *Orderer) SubmitBlock(ctx context.Context, b *common.Block) bool {
-	return channel.NewWriter(ctx, o.inBlocks).Write(b)
+func (o *Orderer) SubmitBlock(ctx context.Context, b *common.Block) error {
+	if !channel.NewWriter(ctx, o.inBlocks).Write(b) {
+		return errors.Wrapf(ctx.Err(), "failed to submit block")
+	}
+	return nil
 }
 
 // SubmitEnv allows submitting envelops directly for testing other packages.
 func (o *Orderer) SubmitEnv(ctx context.Context, e *common.Envelope) bool {
 	return channel.NewWriter(ctx, o.inEnvs).Write(e)
-}
-
-// SubmitPayload allows submitting payload data directly for testing other packages.
-func (o *Orderer) SubmitPayload(ctx context.Context, channelID string, protoMsg proto.Message) (string, error) {
-	env, txID, err := serialization.CreateEnvelope(channelID, nil, protoMsg)
-	if err != nil {
-		return txID, errors.Wrap(err, "failed creating envelope")
-	}
-	if ok := o.SubmitEnv(ctx, env); !ok {
-		return txID, errors.New("failed to submit envelope")
-	}
-	return txID, nil
 }
 
 // GetBlock allows fetching blocks directly for testing other packages.

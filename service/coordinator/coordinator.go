@@ -8,19 +8,25 @@ package coordinator
 
 import (
 	"context"
-	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator/dependencygraph"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
@@ -40,12 +46,6 @@ type (
 		config                *Config
 		metrics               *perfMetrics
 
-		// nextExpectedBlockNumberToBeReceived denotes the next block number that the coordinator
-		// expects to receive from the sidecar. This value is determined based on the last committed
-		// block number in the ledger. The sidecar queries the coordinator for this value before
-		// starting to pull blocks from the ordering service.
-		nextExpectedBlockNumberToBeReceived atomic.Uint64
-
 		// initializationDone is used to find out whether the coordinator service has
 		// been initialized or not.
 		initializationDone *channel.Ready
@@ -61,6 +61,8 @@ type (
 		numWaitingTxsForStatus *atomic.Int32
 
 		txBatchIDToDepGraph uint64
+
+		healthcheck *health.Server
 	}
 
 	channels struct {
@@ -116,9 +118,9 @@ func NewCoordinatorService(c *Config) *Service {
 	// local dependency constructors. Hence, we define a buffer size for dependency graph manager by multiplying the
 	// number of local dependency constructors with the buffer size per goroutine. We follow this approach to avoid
 	// giving too many configurations to the user as it would add complexity to the user experience.
-	bufSzPerChanForSignVerifierMgr := c.ChannelBufferSizePerGoroutine * len(c.VerifierConfig.Endpoints)
-	bufSzPerChanForValCommitMgr := c.ChannelBufferSizePerGoroutine * len(c.ValidatorCommitterConfig.Endpoints)
-	bufSzPerChanForLocalDepMgr := c.ChannelBufferSizePerGoroutine * c.DependencyGraphConfig.NumOfLocalDepConstructors
+	bufSzPerChanForSignVerifierMgr := c.ChannelBufferSizePerGoroutine * len(c.Verifier.Endpoints)
+	bufSzPerChanForValCommitMgr := c.ChannelBufferSizePerGoroutine * len(c.ValidatorCommitter.Endpoints)
+	bufSzPerChanForLocalDepMgr := c.ChannelBufferSizePerGoroutine * c.DependencyGraph.NumOfLocalDepConstructors
 
 	queues := &channels{
 		coordinatorToDepGraphTxs:           make(chan *dependencygraph.TransactionBatch, bufSzPerChanForLocalDepMgr),
@@ -131,12 +133,12 @@ func NewCoordinatorService(c *Config) *Service {
 	metrics := newPerformanceMetrics()
 
 	depMgr := dependencygraph.NewManager(
-		&dependencygraph.Config{
+		&dependencygraph.Parameters{
 			IncomingTxs:               queues.coordinatorToDepGraphTxs,
 			OutgoingDepFreeTxsNode:    queues.depGraphToSigVerifierFreeTxs,
 			IncomingValidatedTxsNode:  queues.vcServiceToDepGraphValidatedTxs,
-			NumOfLocalDepConstructors: c.DependencyGraphConfig.NumOfLocalDepConstructors,
-			WaitingTxsLimit:           c.DependencyGraphConfig.WaitingTxsLimit,
+			NumOfLocalDepConstructors: c.DependencyGraph.NumOfLocalDepConstructors,
+			WaitingTxsLimit:           c.DependencyGraph.WaitingTxsLimit,
 			PrometheusMetricsProvider: metrics.Provider,
 		},
 	)
@@ -145,7 +147,7 @@ func NewCoordinatorService(c *Config) *Service {
 
 	svMgr := newSignatureVerifierManager(
 		&signVerifierManagerConfig{
-			clientConfig:             &c.VerifierConfig,
+			clientConfig:             &c.Verifier,
 			incomingTxsForValidation: queues.depGraphToSigVerifierFreeTxs,
 			outgoingValidatedTxs:     queues.sigVerifierToVCServiceValidatedTxs,
 			metrics:                  metrics,
@@ -155,7 +157,7 @@ func NewCoordinatorService(c *Config) *Service {
 
 	vcMgr := newValidatorCommitterManager(
 		&validatorCommitterManagerConfig{
-			clientConfig:                   &c.ValidatorCommitterConfig,
+			clientConfig:                   &c.ValidatorCommitter,
 			incomingTxsForValidationCommit: queues.sigVerifierToVCServiceValidatedTxs,
 			outgoingValidatedTxsNode:       queues.vcServiceToDepGraphValidatedTxs,
 			outgoingTxsStatus:              queues.vcServiceToCoordinatorTxStatus,
@@ -165,17 +167,17 @@ func NewCoordinatorService(c *Config) *Service {
 	)
 
 	return &Service{
-		UnimplementedCoordinatorServer: protocoordinatorservice.UnimplementedCoordinatorServer{},
-		dependencyMgr:                  depMgr,
-		signatureVerifierMgr:           svMgr,
-		validatorCommitterMgr:          vcMgr,
-		policyMgr:                      policyMgr,
-		queues:                         queues,
-		config:                         c,
-		metrics:                        metrics,
-		initializationDone:             channel.NewReady(),
-		numWaitingTxsForStatus:         &atomic.Int32{},
-		txBatchIDToDepGraph:            1,
+		dependencyMgr:          depMgr,
+		signatureVerifierMgr:   svMgr,
+		validatorCommitterMgr:  vcMgr,
+		policyMgr:              policyMgr,
+		queues:                 queues,
+		config:                 c,
+		metrics:                metrics,
+		initializationDone:     channel.NewReady(),
+		numWaitingTxsForStatus: &atomic.Int32{},
+		txBatchIDToDepGraph:    1,
+		healthcheck:            connection.DefaultHealthCheckService(),
 	}
 }
 
@@ -224,16 +226,6 @@ func (c *Service) Run(ctx context.Context) error {
 	if err := c.validatorCommitterMgr.recoverPolicyManagerFromStateDB(ctx); err != nil {
 		return err
 	}
-	lastCommittedBlock, getErr := c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
-	if getErr != nil {
-		return getErr
-	}
-	if lastCommittedBlock.Block == nil {
-		// no block has been committed.
-		c.nextExpectedBlockNumberToBeReceived.Store(0)
-	} else {
-		c.nextExpectedBlockNumberToBeReceived.Store(lastCommittedBlock.Block.Number + 1)
-	}
 
 	c.initializationDone.SignalReady()
 
@@ -247,6 +239,12 @@ func (c *Service) WaitForReady(ctx context.Context) bool {
 	//       and vcservice manager are ready. Hence, we can just wait for
 	//       the coordinator initialization.
 	return c.initializationDone.WaitForReady(ctx)
+}
+
+// RegisterService registers for the coordinator's GRPC services.
+func (c *Service) RegisterService(server *grpc.Server) {
+	protocoordinatorservice.RegisterCoordinatorServer(server, c)
+	healthgrpc.RegisterHealthServer(server, c.healthcheck)
 }
 
 // GetConfigTransaction get the config transaction from the state DB.
@@ -274,7 +272,7 @@ func (c *Service) GetLastCommittedBlockNumber(
 
 // GetNextExpectedBlockNumber returns the next expected block number to be received by the coordinator.
 func (c *Service) GetNextExpectedBlockNumber(
-	_ context.Context,
+	ctx context.Context,
 	_ *protocoordinatorservice.Empty,
 ) (*protoblocktx.BlockInfo, error) {
 	if !c.streamActive.TryRLock() {
@@ -282,9 +280,16 @@ func (c *Service) GetNextExpectedBlockNumber(
 	}
 	defer c.streamActive.RUnlock()
 
-	return &protoblocktx.BlockInfo{
-		Number: c.nextExpectedBlockNumberToBeReceived.Load(),
-	}, nil
+	lastCommittedBlock, getErr := c.validatorCommitterMgr.getLastCommittedBlockNumber(ctx)
+	if getErr != nil {
+		return nil, grpcerror.WrapInternalError(getErr)
+	}
+
+	res := &protoblocktx.BlockInfo{} // default: no block has been committed.
+	if lastCommittedBlock.Block != nil {
+		res.Number = lastCommittedBlock.Block.Number + 1
+	}
+	return res, nil
 }
 
 // GetTransactionsStatus returns the status of given transactions identifiers.
@@ -354,48 +359,41 @@ func (c *Service) receiveAndProcessBlock(
 	stream protocoordinatorservice.Coordinator_BlockProcessingServer,
 ) error {
 	txsBatchForDependencyGraph := channel.NewWriter(ctx, c.queues.coordinatorToDepGraphTxs)
+	txBatchForVcService := channel.NewWriter(ctx, c.queues.sigVerifierToVCServiceValidatedTxs)
 
 	for ctx.Err() == nil {
 		blk, err := stream.Recv()
 		if err != nil {
 			return errors.Wrap(err, "failed to receive blocks from the sidecar")
 		}
+		logger.Debugf("Coordinator received a batch with %d TXs", len(blk.Txs))
 
 		// NOTE: Block processing is decoupled from the stream's lifecycle.
 		// Even if the stream terminates unexpectedly, any received blocks will
 		// still be forwarded to downstream components for complete processing.
 
-		swapped := c.nextExpectedBlockNumberToBeReceived.CompareAndSwap(blk.Number, blk.Number+1)
-		if !swapped {
-			errMsg := fmt.Sprintf(
-				"coordinator expects block [%d] but received block [%d]",
-				c.nextExpectedBlockNumberToBeReceived.Load(),
-				blk.Number,
-			)
-			logger.Error(errMsg)
-			return errors.New(errMsg)
-		}
-		logger.Debugf("Coordinator received block [%d] with %d TXs", blk.Number, len(blk.Txs))
-
-		promutil.AddToCounter(c.metrics.transactionReceivedTotal, len(blk.Txs))
+		promutil.AddToCounter(c.metrics.transactionReceivedTotal, len(blk.Txs)+len(blk.Rejected))
 		c.numWaitingTxsForStatus.Add(int32(len(blk.Txs))) //nolint:gosec
 
-		if len(blk.Txs) == 0 {
-			continue
+		if len(blk.Txs) > 0 {
+			// TODO: make it configurable.
+			chunkSizeForDepGraph := min(c.config.DependencyGraph.WaitingTxsLimit, 500)
+			for i := 0; i < len(blk.Txs); i += chunkSizeForDepGraph {
+				end := min(i+chunkSizeForDepGraph, len(blk.Txs))
+				txsBatchForDependencyGraph.Write(&dependencygraph.TransactionBatch{
+					ID:  c.txBatchIDToDepGraph,
+					Txs: blk.Txs[i:end],
+				})
+				c.txBatchIDToDepGraph++
+			}
 		}
 
-		// TODO: make it configurable.
-		chunkSizeForDepGraph := min(c.config.DependencyGraphConfig.WaitingTxsLimit, 500)
-		for i := 0; i < len(blk.Txs); i += chunkSizeForDepGraph {
-			end := min(i+chunkSizeForDepGraph, len(blk.Txs))
-			txsBatchForDependencyGraph.Write(
-				&dependencygraph.TransactionBatch{
-					ID:          c.txBatchIDToDepGraph,
-					BlockNumber: blk.Number,
-					Txs:         blk.Txs[i:end],
-					TxsNum:      blk.TxsNum[i:end],
-				})
-			c.txBatchIDToDepGraph++
+		if len(blk.Rejected) > 0 {
+			rejected := make(dependencygraph.TxNodeBatch, len(blk.Rejected))
+			for i, tx := range blk.Rejected {
+				rejected[i] = dependencygraph.NewRejectedTransactionNode(tx)
+			}
+			txBatchForVcService.Write(rejected)
 		}
 	}
 
@@ -420,19 +418,10 @@ func (c *Service) sendTxStatus(
 
 		logger.Debugf("Batch with %d TX statuses forwarded to output stream.", len(txStatus.Status))
 
-		// TODO: introduce metrics to record all sent statuses. Issue #436.
+		statusCount := utils.CountAppearances(slices.Collect(maps.Values(txStatus.Status)))
 		m := c.metrics
-		for _, status := range txStatus.Status {
-			switch status.Code {
-			case protoblocktx.Status_COMMITTED:
-				promutil.AddToCounter(m.transactionCommittedStatusSentTotal, 1)
-			case protoblocktx.Status_ABORTED_MVCC_CONFLICT:
-				promutil.AddToCounter(m.transactionMVCCConflictStatusSentTotal, 1)
-			case protoblocktx.Status_ABORTED_DUPLICATE_TXID:
-				promutil.AddToCounter(m.transactionDuplicateTxStatusSentTotal, 1)
-			case protoblocktx.Status_ABORTED_SIGNATURE_INVALID:
-				promutil.AddToCounter(m.transactionInvalidSignatureStatusSentTotal, 1)
-			}
+		for code, count := range statusCount {
+			promutil.AddToCounter(m.transactionCommittedTotal.WithLabelValues(code.Code.String()), count)
 		}
 	}
 }

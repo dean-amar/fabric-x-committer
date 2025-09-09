@@ -13,11 +13,15 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
 	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
@@ -25,11 +29,12 @@ import (
 // It is used for testing the client which is the coordinator service.
 type VcService struct {
 	protovcservice.ValidationAndCommitServiceServer
-	txBatchChan        chan *protovcservice.TransactionBatch
+	txBatchChan        chan *protovcservice.Batch
 	numBatchesReceived atomic.Uint32
 	lastCommittedBlock atomic.Pointer[protoblocktx.BlockInfo]
 	txsStatus          *fifoCache[*protoblocktx.StatusWithHeight]
 	txsStatusMu        sync.Mutex
+	healthcheck        *health.Server
 	// MockFaultyNodeDropSize allows mocking a faulty node by dropping some TXs.
 	MockFaultyNodeDropSize int
 }
@@ -37,9 +42,16 @@ type VcService struct {
 // NewMockVcService returns a new VcService.
 func NewMockVcService() *VcService {
 	return &VcService{
-		txBatchChan: make(chan *protovcservice.TransactionBatch),
+		txBatchChan: make(chan *protovcservice.Batch),
 		txsStatus:   newFifoCache[*protoblocktx.StatusWithHeight](defaultTxStatusStorageSize),
+		healthcheck: connection.DefaultHealthCheckService(),
 	}
+}
+
+// RegisterService registers for the validator-committer's GRPC services.
+func (v *VcService) RegisterService(server *grpc.Server) {
+	protovcservice.RegisterValidationAndCommitServiceServer(server, v)
+	healthgrpc.RegisterHealthServer(server, v.healthcheck)
 }
 
 // SetLastCommittedBlockNumber set the last committed block number in the database/ledger.
@@ -126,9 +138,9 @@ func (v *VcService) receiveAndProcessTransactions(
 			return errors.Wrap(err, "error receiving transactions")
 		}
 
-		preTxNum := txBatch.Transactions[0].TxNum
+		preTxNum := txBatch.Transactions[0].Ref.TxNum
 		for _, tx := range txBatch.Transactions[1:] {
-			if preTxNum == tx.TxNum {
+			if preTxNum == tx.Ref.TxNum {
 				return errors.New("duplication tx num detected")
 			}
 		}
@@ -161,9 +173,9 @@ func (v *VcService) sendTransactionStatus(
 			if tx.PrelimInvalidTxStatus != nil {
 				code = tx.PrelimInvalidTxStatus.Code
 			}
-			s := types.CreateStatusWithHeight(code, tx.BlockNumber, int(tx.TxNum))
-			txsStatus.Status[tx.ID] = s
-			v.txsStatus.addIfNotExist(tx.ID, s)
+			s := types.NewStatusWithHeightFromRef(code, tx.Ref)
+			txsStatus.Status[tx.Ref.TxId] = s
+			v.txsStatus.addIfNotExist(tx.Ref.TxId, s)
 		}
 		v.txsStatusMu.Unlock()
 
@@ -182,6 +194,6 @@ func (v *VcService) GetNumBatchesReceived() uint32 {
 // SubmitTransactions enqueues the given transactions to a queue read by status sending goroutine.
 // This methods helps the test code to bypass the stream to submit transactions to the mock
 // vcservice.
-func (v *VcService) SubmitTransactions(ctx context.Context, txsBatch *protovcservice.TransactionBatch) {
+func (v *VcService) SubmitTransactions(ctx context.Context, txsBatch *protovcservice.Batch) {
 	channel.NewWriter(ctx, v.txBatchChan).Write(txsBatch)
 }

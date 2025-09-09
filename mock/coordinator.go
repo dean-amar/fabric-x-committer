@@ -15,11 +15,15 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
 	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
@@ -34,6 +38,7 @@ type Coordinator struct {
 	txsStatusMu             sync.Mutex
 	configTransaction       atomic.Pointer[protoblocktx.ConfigTransaction]
 	latency                 atomic.Pointer[time.Duration]
+	healthcheck             *health.Server
 }
 
 // We don't want to utilize unlimited memory for storing the transactions status.
@@ -43,8 +48,15 @@ var defaultTxStatusStorageSize = 100_000
 // NewMockCoordinator creates a new mock coordinator.
 func NewMockCoordinator() *Coordinator {
 	return &Coordinator{
-		txsStatus: newFifoCache[*protoblocktx.StatusWithHeight](defaultTxStatusStorageSize),
+		txsStatus:   newFifoCache[*protoblocktx.StatusWithHeight](defaultTxStatusStorageSize),
+		healthcheck: connection.DefaultHealthCheckService(),
 	}
+}
+
+// RegisterService registers for the coordinator's GRPC services.
+func (c *Coordinator) RegisterService(server *grpc.Server) {
+	protocoordinatorservice.RegisterCoordinatorServer(server, c)
+	healthgrpc.RegisterHealthServer(server, c.healthcheck)
 }
 
 // GetConfigTransaction return the latest configuration transaction.
@@ -121,7 +133,7 @@ func (c *Coordinator) BlockProcessing(stream protocoordinatorservice.Coordinator
 	defer logger.Info("Closed block processing stream")
 
 	g, gCtx := errgroup.WithContext(stream.Context())
-	blockQueue := channel.Make[*protocoordinatorservice.Block](gCtx, 1000)
+	blockQueue := channel.Make[*protocoordinatorservice.Batch](gCtx, 1000)
 	g.Go(func() error {
 		return c.receiveBlocks(gCtx, stream, blockQueue)
 	})
@@ -134,7 +146,7 @@ func (c *Coordinator) BlockProcessing(stream protocoordinatorservice.Coordinator
 func (c *Coordinator) receiveBlocks(
 	ctx context.Context,
 	stream protocoordinatorservice.Coordinator_BlockProcessingServer,
-	blockQueue channel.Writer[*protocoordinatorservice.Block],
+	blockQueue channel.Writer[*protocoordinatorservice.Batch],
 ) error {
 	for ctx.Err() == nil {
 		block, err := stream.Recv()
@@ -142,18 +154,16 @@ func (c *Coordinator) receiveBlocks(
 			return errors.Wrap(err, "receive block failed")
 		}
 
-		if !c.nextExpectedBlockNumber.CompareAndSwap(block.Number, block.Number+1) {
-			return errors.Newf(
-				"the received block [%d] is different from the expected block [%d]",
-				block.Number, c.nextExpectedBlockNumber.Load(),
-			)
+		maxBlock := uint64(0)
+		if len(block.Txs) > 0 {
+			maxBlock = max(maxBlock, block.Txs[len(block.Txs)-1].Ref.BlockNum)
 		}
-
-		if len(block.Txs) != len(block.TxsNum) {
-			return errors.New("the block doesn't have the correct number of transactions set")
+		if len(block.Rejected) > 0 {
+			maxBlock = max(maxBlock, block.Rejected[len(block.Rejected)-1].Ref.BlockNum)
 		}
+		c.nextExpectedBlockNumber.Store(maxBlock + 1)
 
-		logger.Debugf("Received block %d with %d transactions", block.Number, len(block.Txs))
+		logger.Debugf("Received batch with %d transactions", len(block.Txs))
 		c.numWaitingTxs.Add(int32(len(block.Txs))) //nolint:gosec
 
 		// send to the validation
@@ -165,7 +175,7 @@ func (c *Coordinator) receiveBlocks(
 func (c *Coordinator) sendTxsValidationStatus(
 	ctx context.Context,
 	stream protocoordinatorservice.Coordinator_BlockProcessingServer,
-	blockQueue channel.Reader[*protocoordinatorservice.Block],
+	blockQueue channel.Reader[*protocoordinatorservice.Batch],
 ) error {
 	for ctx.Err() == nil {
 		scBlock, ok := blockQueue.Read()
@@ -183,15 +193,21 @@ func (c *Coordinator) sendTxsValidationStatus(
 			}
 		}
 
-		txs := scBlock.Txs
-		txNums := scBlock.TxsNum
-		for len(txs) > 0 {
-			chunkSize := rand.Intn(len(txs)) + 1
-			if err := c.sendTxsStatusChunk(stream, txs[:chunkSize], txNums[:chunkSize], scBlock.Number); err != nil {
+		info := scBlock.Rejected
+		for _, tx := range scBlock.Txs {
+			info = append(info, &protocoordinatorservice.TxStatusInfo{
+				Ref:    tx.Ref,
+				Status: protoblocktx.Status_COMMITTED,
+			})
+		}
+		rand.Shuffle(len(info), func(i, j int) { info[i], info[j] = info[j], info[i] })
+
+		for len(info) > 0 {
+			chunkSize := rand.Intn(len(info)) + 1
+			if err := c.sendTxsStatusChunk(stream, info[:chunkSize]); err != nil {
 				return errors.Wrap(err, "submit chunk failed")
 			}
-			txs = txs[chunkSize:]
-			txNums = txNums[chunkSize:]
+			info = info[chunkSize:]
 		}
 	}
 	return errors.Wrap(ctx.Err(), "context cancelled")
@@ -199,18 +215,17 @@ func (c *Coordinator) sendTxsValidationStatus(
 
 func (c *Coordinator) sendTxsStatusChunk(
 	stream protocoordinatorservice.Coordinator_BlockProcessingServer,
-	txs []*protoblocktx.Tx,
-	txNum []uint32, blockNum uint64,
+	txs []*protocoordinatorservice.TxStatusInfo,
 ) error {
 	b := &protoblocktx.TransactionsStatus{
 		Status: make(map[string]*protoblocktx.StatusWithHeight, len(txs)),
 	}
 	c.txsStatusMu.Lock()
 	defer c.txsStatusMu.Unlock()
-	for i, tx := range txs {
-		s := types.CreateStatusWithHeight(protoblocktx.Status_COMMITTED, blockNum, int(txNum[i]))
-		b.Status[tx.Id] = s
-		c.txsStatus.addIfNotExist(tx.Id, s)
+	for _, info := range txs {
+		s := types.NewStatusWithHeightFromRef(info.Status, info.Ref)
+		b.Status[info.Ref.TxId] = s
+		c.txsStatus.addIfNotExist(info.Ref.TxId, s)
 	}
 	if err := stream.Send(b); err != nil {
 		return errors.Wrap(err, "failed to send status")

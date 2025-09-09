@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,11 +16,13 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
-func TestLoadGen(t *testing.T) {
+func TestLoadGenWithTLSModes(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name         string
@@ -54,25 +57,33 @@ func TestLoadGen(t *testing.T) {
 			serviceFlags: runner.LoadGenForVerifier | runner.LoadGenForDistributedLoadGen | runner.Verifier,
 		},
 	} {
+		tc := tc
 		serviceFlags := tc.serviceFlags
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			gomega.RegisterTestingT(t)
-			c := runner.NewRuntime(t, &runner.Config{
-				NumVerifiers: 2,
-				NumVCService: 2,
-				BlockTimeout: 2 * time.Second,
-				BlockSize:    500,
-			})
-			c.Start(t, serviceFlags)
+			for _, mode := range test.ServerModes {
+				mode := mode
+				t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
+					t.Parallel()
+					gomega.RegisterTestingT(t)
+					c := runner.NewRuntime(t, &runner.Config{
+						NumVerifiers: 2,
+						NumVCService: 2,
+						BlockTimeout: 2 * time.Second,
+						BlockSize:    500,
+						TLSMode:      mode,
+					})
+					c.Start(t, serviceFlags)
 
-			metricsURL, err := monitoring.MakeMetricsURL(c.SystemConfig.Endpoints.LoadGen.Metrics.Address())
-			require.NoError(t, err)
-			require.Eventually(t, func() bool {
-				count := test.GetMetricValueFromURL(t, metricsURL, "loadgen_transaction_committed_total")
-				t.Logf("count %d", count)
-				return count > 1_000
-			}, 90*time.Second, 1*time.Second)
+					metricsURL, err := monitoring.MakeMetricsURL(c.SystemConfig.Endpoints.LoadGen.Metrics.Address())
+					require.NoError(t, err)
+					require.Eventually(t, func() bool {
+						count := test.GetMetricValueFromURL(t, metricsURL, "loadgen_transaction_committed_total")
+						t.Logf("count %d", count)
+						return count > 1_000
+					}, 150*time.Second, 1*time.Second)
+				})
+			}
 		})
 	}
 }
@@ -99,4 +110,33 @@ func TestLoadGenCommitterWithLimit(t *testing.T) {
 
 	count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
 	require.Equal(t, expectedTXs, count)
+}
+
+func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
+	t.Parallel()
+	for _, dbType := range []string{dbtest.PostgresDBType, dbtest.YugaDBType} {
+		databaseType := dbType
+		t.Run(fmt.Sprintf("%s_tls", databaseType), func(t *testing.T) {
+			t.Parallel()
+			conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, databaseType)
+			gomega.RegisterTestingT(t)
+			c := runner.NewRuntime(t, &runner.Config{
+				NumVerifiers: 2,
+				NumVCService: 2,
+				BlockTimeout: 2 * time.Second,
+				BlockSize:    500,
+				TLSMode:      connection.MutualTLSMode,
+				DBConnection: conn,
+			})
+
+			c.Start(t, runner.FullTxPathWithLoadGenAndQuery)
+
+			require.Eventually(t, func() bool {
+				count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
+				t.Logf("count %d", count)
+				return count > 1_000
+			}, 90*time.Second, 500*time.Millisecond)
+			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
+		})
+	}
 }

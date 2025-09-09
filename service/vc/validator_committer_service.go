@@ -13,11 +13,15 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
@@ -38,8 +42,8 @@ type ValidatorCommitterService struct {
 	preparer                 *transactionPreparer
 	validator                *transactionValidator
 	committer                *transactionCommitter
-	receivedTxBatch          chan *protovcservice.TransactionBatch
-	toPrepareTxs             chan *protovcservice.TransactionBatch
+	receivedTxBatch          chan *protovcservice.Batch
+	toPrepareTxs             chan *protovcservice.Batch
 	preparedTxs              chan *preparedTransactions
 	validatedTxs             chan *validatedTransactions
 	txsStatus                chan *protoblocktx.TransactionsStatus
@@ -48,6 +52,7 @@ type ValidatorCommitterService struct {
 	minTxBatchSize           int
 	timeoutForMinTxBatchSize time.Duration
 	config                   *Config
+	healthcheck              *health.Server
 
 	// isStreamActive indicates whether a stream from the client (i.e., coordinator) to the vcservice
 	// is currently active. We permit a maximum of one active stream at a time. If multiple
@@ -79,8 +84,8 @@ func NewValidatorCommitterService(
 
 	// TODO: make queueMultiplier configurable
 	queueMultiplier := 1
-	receivedTxBatch := make(chan *protovcservice.TransactionBatch, l.MaxWorkersForPreparer*queueMultiplier)
-	toPrepareTxs := make(chan *protovcservice.TransactionBatch, l.MaxWorkersForPreparer*queueMultiplier)
+	receivedTxBatch := make(chan *protovcservice.Batch, l.MaxWorkersForPreparer*queueMultiplier)
+	toPrepareTxs := make(chan *protovcservice.Batch, l.MaxWorkersForPreparer*queueMultiplier)
 	preparedTxs := make(chan *preparedTransactions, l.MaxWorkersForValidator*queueMultiplier)
 	validatedTxs := make(chan *validatedTransactions, queueMultiplier)
 	txsStatus := make(chan *protoblocktx.TransactionsStatus, l.MaxWorkersForCommitter*queueMultiplier)
@@ -106,6 +111,7 @@ func NewValidatorCommitterService(
 		minTxBatchSize:           config.ResourceLimits.MinTransactionBatchSize,
 		timeoutForMinTxBatchSize: config.ResourceLimits.TimeoutForMinTransactionBatchSize,
 		config:                   config,
+		healthcheck:              connection.DefaultHealthCheckService(),
 	}
 
 	return vc, nil
@@ -161,6 +167,12 @@ func (vc *ValidatorCommitterService) Run(ctx context.Context) error {
 // If the context ended before the service is ready, returns false.
 func (*ValidatorCommitterService) WaitForReady(context.Context) bool {
 	return true
+}
+
+// RegisterService registers for the validator-committer's GRPC services.
+func (vc *ValidatorCommitterService) RegisterService(server *grpc.Server) {
+	protovcservice.RegisterValidationAndCommitServiceServer(server, vc)
+	healthgrpc.RegisterHealthServer(server, vc.healthcheck)
 }
 
 func (vc *ValidatorCommitterService) monitorQueues(ctx context.Context) {
@@ -299,7 +311,7 @@ func (vc *ValidatorCommitterService) receiveTransactions(
 }
 
 func (vc *ValidatorCommitterService) batchReceivedTransactionsAndForwardForProcessing(ctx context.Context) {
-	largerBatch := &protovcservice.TransactionBatch{}
+	largerBatch := &protovcservice.Batch{}
 	timer := time.NewTimer(vc.timeoutForMinTxBatchSize)
 	defer timer.Stop()
 	toPrepareTxs := channel.NewWriter(ctx, vc.toPrepareTxs)
@@ -312,7 +324,7 @@ func (vc *ValidatorCommitterService) batchReceivedTransactionsAndForwardForProce
 		if ok := toPrepareTxs.Write(largerBatch); !ok {
 			return
 		}
-		largerBatch = &protovcservice.TransactionBatch{}
+		largerBatch = &protovcservice.Batch{}
 	}
 
 	for {
@@ -363,7 +375,7 @@ func (vc *ValidatorCommitterService) sendTransactionStatus(
 				committed++
 			case protoblocktx.Status_ABORTED_MVCC_CONFLICT:
 				mvcc++
-			case protoblocktx.Status_ABORTED_DUPLICATE_TXID:
+			case protoblocktx.Status_REJECTED_DUPLICATE_TX_ID:
 				dup++
 			}
 		}

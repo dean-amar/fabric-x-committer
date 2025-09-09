@@ -26,7 +26,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/tlsgen"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 const (
@@ -211,20 +211,20 @@ func (dc *DatabaseContainer) setTLSPropertiesForDatabase(t *testing.T) {
 		return
 	}
 
-	tlsManager := tlsgen.NewSecureCommunicationManager(t)
+	tlsManager := test.NewCredentialsFactory(t)
 
 	var (
 		credsPathDir, serverName string
-		paths                    map[string]string
+		tlsConfig                connection.TLSConfig
 	)
 
 	switch dc.DatabaseType {
 	case PostgresDBType:
 		serverName = defaultPostgresServerName
-		credsPathDir, paths = dc.configurePostgresTLS(t, tlsManager)
+		tlsConfig, credsPathDir = dc.configurePostgresTLS(t, tlsManager)
 	case YugaDBType:
 		serverName = defaultYugabyteTLSContainerIP
-		credsPathDir, paths = dc.configureYugabyteTLS(t, tlsManager)
+		tlsConfig, credsPathDir = dc.configureYugabyteTLS(t, tlsManager)
 
 	default:
 		t.Fatalf("Unsupported database type: %s", dc.DatabaseType)
@@ -232,7 +232,7 @@ func (dc *DatabaseContainer) setTLSPropertiesForDatabase(t *testing.T) {
 
 	dc.Creds = containerCreds{
 		CredsPath:  credsPathDir,
-		CACertPath: paths[tlsgen.KeyCACert],
+		CACertPath: tlsConfig.CACertPaths[0],
 		ServerName: serverName,
 	}
 	dc.Binds = append(dc.Binds, credsPathDir+":/creds")
@@ -241,8 +241,8 @@ func (dc *DatabaseContainer) setTLSPropertiesForDatabase(t *testing.T) {
 
 func (dc *DatabaseContainer) configurePostgresTLS(
 	t *testing.T,
-	tlsManager *tlsgen.SecureCommunicationManager,
-) (string, map[string]string) {
+	tlsManager *test.CredentialsFactory,
+) (connection.TLSConfig, string) {
 	t.Helper()
 
 	dc.Cmd = []string{
@@ -251,15 +251,15 @@ func (dc *DatabaseContainer) configurePostgresTLS(
 		"-c", "ssl_key_file=/creds/server.key",
 	}
 
-	return tlsManager.CreateServerCreds(t, defaultPostgresServerName, tlsgen.CertStylePostgres)
+	return tlsManager.CreateServerCredentials(t, "", defaultPostgresServerName, test.CertStylePostgres)
 }
 
 func (dc *DatabaseContainer) configureYugabyteTLS(
 	t *testing.T,
-	tlsManager *tlsgen.SecureCommunicationManager,
-) (string, map[string]string) {
+	tlsManager *test.CredentialsFactory,
+) (connection.TLSConfig, string) {
 	t.Helper()
-	dc.Network = CreateDockerNetwork(t, defaultNetworkName, defaultSubnet, defaultGateway).Name
+	dc.Network = CreateDockerNetworkWithSubnet(t, defaultNetworkName, defaultSubnet, defaultGateway).Name
 	t.Cleanup(func() {
 		RemoveDockerNetwork(t, defaultNetworkName)
 	})
@@ -281,7 +281,7 @@ func (dc *DatabaseContainer) configureYugabyteTLS(
 		},
 	}
 
-	return tlsManager.CreateServerCreds(t, defaultYugabyteTLSContainerIP, tlsgen.CertStyleYugabyte)
+	return tlsManager.CreateServerCredentials(t, "", defaultYugabyteTLSContainerIP, test.CertStyleYugabyte)
 }
 
 // createContainer attempts to create a container instance, or attach to an existing one.
@@ -363,7 +363,7 @@ func (dc *DatabaseContainer) getConnectionOptions(ctx context.Context, t *testin
 	require.NoError(t, err)
 
 	endpoints := []*connection.Endpoint{
-		dc.GetContainerConnectionDetails(ctx, t),
+		dc.GetContainerConnectionDetails(t),
 	}
 	for _, p := range container.NetworkSettings.Ports[dc.DbPort] {
 		endpoints = append(endpoints, connection.CreateEndpointHP(p.HostIP, p.HostPort))
@@ -374,12 +374,11 @@ func (dc *DatabaseContainer) getConnectionOptions(ctx context.Context, t *testin
 
 // GetContainerConnectionDetails inspect the container and fetches its connection to an endpoint.
 func (dc *DatabaseContainer) GetContainerConnectionDetails(
-	ctx context.Context,
 	t *testing.T,
 ) *connection.Endpoint {
 	t.Helper()
 	container, err := dc.client.InspectContainerWithOptions(docker.InspectContainerOptions{
-		Context: ctx,
+		Context: t.Context(),
 		ID:      dc.containerID,
 	})
 	require.NoError(t, err)
@@ -472,25 +471,27 @@ func (dc *DatabaseContainer) readPasswordFromContainer(t *testing.T, filePath st
 	return defaultPassword
 }
 
-// ExecuteCommand execute a given command in the container.
+// ExecuteCommand executes a command and returns the container output.
 func (dc *DatabaseContainer) ExecuteCommand(t *testing.T, cmd []string) string {
 	t.Helper()
-
-	var stdout bytes.Buffer
+	require.NotNil(t, dc.client)
 	t.Logf("executing %s", strings.Join(cmd, " "))
+
+	var stdout strings.Builder
 	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
 		Container:    dc.containerID,
 		Cmd:          cmd,
 		AttachStdout: true,
-		AttachStderr: true,
-		Tty:          false,
 	})
-	require.NoError(t, err, "failed to create exec for command")
-
-	err = dc.client.StartExec(exec.ID, docker.StartExecOptions{
+	require.NoError(t, err)
+	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{
 		OutputStream: &stdout,
-	})
-	require.NoError(t, err, "failed to start exec for command")
+		RawTerminal:  false,
+	}))
+
+	//inspect, err := dc.client.InspectExec(exec.ID)
+	//require.NoError(t, err)
+	//require.Equal(t, 0, inspect.ExitCode)
 
 	return stdout.String()
 }
@@ -519,8 +520,34 @@ func stopContainerByIP(t *testing.T, targetIP string) {
 	t.Logf("no container found with the requested ip: %v", targetIP)
 }
 
-// CreateDockerNetwork creates a network if it doesn't exist.
-func CreateDockerNetwork(t *testing.T, name, subnet, gateway string) *docker.Network {
+// EnsureNodeReadiness checks the container's readiness by monitoring its logs and ensure its running correctly.
+func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput string) {
+	t.Helper()
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		output := dc.GetContainerLogs(t)
+		require.Contains(ct, output, requiredOutput)
+	}, 45*time.Second, 250*time.Millisecond)
+}
+
+// fixCertificatePermissions fixes the ownership of the TLS certificates inside the container.
+func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T,
+	user,
+	containerPublicKeyPath,
+	containerPrivateKeyPath string,
+) {
+	t.Helper()
+
+	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
+		Container: dc.containerID,
+		Cmd:       []string{"chown", user, containerPublicKeyPath, containerPrivateKeyPath},
+		User:      "root", // Run as root to change ownership
+	})
+	require.NoError(t, err)
+	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{}))
+}
+
+// CreateDockerNetworkWithSubnet creates a network if it doesn't exist.
+func CreateDockerNetworkWithSubnet(t *testing.T, name, subnet, gateway string) *docker.Network {
 	t.Helper()
 	client := GetDockerClient(t)
 	network, err := client.NetworkInfo(name)
@@ -544,52 +571,38 @@ func CreateDockerNetwork(t *testing.T, name, subnet, gateway string) *docker.Net
 	return network
 }
 
+// CreateDockerNetwork creates a network if it doesn't exist.
+func CreateDockerNetwork(t *testing.T, name string) *docker.Network {
+	t.Helper()
+	client := GetDockerClient(t)
+	network, err := client.CreateNetwork(docker.CreateNetworkOptions{
+		Name:   name,
+		Driver: "bridge",
+	})
+	if errors.Is(err, docker.ErrNetworkAlreadyExists) {
+		t.Logf("network %s already exists", name)
+		network, err = client.NetworkInfo(name)
+		require.NoError(t, err)
+		return network
+	}
+	require.NoError(t, err, "failed to create network")
+
+	t.Logf("network %s created", network.Name)
+	return network
+}
+
 // RemoveDockerNetwork removes a Docker network by name.
 func RemoveDockerNetwork(t *testing.T, name string) {
 	t.Helper()
 	client := GetDockerClient(t)
-	network, err := client.NetworkInfo(name)
-	require.NoError(t, err)
-
-	err = client.RemoveNetwork(network.ID)
+	err := client.RemoveNetwork(name)
+	if errors.As(err, new(*docker.NoSuchNetwork)) {
+		t.Logf("error: %s", err)
+		return
+	}
 	require.NoError(t, err)
 
 	t.Logf("network %s removed successfully", name)
-}
-
-// EnsureNodeReadiness checks the container's readiness by monitoring its logs and ensure its running correctly.
-func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput string) error {
-	t.Helper()
-	var err error
-	if ok := assert.Eventually(t, func() bool {
-		output := dc.GetContainerLogs(t)
-		if !strings.Contains(output, requiredOutput) {
-			err = errors.Newf("Node %s readiness check failed", dc.Name)
-			return false
-		}
-		return true
-	}, 90*time.Second, 250*time.Millisecond); !ok {
-		dc.StopContainer(t)
-		return err
-	}
-	return nil
-}
-
-// fixCertificatePermissions fixes the ownership of the TLS certificates inside the container.
-func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T,
-	user,
-	containerPublicKeyPath,
-	containerPrivateKeyPath string,
-) {
-	t.Helper()
-
-	exec, err := dc.client.CreateExec(docker.CreateExecOptions{
-		Container: dc.containerID,
-		Cmd:       []string{"chown", user, containerPublicKeyPath, containerPrivateKeyPath},
-		User:      "root", // Run as root to change ownership
-	})
-	require.NoError(t, err)
-	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{}))
 }
 
 // GetDockerClient instantiate a new docker client.

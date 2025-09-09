@@ -12,11 +12,16 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
@@ -27,10 +32,11 @@ import (
 type SigVerifier struct {
 	protosigverifierservice.UnimplementedVerifierServer
 	updates                    []*protosigverifierservice.Update
-	requestBatch               chan *protosigverifierservice.RequestBatch
+	requestBatch               chan *protosigverifierservice.Batch
 	numBlocksReceived          atomic.Uint32
 	returnErrForUpdatePolicies atomic.Bool
 	policyUpdateCounter        atomic.Uint64
+	healthcheck                *health.Server
 	// MockFaultyNodeDropSize allows mocking a faulty node by dropping some TXs.
 	MockFaultyNodeDropSize int
 }
@@ -38,8 +44,15 @@ type SigVerifier struct {
 // NewMockSigVerifier returns a new mock verifier.
 func NewMockSigVerifier() *SigVerifier {
 	return &SigVerifier{
-		requestBatch: make(chan *protosigverifierservice.RequestBatch, 10),
+		requestBatch: make(chan *protosigverifierservice.Batch, 10),
+		healthcheck:  connection.DefaultHealthCheckService(),
 	}
+}
+
+// RegisterService registers for the verifier's GRPC services.
+func (m *SigVerifier) RegisterService(server *grpc.Server) {
+	protosigverifierservice.RegisterVerifierServer(server, m)
+	healthgrpc.RegisterHealthServer(server, m.healthcheck)
 }
 
 func (m *SigVerifier) updatePolicies(update *protosigverifierservice.Update) error {
@@ -117,13 +130,13 @@ func (m *SigVerifier) sendResponseBatch(
 				continue
 			}
 			status := protoblocktx.Status_COMMITTED
-			if len(req.GetTx().GetSignatures()) == 0 {
+			isConfig := len(req.Tx.Namespaces) == 1 && req.Tx.Namespaces[0].NsId == types.ConfigNamespaceID
+			if len(req.Tx.Signatures) == 0 && !isConfig {
 				status = protoblocktx.Status_ABORTED_SIGNATURE_INVALID
 			}
 			respBatch.Responses = append(respBatch.Responses, &protosigverifierservice.Response{
-				BlockNum: req.BlockNum,
-				TxNum:    req.TxNum,
-				Status:   status,
+				Ref:    req.Ref,
+				Status: status,
 			})
 		}
 
@@ -166,7 +179,7 @@ func (m *SigVerifier) ClearPolicies() {
 // Returns true if successful.
 func (m *SigVerifier) SendRequestBatchWithoutStream(
 	ctx context.Context,
-	requestBatch *protosigverifierservice.RequestBatch,
+	requestBatch *protosigverifierservice.Batch,
 ) bool {
 	return channel.NewWriter(ctx, m.requestBatch).Write(requestBatch)
 }

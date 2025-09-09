@@ -9,83 +9,195 @@ package test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric/common/crypto/tlsgen"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/connection/tlsgen"
 )
 
 type (
-	// SecureConnectionFunctionArguments groups the arguments required to run a secure connection test.
-	SecureConnectionFunctionArguments struct {
-		ServerCN      string
-		ServerStarter ServerStarter
-		ClientStarter ClientStarter
-		Parallel      bool
+	// CredentialsFactory responsible for the creation of
+	// TLS certificates inside a TLSConfig for testing purposes
+	// by using the tls generation library of 'Hyperledger Fabric'.
+	CredentialsFactory struct {
+		CertificateAuthority tlsgen.CA
 	}
 
-	// ServerStarter is a func that receives a TLS config, start the server and return its endpoint.
-	ServerStarter func(t *testing.T, serverTLS *connection.ConfigTLS) (endpoint connection.Endpoint)
+	// testCase define a secure connection test case.
+	testCase struct {
+		testDescription  string
+		clientSecureMode string
+		shouldFail       bool
+	}
 
-	// ClientStarter dials the service and returns a func that executes a request.
-	ClientStarter func(t *testing.T, endpoint *connection.Endpoint, cfg *connection.ConfigTLS) RequestFunc
+	createTLSConfigParameters struct {
+		connectionMode string
+		keyPair        *tlsgen.CertKeyPair
+		caCertificate  []byte
+		namingFunction func(key string) string
+	}
 
-	// RequestFunc performs a request and returns the resulting error.
-	RequestFunc func(ctx context.Context) error
+	// ServerStarter is a function that receives a TLS configuration, starts the server,
+	// and returns a RPCAttempt function for initiating a client connection and attempting an RPC call.
+	ServerStarter func(t *testing.T, serverTLS connection.TLSConfig) RPCAttempt
+
+	// RPCAttempt is a function returned by ServerStarter that contains the information
+	// needed to start a client connection and attempt an RPC call.
+	RPCAttempt func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error
+
+	// CertStyle sets the database certificates file formatting.
+	CertStyle int
 )
 
-// RunSecureConnectionTest starts a gRPC server with mTLS enabled and
-// tests client connections using various TLS configurations to verify that
-// the server correctly accepts or rejects connections based on the client's setup.
+const (
+	defaultHostName = "localhost"
+
+	// CertStyleDefault creates certificates by the default naming convention.
+	CertStyleDefault CertStyle = iota
+	// CertStyleYugabyte creates YugabyteDB node's certificates by node.<IP>.key, node.<IP>.crt, ca.crt.
+	CertStyleYugabyte
+	// CertStylePostgres creates PostgreSQL node's certificates by server.key, server.crt, ca.crt.
+	CertStylePostgres
+
+	//nolint:revive // KeyPrivate, KeyPublic KeyCACert are convention key names for the credential map.
+	KeyPrivate = "private-key"
+	KeyPublic  = "public-key"
+	KeyCACert  = "ca-certificate"
+
+	keySubDirectory = "sub-dir"
+	caCertFileName  = "ca.crt"
+)
+
+// ServerModes is a list of server-side TLS modes used for testing.
+var ServerModes = []string{connection.MutualTLSMode, connection.OneSideTLSMode, connection.NoneTLSMode}
+
+// NewCredentialsFactory returns a CredentialsFactory with a new CA.
+func NewCredentialsFactory(t *testing.T) *CredentialsFactory {
+	t.Helper()
+	ca, err := tlsgen.NewCA()
+	require.NoError(t, err)
+	return &CredentialsFactory{
+		CertificateAuthority: ca,
+	}
+}
+
+// CreateServerCredentials creates a server key pair given SAN (Subject Alternative Name),
+// Writing it to a temp testing folder and returns a [connection.TLSConfig].
+func (scm *CredentialsFactory) CreateServerCredentials(
+	t *testing.T,
+	tlsMode string,
+	san string,
+	namingStyle CertStyle,
+) (connection.TLSConfig, string) {
+	t.Helper()
+	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san)
+	require.NoError(t, err)
+	return createTLSConfig(t, createTLSConfigParameters{
+		tlsMode,
+		serverKeypair,
+		scm.CertificateAuthority.CertBytes(),
+		selectFileNames(namingStyle, san),
+	})
+}
+
+// CreateClientCredentials creates a client key pair,
+// Writing it to a temp testing folder and returns a [connection.TLSConfig].
+func (scm *CredentialsFactory) CreateClientCredentials(t *testing.T, tlsMode string) (connection.TLSConfig, string) {
+	t.Helper()
+	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
+	require.NoError(t, err)
+	return createTLSConfig(t, createTLSConfigParameters{
+		tlsMode,
+		clientKeypair,
+		scm.CertificateAuthority.CertBytes(),
+		selectFileNames(CertStyleDefault, ""),
+	})
+}
+
+/*
+RunSecureConnectionTest starts a gRPC server with mTLS enabled and
+tests client connections using various TLS configurations to verify that
+the server correctly accepts or rejects connections based on the client's setup.
+It runs a server instance of the service and returns a function
+that starts a client with the required TLS mode, attempts an RPC call,
+and returns the resulting error.
+Server Mode | Client with mTLS | Client with server-side TLS | Client with no TLS
+------------|------------------|-----------------------------|--------------------
+mTLS        |      connect     |        can't connect        |     can't connect
+TLS         |      connect     |           connect           |     can't connect
+None        | can't connect    |        can't connect        |       connect.
+*/
 func RunSecureConnectionTest(
 	t *testing.T,
-	secureConnArguments SecureConnectionFunctionArguments,
+	starter ServerStarter,
 ) {
 	t.Helper()
-	tlsMgr := tlsgen.NewSecureCommunicationManager(t)
-	serverCreds := tlsMgr.CreateServerCertificate(t, secureConnArguments.ServerCN)
-	serverTLS := CreateTLSConfigFromPaths(connection.TLSMutual, serverCreds, "")
-	endpoint := secureConnArguments.ServerStarter(t, &serverTLS)
-
-	clientCreds := tlsMgr.CreateClientCertificate(t)
-	baseClientTLS := CreateTLSConfigFromPaths(connection.TLSNone, clientCreds, secureConnArguments.ServerCN)
-
-	cases := []struct {
-		desc      string
-		tlsMode   connection.TLSMode
-		expectErr bool
+	// create server and client credentials
+	tlsMgr := NewCredentialsFactory(t)
+	// create a base TLS configuration for the client
+	baseClientTLS, _ := tlsMgr.CreateClientCredentials(t, connection.NoneTLSMode)
+	for _, tc := range []struct {
+		serverMode string
+		cases      []testCase
 	}{
-		{"correct client credentials", connection.TLSMutual, false},
-		{"without mTLS", connection.TLSServer, true},
-		{"with no TLS at all", connection.TLSNone, true},
-	}
-
-	for _, tc := range cases {
-		testCase := tc
-		t.Run(fmt.Sprintf("%s/%s", secureConnArguments.ServerCN, testCase.desc), func(t *testing.T) {
-			if secureConnArguments.Parallel {
+		{
+			serverMode: connection.MutualTLSMode,
+			cases: []testCase{
+				{"client mTLS", connection.MutualTLSMode, false},
+				{"client with one sided TLS", connection.OneSideTLSMode, true},
+				{"client no TLS", connection.NoneTLSMode, true},
+			},
+		},
+		{
+			serverMode: connection.OneSideTLSMode,
+			cases: []testCase{
+				{"client mTLS", connection.MutualTLSMode, false},
+				{"client with one sided TLS", connection.OneSideTLSMode, false},
+				{"client no TLS", connection.NoneTLSMode, true},
+			},
+		},
+		{
+			serverMode: connection.NoneTLSMode,
+			cases: []testCase{
+				{"client mTLS", connection.MutualTLSMode, true},
+				{"client with one sided TLS", connection.OneSideTLSMode, true},
+				{"client no TLS", connection.NoneTLSMode, false},
+			},
+		},
+	} {
+		// create server's tls config and start it according to the serverSecureMode.
+		serverTLS, _ := tlsMgr.CreateServerCredentials(t, tc.serverMode, defaultHostName, CertStyleDefault)
+		rpcAttemptFunc := starter(t, serverTLS)
+		// for each server secure mode, build the client's test cases.
+		for _, clientTestCase := range tc.cases {
+			clientTc := clientTestCase
+			t.Run(fmt.Sprintf(
+				"tls-mode:%s/%s",
+				tc.serverMode,
+				clientTc.testDescription,
+			), func(t *testing.T) {
 				t.Parallel()
-			}
 
-			cfg := baseClientTLS
-			cfg.Mode = testCase.tlsMode
+				cfg := baseClientTLS
+				cfg.Mode = clientTc.clientSecureMode
 
-			requestFunc := secureConnArguments.ClientStarter(t, &endpoint, &cfg)
+				ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+				t.Cleanup(cancel)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
-			t.Cleanup(cancel)
-
-			err := requestFunc(ctx)
-			if tc.expectErr {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-		})
+				err := rpcAttemptFunc(ctx, t, cfg)
+				if clientTc.shouldFail {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
 	}
 }
 
@@ -95,36 +207,93 @@ func RunSecureConnectionTest(
 func CreateClientWithTLS[T any](
 	t *testing.T,
 	endpoint *connection.Endpoint,
-	tlsCfg *connection.ConfigTLS,
+	tlsCfg connection.TLSConfig,
 	protoClient func(grpc.ClientConnInterface) T,
 ) T {
 	t.Helper()
-
-	creds, err := tlsCfg.ClientOption()
+	conn, err := connection.Connect(NewSecuredDialConfig(t, endpoint, tlsCfg))
 	require.NoError(t, err)
-
-	conn, err := connection.Connect(
-		connection.NewDialConfigWithCreds(endpoint, creds),
-	)
-	require.NoError(t, err)
-
-	t.Cleanup(func() { require.NoError(t, conn.Close()) })
-
+	t.Cleanup(func() {
+		require.NoError(t, conn.Close())
+	})
 	return protoClient(conn)
 }
 
-// CreateTLSConfigFromPaths creates and returns a TLS configuration based on the
-// given TLS mode, credential file paths, and the expected server name.
-func CreateTLSConfigFromPaths(
-	connectionMode connection.TLSMode,
-	paths map[string]string,
-	serverName string,
-) connection.ConfigTLS {
-	return connection.ConfigTLS{
-		Mode:        connectionMode,
-		ServerName:  serverName,
-		KeyPath:     paths["private-key"],
-		CertPath:    paths["public-key"],
-		CACertPaths: []string{paths["ca-certificate"]},
+// createTLSConfig creates and returns a TLS configuration based on the
+// given TLS mode and the credential bytes.
+func createTLSConfig(
+	t *testing.T,
+	params createTLSConfigParameters,
+) (connection.TLSConfig, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	namingFunction := params.namingFunction
+	//nolint:gofumpt //Note: gofumpt reports this line as improperly formatted, but no actual formatting issue exists.
+	if sub := namingFunction(keySubDirectory); sub != "" {
+		tmpDir = filepath.Join(tmpDir, sub)
+		require.NoError(t, os.MkdirAll(tmpDir, 0700))
+	}
+
+	privateKeyPath := filepath.Join(tmpDir, namingFunction("private-key"))
+	require.NoError(t, os.WriteFile(privateKeyPath, params.keyPair.Key, 0o600))
+
+	publicKeyPath := filepath.Join(tmpDir, namingFunction("public-key"))
+	require.NoError(t, os.WriteFile(publicKeyPath, params.keyPair.Cert, 0o600))
+
+	caCertificatePath := filepath.Join(tmpDir, namingFunction("ca-certificate"))
+	require.NoError(t, os.WriteFile(caCertificatePath, params.caCertificate, 0o600))
+
+	return connection.TLSConfig{
+		Mode:        params.connectionMode,
+		KeyPath:     privateKeyPath,
+		CertPath:    publicKeyPath,
+		CACertPaths: []string{caCertificatePath},
+	}, tmpDir
+}
+
+func selectFileNames(style CertStyle, serverName string) func(string) string {
+	switch style {
+	case CertStyleYugabyte:
+		suffix := fmt.Sprintf(".%s", serverName)
+		return func(key string) string {
+			switch key {
+			case KeyPrivate:
+				return "node" + suffix + ".key"
+			case KeyPublic:
+				return "node" + suffix + ".crt"
+			case KeyCACert:
+				return caCertFileName
+			default:
+				return ""
+			}
+		}
+
+	case CertStylePostgres:
+		return func(key string) string {
+			switch key {
+			case KeyPrivate:
+				return "server.key"
+			case KeyPublic:
+				return "server.crt"
+			case KeyCACert:
+				return caCertFileName
+			default:
+				return ""
+			}
+		}
+
+	default:
+		return func(key string) string {
+			switch key {
+			case KeyPrivate:
+				return "private-key.key"
+			case KeyPublic:
+				return "public-key.crt"
+			case KeyCACert:
+				return caCertFileName
+			default:
+				return ""
+			}
+		}
 	}
 }

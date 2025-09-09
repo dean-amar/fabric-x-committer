@@ -14,14 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
-	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
-	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
@@ -30,8 +25,8 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
-	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
@@ -60,16 +55,12 @@ func TestLoadGenForLoadGen(t *testing.T) {
 			require.NoError(t, err)
 
 			subClientConf := DefaultClientConf()
-			subClientConf.Adapter.LoadGenClient = &adapters.LoadGenClientConfig{
-				Endpoint: &clientConf.Server.Endpoint,
-			}
+			subClientConf.Adapter.LoadGenClient = test.NewInsecureClientConfig(&clientConf.Server.Endpoint)
 			subClient, err := NewLoadGenClient(subClientConf)
 			require.NoError(t, err)
 
 			t.Log("Start distributed loadgen")
-			test.RunServiceAndGrpcForTest(t.Context(), t, subClient, subClientConf.Server, func(s *grpc.Server) {
-				protoloadgen.RegisterLoadGenServiceServer(s, subClient)
-			})
+			test.RunServiceAndGrpcForTest(t.Context(), t, subClient, subClientConf.Server)
 			testLoadGenerator(t, clientConf)
 		})
 	}
@@ -82,10 +73,8 @@ func TestLoadGenForVCService(t *testing.T) {
 		clientConf.Limit = limit
 		t.Run(limitToString(limit), func(t *testing.T) {
 			t.Parallel()
-			env := vc.NewValidatorAndCommitServiceTestEnv(t, 2)
-			clientConf.Adapter.VCClient = &adapters.VCClientConfig{
-				Endpoints: env.Endpoints,
-			}
+			env := vc.NewValidatorAndCommitServiceTestEnvWithTLS(t, 2, test.InsecureTLSConfig)
+			clientConf.Adapter.VCClient = test.NewInsecureMultiClientConfig(env.Endpoints...)
 			testLoadGenerator(t, clientConf)
 		})
 	}
@@ -105,12 +94,12 @@ func TestLoadGenForSigVerifier(t *testing.T) {
 	}
 }
 
-func startVerifiers(t *testing.T) *adapters.VerifierClientConfig {
+func startVerifiers(t *testing.T) *connection.MultiClientConfig {
 	t.Helper()
 	endpoints := make([]*connection.Endpoint, 2)
 	for i := range endpoints {
 		sConf := &verifier.Config{
-			Server: connection.NewLocalHostServer(),
+			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 			ParallelExecutor: verifier.ExecutorConfig{
 				BatchSizeCutoff:   50,
 				BatchTimeCutoff:   10 * time.Millisecond,
@@ -120,14 +109,10 @@ func startVerifiers(t *testing.T) *adapters.VerifierClientConfig {
 		}
 
 		service := verifier.New(sConf)
-		test.RunGrpcServerForTest(t.Context(), t, sConf.Server, func(server *grpc.Server) {
-			protosigverifierservice.RegisterVerifierServer(server, service)
-		})
+		test.RunGrpcServerForTest(t.Context(), t, sConf.Server, service.RegisterService)
 		endpoints[i] = &sConf.Server.Endpoint
 	}
-	return &adapters.VerifierClientConfig{
-		Endpoints: endpoints,
-	}
+	return test.NewInsecureMultiClientConfig(endpoints...)
 }
 
 func TestLoadGenForCoordinator(t *testing.T) {
@@ -145,27 +130,22 @@ func TestLoadGenForCoordinator(t *testing.T) {
 			_, vcServer := mock.StartMockVCService(t, 1)
 
 			cConf := &coordinator.Config{
-				Server:                   connection.NewLocalHostServer(),
-				Monitoring:               defaultMonitoring(),
-				VerifierConfig:           *test.ServerToClientConfig(sigVerServer.Configs...),
-				ValidatorCommitterConfig: *test.ServerToClientConfig(vcServer.Configs...),
-				DependencyGraphConfig: &coordinator.DependencyGraphConfig{
-					NumOfLocalDepConstructors:       1,
-					WaitingTxsLimit:                 10_000,
-					NumOfWorkersForGlobalDepManager: 1,
+				Server:             connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
+				Monitoring:         defaultMonitoring(),
+				Verifier:           *test.ServerToMultiClientConfig(sigVerServer.Configs...),
+				ValidatorCommitter: *test.ServerToMultiClientConfig(vcServer.Configs...),
+				DependencyGraph: &coordinator.DependencyGraphConfig{
+					NumOfLocalDepConstructors: 1,
+					WaitingTxsLimit:           100_000,
 				},
 				ChannelBufferSizePerGoroutine: 10,
 			}
 
 			service := coordinator.NewCoordinatorService(cConf)
-			test.RunServiceAndGrpcForTest(t.Context(), t, service, cConf.Server, func(server *grpc.Server) {
-				protocoordinatorservice.RegisterCoordinatorServer(server, service)
-			})
+			test.RunServiceAndGrpcForTest(t.Context(), t, service, cConf.Server)
 
 			// Start client
-			clientConf.Adapter.CoordinatorClient = &adapters.CoordinatorClientConfig{
-				Endpoint: &cConf.Server.Endpoint,
-			}
+			clientConf.Adapter.CoordinatorClient = test.NewInsecureClientConfig(&cConf.Server.Endpoint)
 			testLoadGenerator(t, clientConf)
 		})
 	}
@@ -197,22 +177,20 @@ func TestLoadGenForSidecar(t *testing.T) {
 			}
 
 			// Start server under test
-			chanID := "channel"
 			sidecarConf := &sidecar.Config{
 				Server: sidecarServerConf,
-				Orderer: broadcastdeliver.Config{
-					Connection: broadcastdeliver.ConnectionConfig{
-						Endpoints: connection.NewOrdererEndpoints(0, "org", ordererServers...),
+				Orderer: ordererconn.Config{
+					Connection: ordererconn.ConnectionConfig{
+						Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
 					},
-					ChannelID:     chanID,
-					ConsensusType: broadcastdeliver.Bft,
+					ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+					Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+					ConsensusType: ordererconn.Bft,
 				},
 				LastCommittedBlockSetInterval: 100 * time.Millisecond,
 				WaitingTxsLimit:               5000,
-				Committer: sidecar.CoordinatorConfig{
-					Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
-				},
-				Monitoring: defaultMonitoring(),
+				Committer:                     test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
+				Monitoring:                    defaultMonitoring(),
 				Ledger: sidecar.LedgerConfig{
 					Path: t.TempDir(),
 				},
@@ -220,15 +198,12 @@ func TestLoadGenForSidecar(t *testing.T) {
 			service, err := sidecar.New(sidecarConf)
 			require.NoError(t, err)
 			t.Cleanup(service.Close)
-			test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server, func(server *grpc.Server) {
-				peer.RegisterDeliverServer(server, service.GetLedgerService())
-			})
+			test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)
 
 			// Start client
 			clientConf.Adapter.SidecarClient = &adapters.SidecarClientConfig{
-				ChannelID:      chanID,
 				OrdererServers: ordererServers,
-				SidecarConfig:  test.ServerToClientConfig(sidecarServerConf),
+				SidecarClient:  test.NewInsecureClientConfig(&sidecarServerConf.Endpoint),
 			}
 			testLoadGenerator(t, clientConf)
 		})
@@ -248,22 +223,21 @@ func TestLoadGenForOrderer(t *testing.T) {
 			)
 			_, coordinatorServer := mock.StartMockCoordinatorService(t)
 
-			endpoints := connection.NewOrdererEndpoints(0, "msp", ordererServer.Configs...)
+			endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 			sidecarConf := &sidecar.Config{
-				Server: connection.NewLocalHostServer(),
-				Orderer: broadcastdeliver.Config{
-					Connection: broadcastdeliver.ConnectionConfig{
+				Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
+				Orderer: ordererconn.Config{
+					Connection: ordererconn.ConnectionConfig{
 						Endpoints: endpoints,
 					},
-					ChannelID:     "mychannel",
-					ConsensusType: broadcastdeliver.Bft,
+					ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+					Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+					ConsensusType: ordererconn.Bft,
 				},
 				LastCommittedBlockSetInterval: 100 * time.Millisecond,
 				WaitingTxsLimit:               5000,
-				Committer: sidecar.CoordinatorConfig{
-					Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
-				},
-				Monitoring: defaultMonitoring(),
+				Committer:                     test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
+				Monitoring:                    defaultMonitoring(),
 				Ledger: sidecar.LedgerConfig{
 					Path: t.TempDir(),
 				},
@@ -273,20 +247,19 @@ func TestLoadGenForOrderer(t *testing.T) {
 			service, err := sidecar.New(sidecarConf)
 			require.NoError(t, err)
 			t.Cleanup(service.Close)
-			test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server, func(server *grpc.Server) {
-				peer.RegisterDeliverServer(server, service.GetLedgerService())
-			})
+			test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)
 
 			// Submit default config block.
 			require.NotNil(t, clientConf.LoadProfile)
 			clientConf.LoadProfile.Transaction.Policy.OrdererEndpoints = endpoints
 			configBlock, err := workload.CreateConfigBlock(clientConf.LoadProfile.Transaction.Policy)
 			require.NoError(t, err)
-			orderer.SubmitBlock(t.Context(), configBlock)
+			err = orderer.SubmitBlock(t.Context(), configBlock)
+			require.NoError(t, err)
 
 			// Start client
 			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
-				SidecarConfig:        test.MakeClientConfig(&sidecarConf.Server.Endpoint),
+				SidecarClient:        test.NewInsecureClientConfig(&sidecarConf.Server.Endpoint),
 				Orderer:              sidecarConf.Orderer,
 				BroadcastParallelism: 5,
 			}
@@ -310,7 +283,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 				},
 			)
 
-			endpoints := connection.NewOrdererEndpoints(0, "msp", ordererServer.Configs...)
+			endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 
 			// Submit default config block.
 			// This is ignored when sidecar isn't used.
@@ -319,16 +292,17 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 			clientConf.LoadProfile.Transaction.Policy.OrdererEndpoints = endpoints
 			configBlock, err := workload.CreateConfigBlock(clientConf.LoadProfile.Transaction.Policy)
 			require.NoError(t, err)
-			orderer.SubmitBlock(t.Context(), configBlock)
+			err = orderer.SubmitBlock(t.Context(), configBlock)
+			require.NoError(t, err)
 
 			// Start client
 			clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
-				Orderer: broadcastdeliver.Config{
-					Connection: broadcastdeliver.ConnectionConfig{
+				Orderer: ordererconn.Config{
+					Connection: ordererconn.ConnectionConfig{
 						Endpoints: endpoints,
 					},
-					ChannelID:     "mychannel",
-					ConsensusType: broadcastdeliver.Bft,
+					ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+					ConsensusType: ordererconn.Bft,
 				},
 				BroadcastParallelism: 5,
 			}
@@ -339,7 +313,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 
 func preAllocatePorts(t *testing.T) *connection.ServerConfig {
 	t.Helper()
-	server := connection.NewLocalHostServer()
+	server := connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig)
 	listener, err := server.PreAllocateListener()
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -353,9 +327,7 @@ func testLoadGenerator(t *testing.T, c *ClientConfig) {
 	client, err := NewLoadGenClient(c)
 	require.NoError(t, err)
 
-	ready := test.RunServiceAndGrpcForTest(t.Context(), t, client, client.conf.Server, func(s *grpc.Server) {
-		protoloadgen.RegisterLoadGenServiceServer(s, client)
-	})
+	ready := test.RunServiceAndGrpcForTest(t.Context(), t, client, client.conf.Server)
 	eventuallyMetrics(t, client.resources.Metrics, func(m metrics.MetricState) bool {
 		return m.TransactionsSent > 0 &&
 			m.TransactionsReceived > 0 &&

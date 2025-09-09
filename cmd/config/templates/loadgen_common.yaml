@@ -7,6 +7,15 @@
 
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
+  tls:
+    mode: {{ .ServiceTLS.Mode }}
+    key-path: {{ .ServiceTLS.KeyPath }}
+    cert-path: {{ .ServiceTLS.CertPath }}
+    ca-cert-paths:
+      {{- range .ServiceTLS.CACertPaths }}
+      - {{ . }}
+      {{- end }}
+
 monitoring:
   server:
     endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
@@ -30,6 +39,7 @@ load-profile:
     read-write-count:
       const: 2
     policy:
+      channel-id: {{ .Policy.ChannelID }}
       namespace-policies:
         {{ range $nsID, $element := .Policy.NamespacePolicies }}
         {{ $nsID }}:

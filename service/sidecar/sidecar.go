@@ -13,17 +13,21 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric/protoutil"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protonotify"
 	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/deliver"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
@@ -34,13 +38,16 @@ var logger = logging.New("sidecar")
 // it aggregates the transaction status and forwards the validated block to clients who have
 // registered on the ledger server.
 type Service struct {
-	ordererClient      *broadcastdeliver.Client
+	ordererClient      *deliver.Client
 	relay              *relay
-	ledgerService      *LedgerService
+	notifier           *notifier
+	ledgerService      *ledgerService
 	coordConn          *grpc.ClientConn
 	blockToBeCommitted chan *common.Block
 	committedBlock     chan *common.Block
+	statusQueue        chan []*protonotify.TxStatusEvent
 	config             *Config
+	healthcheck        *health.Server
 	metrics            *perfMetrics
 }
 
@@ -53,7 +60,7 @@ func New(c *Config) (*Service, error) {
 	}
 
 	// 1. Fetch blocks from the ordering service.
-	ordererClient, err := broadcastdeliver.New(&c.Orderer)
+	ordererClient, err := deliver.New(&c.Orderer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create orderer client: %w", err)
 	}
@@ -68,14 +75,22 @@ func New(c *Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ledger: %w", err)
 	}
+
+	bufferSize := c.ChannelBufferSize
+	if bufferSize <= 0 {
+		bufferSize = defaultBufferSize
+	}
 	return &Service{
 		ordererClient:      ordererClient,
 		relay:              relayService,
+		notifier:           newNotifier(bufferSize, &c.Notification),
 		ledgerService:      ledgerService,
+		healthcheck:        connection.DefaultHealthCheckService(),
 		config:             c,
 		metrics:            metrics,
-		blockToBeCommitted: make(chan *common.Block, 100),
-		committedBlock:     make(chan *common.Block, 100),
+		blockToBeCommitted: make(chan *common.Block, bufferSize),
+		committedBlock:     make(chan *common.Block, bufferSize),
+		statusQueue:        make(chan []*protonotify.TxStatusEvent, bufferSize),
 	}, nil
 }
 
@@ -94,35 +109,34 @@ func (s *Service) Run(ctx context.Context) error {
 		_ = s.metrics.StartPrometheusServer(pCtx, s.config.Monitoring.Server, s.monitorQueues)
 	}()
 
-	coordinatorEndpoints := connection.AddressString(s.config.Committer.Config.Endpoints...)
-	logger.Infof("Create coordinator client and connect to %s", coordinatorEndpoints)
-
-	committerDialConfig, err := connection.NewLoadBalancedDialConfig(s.config.Committer.Config)
+	logger.Infof("Create coordinator client and connect to %s", s.config.Committer.Endpoint)
+	committerDialConfig, err := connection.NewSingleDialConfig(s.config.Committer)
 	if err != nil {
 		return errors.Wrapf(err, "could not load coordinator dial config")
 	}
-
-	// connecting to the coordinator.
 	conn, connErr := connection.Connect(committerDialConfig)
 	if connErr != nil {
 		return errors.Wrapf(connErr, "failed to connect to coordinator")
 	}
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)
-	logger.Infof("sidecar connected to coordinator at %s", coordinatorEndpoints)
-
-	// creating coordinator client.
+	logger.Infof("sidecar connected to coordinator at %s", s.config.Committer.Endpoint)
 	coordClient := protocoordinatorservice.NewCoordinatorClient(conn)
 
 	g, gCtx := errgroup.WithContext(pCtx)
 
-	// Deliver the block with status to client runs independently of the coordinator connection lifecycle.
-	// eCtx will be cancelled if this service stopped processing the blocks due to ledger error.
+	// The following runs independently of the coordinator connection lifecycle.
+	// gCtx will be cancelled if these stopped processing due to ledger error.
 	// Such errors require human interaction to resolve the ledger discrepancy.
 	g.Go(func() error {
+		// Deliver the block with status to clients.
 		return s.ledgerService.run(gCtx, &ledgerRunConfig{
 			IncomingCommittedBlock: s.committedBlock,
 		})
+	})
+	g.Go(func() error {
+		// Notification for clients.
+		return s.notifier.run(gCtx, s.statusQueue)
 	})
 
 	g.Go(func() error {
@@ -136,6 +150,13 @@ func (s *Service) Run(ctx context.Context) error {
 	})
 
 	return utils.ProcessErr(g.Wait(), "sidecar has been stopped")
+}
+
+// RegisterService registers for the sidecar's GRPC services.
+func (s *Service) RegisterService(server *grpc.Server) {
+	peer.RegisterDeliverServer(server, s.ledgerService)
+	protonotify.RegisterNotifierServer(server, s.notifier)
+	healthgrpc.RegisterHealthServer(server, s.healthcheck)
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(
@@ -156,9 +177,9 @@ func (s *Service) sendBlocksAndReceiveStatus(
 	// NOTE: ordererClient.Deliver and relay.Run must always return an error on exist.
 	g.Go(func() error {
 		logger.Info("Fetch blocks from the ordering service and write them on s.blockToBeCommitted.")
-		err := s.ordererClient.Deliver(gCtx, &broadcastdeliver.DeliverConfig{
+		err := s.ordererClient.Deliver(gCtx, &deliver.Parameters{
 			StartBlkNum: int64(nextBlockNum), //nolint:gosec
-			EndBlkNum:   broadcastdeliver.MaxBlockNum,
+			EndBlkNum:   deliver.MaxBlockNum,
 			OutputBlock: s.blockToBeCommitted,
 		})
 		if errors.Is(err, context.Canceled) {
@@ -176,6 +197,7 @@ func (s *Service) sendBlocksAndReceiveStatus(
 			configUpdater:                  s.configUpdater,
 			incomingBlockToBeCommitted:     s.blockToBeCommitted,
 			outgoingCommittedBlock:         s.committedBlock,
+			outgoingStatusUpdates:          s.statusQueue,
 			waitingTxsLimit:                s.config.WaitingTxsLimit,
 		})
 	})
@@ -292,7 +314,7 @@ func (s *Service) recoverLedgerStore(
 	g.Go(func() error {
 		logger.Infof("starting delivery service with the orderer to receive block %d to %d",
 			blockStoreHeight, stateDBHeight-1)
-		return s.ordererClient.Deliver(gCtx, &broadcastdeliver.DeliverConfig{
+		return s.ordererClient.Deliver(gCtx, &deliver.Parameters{
 			StartBlkNum: int64(blockStoreHeight), //nolint:gosec
 			EndBlkNum:   stateDBHeight - 1,
 			OutputBlock: blockCh,
@@ -323,12 +345,18 @@ func appendMissingBlock(
 	blk *common.Block,
 	committedBlocks channel.Writer[*common.Block],
 ) error {
-	mappedBlock := mapBlock(blk)
+	var txIDToHeight utils.SyncMap[string, types.Height]
+	mappedBlock, err := mapBlock(blk, &txIDToHeight)
+	if err != nil {
+		// This can never occur unless there is a bug in the relay.
+		return err
+	}
+
 	txIDs := make([]string, len(mappedBlock.block.Txs))
-	expectedHeight := make(map[string]*types.Height)
+	expectedHeight := make(map[string]*types.Height, len(mappedBlock.block.Txs))
 	for i, tx := range mappedBlock.block.Txs {
-		txIDs[i] = tx.Id
-		expectedHeight[tx.Id] = types.NewHeight(mappedBlock.block.Number, mappedBlock.block.TxsNum[i])
+		txIDs[i] = tx.Ref.TxId
+		expectedHeight[tx.Ref.TxId] = types.NewHeightFromTxRef(tx.Ref)
 	}
 
 	txsStatus, err := client.GetTransactionsStatus(ctx, &protoblocktx.QueryStatus{TxIDs: txIDs})
@@ -340,11 +368,9 @@ func appendMissingBlock(
 		return err
 	}
 
-	blk.Metadata = &common.BlockMetadata{
-		Metadata: [][]byte{nil, nil, mappedBlock.withStatus.txStatus},
-	}
+	mappedBlock.withStatus.setStatusMetadataInBlock()
 
-	if !committedBlocks.Write(blk) {
+	if !committedBlocks.Write(mappedBlock.withStatus.block) {
 		return errors.New("context ended")
 	}
 	return nil
@@ -370,11 +396,6 @@ func (s *Service) Close() {
 	s.ledgerService.close()
 }
 
-// GetLedgerService returns the ledger that implements peer.DeliverServer.
-func (s *Service) GetLedgerService() *LedgerService {
-	return s.ledgerService
-}
-
 func waitForIdleCoordinator(ctx context.Context, client protocoordinatorservice.CoordinatorClient) error {
 	for {
 		waitingTxs, err := client.NumberOfWaitingTransactionsForStatus(ctx, nil)
@@ -390,7 +411,7 @@ func waitForIdleCoordinator(ctx context.Context, client protocoordinatorservice.
 }
 
 func fillStatuses(
-	finalStatuses []validationCode,
+	finalStatuses []protoblocktx.Status,
 	statuses map[string]*protoblocktx.StatusWithHeight,
 	expectedHeight map[string]*types.Height,
 ) error {
@@ -400,11 +421,10 @@ func fillStatuses(
 			return errors.Newf("committer should have the status of txID [%s] but it does not", txID)
 		}
 		if types.AreSame(height, types.NewHeight(s.BlockNumber, s.TxNumber)) {
-			finalStatuses[height.TxNum] = byte(s.Code)
+			finalStatuses[height.TxNum] = s.Code
 			continue
 		}
-		finalStatuses[height.TxNum] = byte(protoblocktx.Status_ABORTED_DUPLICATE_TXID)
+		finalStatuses[height.TxNum] = protoblocktx.Status_REJECTED_DUPLICATE_TX_ID
 	}
-
 	return nil
 }

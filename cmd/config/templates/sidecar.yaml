@@ -4,11 +4,10 @@
 #
 server:
   endpoint: {{ .ServiceEndpoints.Server | default "localhost:0" }}
-  server-creds:
-    tls-mode: {{ .ServiceTLS.Mode }}
-    server-name: {{ .ServiceTLS.ServerName }}
-    cert-path: {{ .ServiceTLS.CertPath }}
+  tls:
+    mode: {{ .ServiceTLS.Mode }}
     key-path: {{ .ServiceTLS.KeyPath }}
+    cert-path: {{ .ServiceTLS.CertPath }}
     ca-cert-paths:
       {{- range .ServiceTLS.CACertPaths }}
       - {{ . }}
@@ -30,27 +29,28 @@ orderer:
       {{- range .Endpoints.Orderer }}
       - {{ .Server }}
       {{- end }}
-  channel-id: {{ .ChannelID }}
+  channel-id: {{ .Policy.ChannelID }}
   consensus-type: BFT
 committer:
-  client:
-    endpoints:
-      - {{ .Endpoints.Coordinator.Server }}
-    client-creds:
-      tls-mode: {{ .ClientsCreds.Coordinator.Mode }}
-      server-name: {{ .ClientsCreds.Coordinator.ServerName }}
-      cert-path: {{ .ClientsCreds.Coordinator.CertPath }}
-      key-path: {{ .ClientsCreds.Coordinator.KeyPath }}
-      ca-cert-paths:
-        {{- range .ClientsCreds.Coordinator.CACertPaths }}
-        - {{ . }}
-        {{- end }}
+  endpoint: {{ .Endpoints.Coordinator.Server }}
+  tls:
+    mode: {{ .ClientTLS.Mode }}
+    key-path: {{ .ClientTLS.KeyPath }}
+    cert-path: {{ .ClientTLS.CertPath }}
+    ca-cert-paths:
+      {{- range .ClientTLS.CACertPaths }}
+      - {{ . }}
+      {{- end }}
 
 ledger:
   path: {{ .LedgerPath }}
 
+notification:
+  max-timeout: 10m
+
 last-committed-block-set-interval: 5s
 waiting-txs-limit: 20_000_000
+channel-buffer-size: 100
 
 bootstrap:
   genesis-block-file-path: {{ .ConfigBlockPath }}

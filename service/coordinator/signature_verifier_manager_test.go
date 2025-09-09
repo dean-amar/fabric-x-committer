@@ -8,6 +8,7 @@ package coordinator
 
 import (
 	"context"
+	"crypto/rand"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,9 +19,11 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
 	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator/dependencygraph"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
@@ -48,7 +51,7 @@ func newSvMgrTestEnv(t *testing.T, numSvService int, expectedEndErrorMsg ...byte
 	pm := newPolicyManager()
 	svm := newSignatureVerifierManager(
 		&signVerifierManagerConfig{
-			clientConfig:             test.ServerToClientConfig(sc.Configs...),
+			clientConfig:             test.ServerToMultiClientConfig(sc.Configs...),
 			incomingTxsForValidation: inputTxBatch,
 			outgoingValidatedTxs:     outputValidatedTxs,
 			metrics:                  newPerformanceMetrics(),
@@ -87,7 +90,7 @@ func newSvMgrTestEnv(t *testing.T, numSvService int, expectedEndErrorMsg ...byte
 func (e *svMgrTestEnv) submitTxBatch(t *testing.T, numTxs int) dependencygraph.TxNodeBatch {
 	t.Helper()
 	blkNum := e.curBlockNum.Add(1) - 1
-	txBatch, expectedValidatedTxs := createTxNodeBatchForTest(t, blkNum, numTxs)
+	txBatch, expectedValidatedTxs := createTxNodeBatchForTest(t, blkNum, numTxs, 0)
 	channel.NewWriter(t.Context(), e.inputTxBatch).Write(txBatch)
 	return expectedValidatedTxs
 }
@@ -146,6 +149,36 @@ func TestSignatureVerifierManagerWithSingleVerifier(t *testing.T) {
 	)
 }
 
+func TestSignatureVerifierManagerWithLargeSize(t *testing.T) {
+	t.Parallel()
+	env := newSvMgrTestEnv(t, 1)
+
+	expectedValidatedTxs := env.submitTxBatch(t, 1)
+	env.requireTxBatch(t, expectedValidatedTxs)
+
+	totalBlocks := 3
+	txPerBlock := 50
+	txBatches := make([]dependencygraph.TxNodeBatch, totalBlocks)
+	expectedValidatedTxsBatches := make([]dependencygraph.TxNodeBatch, totalBlocks)
+	for i := range 3 {
+		//nolint:gosec // int -> uint64
+		txBatches[i], expectedValidatedTxsBatches[i] = createTxNodeBatchForTest(t, uint64(i+1), txPerBlock, 1024*1024)
+	}
+
+	txsBatch := make(dependencygraph.TxNodeBatch, 0, totalBlocks*txPerBlock)
+	for _, b := range txBatches {
+		txsBatch = append(txsBatch, b...)
+	}
+
+	channel.NewWriter(t.Context(), env.inputTxBatch).Write(txsBatch)
+	// env.requireTxBatch(t, expectedValidatedTxs)
+
+	test.EventuallyIntMetric(
+		t, totalBlocks*txPerBlock+1, env.signVerifierManager.config.metrics.sigverifierTransactionProcessedTotal,
+		30*time.Second, 10*time.Millisecond,
+	)
+}
+
 func TestSignatureVerifierManagerWithMultipleVerifiers(t *testing.T) {
 	t.Parallel()
 	env := newSvMgrTestEnv(t, 2)
@@ -162,7 +195,7 @@ func TestSignatureVerifierManagerWithMultipleVerifiers(t *testing.T) {
 	for range numBlocks {
 		select {
 		case txBatch := <-env.outputValidatedTxs:
-			require.ElementsMatch(t, expectedValidatedTxs[txBatch[0].Tx.BlockNumber], txBatch)
+			require.ElementsMatch(t, expectedValidatedTxs[txBatch[0].Tx.Ref.BlockNum], txBatch)
 		case <-deadline:
 			t.Fatal("Did not receive all blocks from output after timeout")
 		}
@@ -189,36 +222,43 @@ func TestSignatureVerifierWithAllInvalidTxs(t *testing.T) {
 	expectedValidatedTxs := dependencygraph.TxNodeBatch{}
 	for i := range 3 {
 		txNode := &dependencygraph.TransactionNode{
-			Tx: &protovcservice.Transaction{
-				BlockNumber: uint64(i), //nolint:gosec
-				TxNum:       uint32(i), //nolint:gosec
+			Tx: &protovcservice.Tx{
+				Ref: types.TxRef("", uint64(i), uint32(i)), //nolint:gosec
 			},
 		}
 		txBatch = append(txBatch, txNode)
 
 		expectedValidatedTxs = append(expectedValidatedTxs, &dependencygraph.TransactionNode{
-			Tx: &protovcservice.Transaction{
-				BlockNumber:           txNode.Tx.BlockNumber,
-				TxNum:                 txNode.Tx.TxNum,
+			Tx: &protovcservice.Tx{
+				Ref:                   txNode.Tx.Ref,
 				PrelimInvalidTxStatus: sigInvalidTxStatus,
 			},
 		})
 	}
 
 	env := newSvMgrTestEnv(t, 1)
+	env.requireTxBatch(t, env.submitTxBatch(t, 1))
+
 	channel.NewWriter(t.Context(), env.inputTxBatch).Write(txBatch)
 	env.requireTxBatch(t, expectedValidatedTxs)
 }
 
 func createTxNodeBatchForTest(
-	_ *testing.T,
-	blkNum uint64, numTxs int,
+	t *testing.T,
+	blkNum uint64, numTxs, valueSize int,
 ) (inputTxBatch, expectedValidatedTxs dependencygraph.TxNodeBatch) {
+	t.Helper()
+
+	ns := []*protoblocktx.TxNamespace{{
+		BlindWrites: []*protoblocktx.Write{{
+			Value: utils.MustRead(rand.Reader, valueSize),
+		}},
+	}}
 	for i := range numTxs {
 		txNode := &dependencygraph.TransactionNode{
-			Tx: &protovcservice.Transaction{
-				BlockNumber: blkNum,
-				TxNum:       uint32(i), //nolint:gosec
+			Tx: &protovcservice.Tx{
+				Ref:        types.TxRef("", blkNum, uint32(i)), //nolint:gosec
+				Namespaces: ns,
 			},
 		}
 
@@ -231,9 +271,9 @@ func createTxNodeBatchForTest(
 			// odd number txs are invalid. No signature means invalid transaction.
 			// we need to create a copy of txNode to add expected status.
 			txNodeWithStatus := &dependencygraph.TransactionNode{
-				Tx: &protovcservice.Transaction{
-					BlockNumber:           txNode.Tx.BlockNumber,
-					TxNum:                 txNode.Tx.TxNum,
+				Tx: &protovcservice.Tx{
+					Ref:                   txNode.Tx.Ref,
+					Namespaces:            ns,
 					PrelimInvalidTxStatus: sigInvalidTxStatus,
 				},
 			}

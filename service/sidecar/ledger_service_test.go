@@ -14,6 +14,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric/protoutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -33,10 +34,7 @@ func TestLedgerService(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(ls.close)
 
-	config := &connection.ServerConfig{
-		Endpoint: connection.Endpoint{Host: "localhost"},
-	}
-
+	config := connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig)
 	inputBlock := make(chan *common.Block, 10)
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
 		return connection.FilterStreamRPCError(ls.run(ctx, &ledgerRunConfig{
@@ -47,10 +45,10 @@ func TestLedgerService(t *testing.T) {
 		peer.RegisterDeliverServer(server, ls)
 	})
 
-	// NOTE: if we start the deliver client without even the 0'th block, it would
+	// NOTE: if we start the delivery client without even the 0'th block, it would
 	//       result in an error. This is due to the iterator implementation in the
 	//       fabric ledger.
-	blk0 := createBlockForTest(0, nil, [3]string{"0", "1", "2"})
+	blk0, _ := createBlockForTest(t, 0, nil)
 	valid := byte(protoblocktx.Status_COMMITTED)
 	metadata := &common.BlockMetadata{
 		Metadata: [][]byte{nil, nil, {valid, valid, valid}},
@@ -63,14 +61,14 @@ func TestLedgerService(t *testing.T) {
 	require.Equal(t, 1, test.GetIntMetricValue(t, metrics.blockHeight))
 	require.Greater(t, test.GetMetricValue(t, metrics.appendBlockToLedgerSeconds), float64(0))
 
-	receivedBlocksFromLedgerService := sidecarclient.StartSidecarClient(t.Context(), t, &sidecarclient.Config{
-		ChannelID:    channelID,
-		ClientConfig: test.MakeClientConfig(&config.Endpoint),
+	receivedBlocksFromLedgerService := sidecarclient.StartSidecarClient(t.Context(), t, &sidecarclient.Parameters{
+		ChannelID: channelID,
+		Client:    test.NewInsecureClientConfig(&config.Endpoint),
 	}, 0)
 
-	blk1 := createBlockForTest(1, protoutil.BlockHeaderHash(blk0.Header), [3]string{"3", "4", "5"})
+	blk1, _ := createBlockForTest(t, 1, protoutil.BlockHeaderHash(blk0.Header))
 	blk1.Metadata = metadata
-	blk2 := createBlockForTest(2, protoutil.BlockHeaderHash(blk1.Header), [3]string{"6", "7", "8"})
+	blk2, _ := createBlockForTest(t, 2, protoutil.BlockHeaderHash(blk1.Header))
 	blk2.Metadata = metadata
 	inputBlock <- blk1
 	inputBlock <- blk2
@@ -89,9 +87,9 @@ func TestLedgerService(t *testing.T) {
 }
 
 // ensureAtLeastHeight checks if the ledger is at or above the specified height.
-func ensureAtLeastHeight(t *testing.T, s *LedgerService, height uint64) {
+func ensureAtLeastHeight(t *testing.T, s *ledgerService, height uint64) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		return s.GetBlockHeight() >= height
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		require.GreaterOrEqual(ct, s.GetBlockHeight(), height)
 	}, 15*time.Second, 10*time.Millisecond)
 }

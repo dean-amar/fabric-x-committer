@@ -13,14 +13,11 @@ import (
 	"html/template"
 	"os"
 	"path"
-	"path/filepath"
 	"testing"
 	"time"
 
 	sprig "github.com/go-task/slim-sprig/v3"
 	"github.com/google/uuid"
-	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
@@ -34,20 +31,20 @@ type (
 		// Instance endpoints.
 		ServiceEndpoints ServiceEndpoints
 
-		// Service Tls options and certificates.
-		ServiceTLS connection.ConfigTLS
+		// ServiceTLS holds the TLS configuration for a service.
+		ServiceTLS connection.TLSConfig
+		// ClientTLS holds the TLS configuration used by a service when acting as a client to other services.
+		ClientTLS connection.TLSConfig
 
 		// System's resources.
 		Endpoints SystemEndpoints
 		DB        DatabaseConfig
 
 		// Per service configurations.
-		ClientsCreds      ClientsTLSConfig        // coordinator, sidecar
 		BlockSize         uint64                  // orderer, loadgen
 		BlockTimeout      time.Duration           // orderer
 		ConfigBlockPath   string                  // orderer, sidecar, loadgen
 		LedgerPath        string                  // sidecar
-		ChannelID         string                  // sidecar, loadgen
 		Policy            *workload.PolicyProfile // loadgen
 		LoadGenBlockLimit uint64                  // loadgen
 		LoadGenTXLimit    uint64                  // loadgen
@@ -80,18 +77,6 @@ type (
 		Endpoints   []*connection.Endpoint
 		Creds       connection.DatabaseCreds
 	}
-
-	// ClientsTLSConfig contains the client's config TLS.
-	ClientsTLSConfig struct {
-		Vc          connection.ConfigTLS
-		Verifier    connection.ConfigTLS
-		Coordinator connection.ConfigTLS
-		Sidecar     connection.ConfigTLS
-		Query       connection.ConfigTLS
-	}
-
-	// ConfigBlock represents the configuration of the config block.
-	ConfigBlock = workload.ConfigBlock //nolint:revive
 )
 
 // Config templates.
@@ -154,23 +139,6 @@ func CreateTempConfigFromTemplate(t *testing.T, cmdTemplate string, conf *System
 	outputConfigFilePath := path.Join(t.TempDir(), fmt.Sprintf("config-%s.yaml", uuid.NewString()))
 	CreateConfigFromTemplate(t, cmdTemplate, outputConfigFilePath, conf)
 	return outputConfigFilePath
-}
-
-// CreateConfigBlock create and writes a config block to file.
-func CreateConfigBlock(t *testing.T, conf *ConfigBlock) string {
-	t.Helper()
-	block, err := workload.CreateDefaultConfigBlock(conf)
-	require.NoError(t, err)
-	return WriteConfigBlock(t, block)
-}
-
-// WriteConfigBlock writes a config block to file.
-func WriteConfigBlock(t *testing.T, block *common.Block) string {
-	t.Helper()
-	blockDir := t.TempDir()
-	configBlockPath := filepath.Join(blockDir, "config.block")
-	require.NoError(t, configtxgen.WriteOutputBlock(block, configBlockPath))
-	return configBlockPath
 }
 
 // WithEndpoint creates a new SystemConfig with a modified ServerEndpoint and MetricsEndpoint.

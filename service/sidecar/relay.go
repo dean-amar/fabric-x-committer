@@ -8,7 +8,7 @@ package sidecar
 
 import (
 	"context"
-	"slices"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +18,8 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
+	"github.com/hyperledger/fabric-x-committer/api/protonotify"
+	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
@@ -25,22 +27,24 @@ import (
 
 type (
 	relay struct {
-		incomingBlockToBeCommitted    <-chan *common.Block
-		outgoingCommittedBlock        chan<- *common.Block
-		nextBlockNumberToBeCommitted  atomic.Uint64
+		incomingBlockToBeCommitted <-chan *common.Block
+		outgoingCommittedBlock     chan<- *common.Block
+		outgoingStatusUpdates      chan<- []*protonotify.TxStatusEvent
+
+		// nextExpectedBlockNumberToBeReceived denotes the next block number that the sidecar
+		// expects to receive from the orderer. This value is initially extracted from the last committed
+		// block number in the ledger, then incremented.
+		// The sidecar queries the coordinator for this value before starting to pull blocks from the ordering service.
+		nextExpectedBlockNumberToBeReceived atomic.Uint64
+		// nextBlockNumberToBeCommitted denotes the next block number of to be committed.
+		nextBlockNumberToBeCommitted atomic.Uint64
+
 		activeBlocksCount             atomic.Int32
 		blkNumToBlkWithStatus         utils.SyncMap[uint64, *blockWithStatus]
-		txIDToBlkNum                  utils.SyncMap[string, uint64]
+		txIDToHeight                  utils.SyncMap[string, types.Height]
 		lastCommittedBlockSetInterval time.Duration
 		waitingTxsSlots               *utils.Slots
 		metrics                       *perfMetrics
-	}
-
-	blockWithStatus struct {
-		block         *common.Block
-		txStatus      []validationCode
-		txIDToTxIndex map[string]int
-		pendingCount  int
 	}
 
 	relayRunConfig struct {
@@ -49,6 +53,7 @@ type (
 		configUpdater                  func(*common.Block)
 		incomingBlockToBeCommitted     <-chan *common.Block
 		outgoingCommittedBlock         chan<- *common.Block
+		outgoingStatusUpdates          chan<- []*protonotify.TxStatusEvent
 		waitingTxsLimit                int
 	}
 )
@@ -71,138 +76,136 @@ func newRelay(
 
 // run starts the relay service. The call to run blocks until an error occurs or the context is canceled.
 func (r *relay) run(ctx context.Context, config *relayRunConfig) error { //nolint:contextcheck // false positive
+	r.nextExpectedBlockNumberToBeReceived.Store(config.nextExpectedBlockByCoordinator)
 	r.nextBlockNumberToBeCommitted.Store(config.nextExpectedBlockByCoordinator)
 	r.incomingBlockToBeCommitted = config.incomingBlockToBeCommitted
 	r.outgoingCommittedBlock = config.outgoingCommittedBlock
+	r.outgoingStatusUpdates = config.outgoingStatusUpdates
 	r.blkNumToBlkWithStatus.Clear()
-	r.txIDToBlkNum.Clear()
+	r.txIDToHeight.Clear()
 	r.waitingTxsSlots = utils.NewSlots(int64(config.waitingTxsLimit))
 
+	// Using the errgroup context for the stream ensures that we cancel the stream once one of the tasks fails.
+	// And we use the stream's context to ensure that if the stream is closed, we stop all the tasks.
+	// Finally, we use `rCtx` to ensure that even if all tasks stops without an error, the stream will be cancelled.
 	rCtx, rCancel := context.WithCancel(ctx)
 	defer rCancel()
-
-	stream, err := config.coordClient.BlockProcessing(rCtx)
+	g, gCtx := errgroup.WithContext(rCtx)
+	stream, err := config.coordClient.BlockProcessing(gCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to open stream for block processing")
 	}
+	sCtx := stream.Context()
 
 	logger.Infof("Starting coordinator sender and receiver")
 
 	expectedNextBlockToBeCommitted := r.nextBlockNumberToBeCommitted.Load()
 
-	g, gCtx := errgroup.WithContext(stream.Context())
+	mappedBlockQueue := make(chan *blockMappingResult, cap(r.incomingBlockToBeCommitted))
 	g.Go(func() error {
-		return r.preProcessBlockAndSendToCoordinator(gCtx, stream, config.configUpdater)
+		return r.preProcessBlock(sCtx, mappedBlockQueue, config.configUpdater)
+	})
+	g.Go(func() error {
+		return r.sendBlocksToCoordinator(sCtx, mappedBlockQueue, stream)
 	})
 
-	statusBatch := make(chan *protoblocktx.TransactionsStatus, 1000)
+	statusBatch := make(chan *protoblocktx.TransactionsStatus, cap(r.outgoingCommittedBlock))
 	g.Go(func() error {
-		return receiveStatusFromCoordinator(gCtx, stream, statusBatch)
+		return receiveStatusFromCoordinator(sCtx, stream, statusBatch)
+	})
+	g.Go(func() error {
+		return r.processStatusBatch(sCtx, statusBatch)
 	})
 
 	g.Go(func() error {
-		return r.processStatusBatch(gCtx, statusBatch)
-	})
-
-	g.Go(func() error {
-		return r.setLastCommittedBlockNumber(gCtx, config.coordClient, expectedNextBlockToBeCommitted)
+		return r.setLastCommittedBlockNumber(sCtx, config.coordClient, expectedNextBlockToBeCommitted)
 	})
 
 	return utils.ProcessErr(g.Wait(), "stream with the coordinator has ended")
 }
 
-func (r *relay) preProcessBlockAndSendToCoordinator( //nolint:gocognit
+func (r *relay) preProcessBlock(
 	ctx context.Context,
-	stream protocoordinatorservice.Coordinator_BlockProcessingClient,
+	mappedBlockQueue chan<- *blockMappingResult,
 	configUpdater func(*common.Block),
 ) error {
-	g, gCtx := errgroup.WithContext(ctx)
+	incomingBlockToBeCommitted := channel.NewReader(ctx, r.incomingBlockToBeCommitted)
+	queue := channel.NewWriter(ctx, mappedBlockQueue)
 
-	incomingBlockToBeCommitted := channel.NewReader(gCtx, r.incomingBlockToBeCommitted)
-	mappedBlockQueue := channel.Make[*scBlockWithStatus](gCtx, len(r.incomingBlockToBeCommitted))
-	outgoingCommittedBlock := channel.NewWriter(gCtx, r.outgoingCommittedBlock)
-
-	done := context.AfterFunc(gCtx, r.waitingTxsSlots.Broadcast)
+	done := context.AfterFunc(ctx, r.waitingTxsSlots.Broadcast)
 	defer done()
 
-	g.Go(func() error {
-		for {
-			block, ok := incomingBlockToBeCommitted.Read()
-			if !ok {
-				return errors.Wrap(gCtx.Err(), "context ended")
-			}
-			if block.Header == nil {
-				logger.Warn("Received a block without header")
-				continue
-			}
-
-			logger.Debugf("Block %d arrived in the relay", block.Header.Number)
-
-			start := time.Now()
-			mappedBlock := mapBlock(block)
-			promutil.Observe(r.metrics.blockMappingInRelaySeconds, time.Since(start))
-			if mappedBlock.isConfig {
-				configUpdater(block)
-			}
-
-			txsCount := len(mappedBlock.block.Txs)
-			r.waitingTxsSlots.Acquire(gCtx, int64(txsCount))
-			promutil.AddToGauge(r.metrics.waitingTransactionsQueueSize, txsCount)
-			mappedBlockQueue.Write(mappedBlock)
+	for {
+		block, ok := incomingBlockToBeCommitted.Read()
+		if !ok {
+			return errors.Wrap(ctx.Err(), "context ended")
 		}
-	})
-
-	g.Go(func() error {
-		for {
-			mappedBlock, ok := mappedBlockQueue.Read()
-			if !ok {
-				return errors.Wrap(gCtx.Err(), "context ended")
-			}
-
-			startTime := time.Now()
-			blockNum := mappedBlock.block.Number
-			r.blkNumToBlkWithStatus.Store(blockNum, mappedBlock.withStatus)
-
-			dupIdx := make([]int, 0, len(mappedBlock.block.Txs))
-			for txIndex, tx := range mappedBlock.block.Txs {
-				if _, loaded := r.txIDToBlkNum.LoadOrStore(tx.Id, blockNum); !loaded {
-					logger.Debugf("Adding txID [%s] to in progress list", tx.GetId())
-					mappedBlock.withStatus.txIDToTxIndex[tx.Id] = txIndex
-					continue
-				}
-				logger.Debugf("txID [%s] is duplicate", tx.GetId())
-				promutil.AddToCounterVec(r.metrics.transactionsStatusReceivedTotal, []string{
-					protoblocktx.Status_ABORTED_DUPLICATE_TXID.String(),
-				}, 1)
-				mappedBlock.withStatus.pendingCount--
-				mappedBlock.withStatus.txStatus[txIndex] = validationCode(protoblocktx.Status_ABORTED_DUPLICATE_TXID)
-				dupIdx = append(dupIdx, txIndex)
-			}
-
-			// Iterate over the indices in reverse order. Note that the dupIdx is sorted by default.
-			for _, index := range slices.Backward(dupIdx) {
-				mappedBlock.block.Txs = slices.Delete(mappedBlock.block.Txs, index, index+1)
-				mappedBlock.block.TxsNum = slices.Delete(mappedBlock.block.TxsNum, index, index+1)
-			}
-
-			r.activeBlocksCount.Add(1)
-
-			txsCount := len(mappedBlock.block.Txs)
-			if txsCount == 0 && mappedBlock.withStatus.pendingCount == 0 {
-				r.processCommittedBlocksInOrder(gCtx, outgoingCommittedBlock)
-			}
-
-			if err := stream.Send(mappedBlock.block); err != nil {
-				return errors.Wrap(err, "failed to send a block to the coordinator")
-			}
-			promutil.AddToCounter(r.metrics.transactionsSentTotal, txsCount)
-			logger.Debugf("Sent SC block %d with %d transactions to Coordinator",
-				mappedBlock.block.Number, txsCount)
-			promutil.Observe(r.metrics.mappedBlockProcessingInRelaySeconds, time.Since(startTime))
+		if block.Header == nil {
+			logger.Warn("Received a block without header")
+			continue
 		}
-	})
+		logger.Debugf("Block %d arrived in the relay", block.Header.Number)
 
-	return utils.ProcessErr(g.Wait(), "pre-processing of blocks and sending to coordinator operation has ended")
+		blockNum := block.Header.Number
+		swapped := r.nextExpectedBlockNumberToBeReceived.CompareAndSwap(blockNum, blockNum+1)
+		if !swapped {
+			errMsg := fmt.Sprintf(
+				"sidecar expects block [%d] but received block [%d]",
+				r.nextExpectedBlockNumberToBeReceived.Load(),
+				blockNum,
+			)
+			logger.Error(errMsg)
+			return errors.New(errMsg)
+		}
+
+		start := time.Now()
+		mappedBlock, err := mapBlock(block, &r.txIDToHeight)
+		if err != nil {
+			// This can never occur unless there is a bug in the relay.
+			return err
+		}
+		promutil.Observe(r.metrics.blockMappingInRelaySeconds, time.Since(start))
+		if mappedBlock.isConfig {
+			configUpdater(block)
+		}
+
+		txsCount := len(mappedBlock.block.Txs)
+		r.waitingTxsSlots.Acquire(ctx, int64(txsCount))
+		promutil.AddToGauge(r.metrics.waitingTransactionsQueueSize, txsCount)
+		queue.Write(mappedBlock)
+	}
+}
+
+func (r *relay) sendBlocksToCoordinator(
+	ctx context.Context,
+	mappedBlockQueue <-chan *blockMappingResult,
+	stream protocoordinatorservice.Coordinator_BlockProcessingClient,
+) error {
+	queue := channel.NewReader(ctx, mappedBlockQueue)
+	outgoingCommittedBlock := channel.NewWriter(ctx, r.outgoingCommittedBlock)
+
+	for {
+		mappedBlock, ok := queue.Read()
+		if !ok {
+			return errors.Wrap(ctx.Err(), "context ended")
+		}
+
+		startTime := time.Now()
+		r.blkNumToBlkWithStatus.Store(mappedBlock.blockNumber, mappedBlock.withStatus)
+		r.activeBlocksCount.Add(1)
+
+		if mappedBlock.withStatus.pendingCount == 0 {
+			r.processCommittedBlocksInOrder(ctx, outgoingCommittedBlock)
+		}
+
+		if err := stream.Send(mappedBlock.block); err != nil {
+			return errors.Wrap(err, "failed to send a block to the coordinator")
+		}
+		txsCount := len(mappedBlock.block.Txs)
+		promutil.AddToCounter(r.metrics.transactionsSentTotal, txsCount)
+		logger.Debugf("Sent SC block %d with %d TXs to Coordinator", mappedBlock.blockNumber, txsCount)
+		promutil.Observe(r.metrics.mappedBlockProcessingInRelaySeconds, time.Since(startTime))
+	}
 }
 
 func receiveStatusFromCoordinator(
@@ -228,6 +231,7 @@ func (r *relay) processStatusBatch(
 ) error {
 	txsStatus := channel.NewReader(ctx, statusBatch)
 	outgoingCommittedBlock := channel.NewWriter(ctx, r.outgoingCommittedBlock)
+	outgoingStatusUpdates := channel.NewWriter(ctx, r.outgoingStatusUpdates)
 	for {
 		tStatus, readOK := txsStatus.Read()
 		if !readOK {
@@ -236,8 +240,11 @@ func (r *relay) processStatusBatch(
 
 		txStatusProcessedCount := int64(0)
 		startTime := time.Now()
-		for txID, txStatus := range tStatus.GetStatus() {
-			if blockNum, ok := r.txIDToBlkNum.Load(txID); !ok || txStatus.BlockNumber != blockNum {
+		statusReport := make([]*protonotify.TxStatusEvent, 0, len(tStatus.Status))
+		for txID, txStatus := range tStatus.Status {
+			// We cannot use LoadAndDelete(txID) because it may not match the received statues.
+			height, ok := r.txIDToHeight.Load(txID)
+			if !ok || txStatus.BlockNumber != height.BlockNum {
 				// - Case 1: Block not found.
 				//   Consider a scenario where the connection between the sidecar and the coordinator fails due
 				//   to a network issue—not because the coordinator restarts. Assume the relay has already submitted
@@ -266,21 +273,22 @@ func (r *relay) processStatusBatch(
 				// This can never occur unless there is a bug in the relay.
 				return errors.Newf("block %d has never been submitted", txStatus.BlockNumber)
 			}
-
-			txIndex := blkWithStatus.txIDToTxIndex[txID]
-
-			if blkWithStatus.txStatus[txIndex] != notYetValidated {
-				return errors.Newf("two results for the same TX (txID=%v). blockNum: %d, txNum: %d",
-					txID, txStatus.BlockNumber, txIndex)
+			err := blkWithStatus.setFinalStatus(height.TxNum, txStatus.Code)
+			if err != nil {
+				// This can never occur unless there is a bug in the relay or the coordinator.
+				return err
 			}
-
-			blkWithStatus.txStatus[txIndex] = byte(txStatus.GetCode())
-			promutil.AddToCounterVec(r.metrics.transactionsStatusReceivedTotal,
-				[]string{txStatus.GetCode().String()}, 1)
-
-			r.txIDToBlkNum.Delete(txID)
-			blkWithStatus.pendingCount--
+			r.txIDToHeight.Delete(txID)
 			txStatusProcessedCount++
+
+			statusReport = append(statusReport, &protonotify.TxStatusEvent{
+				TxId:             txID,
+				StatusWithHeight: txStatus,
+			})
+		}
+
+		if len(statusReport) > 0 {
+			outgoingStatusUpdates.Write(statusReport)
 		}
 
 		r.waitingTxsSlots.Release(txStatusProcessedCount)
@@ -310,9 +318,14 @@ func (r *relay) processCommittedBlocksInOrder(
 		r.nextBlockNumberToBeCommitted.Add(1)
 		r.activeBlocksCount.Add(-1)
 
-		blkWithStatus.block.Metadata = &common.BlockMetadata{
-			Metadata: [][]byte{nil, nil, blkWithStatus.txStatus},
+		statusCount := utils.CountAppearances(blkWithStatus.txStatus)
+		for status, count := range statusCount {
+			promutil.AddToCounter(r.metrics.transactionsStatusReceivedTotal.WithLabelValues(
+				status.String(),
+			), count)
 		}
+
+		blkWithStatus.setStatusMetadataInBlock()
 		outgoingCommittedBlock.Write(blkWithStatus.block)
 	}
 }

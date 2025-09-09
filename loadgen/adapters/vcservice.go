@@ -11,9 +11,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
@@ -24,12 +22,12 @@ type (
 	// VcAdapter applies load on the VC.
 	VcAdapter struct {
 		commonAdapter
-		config *VCClientConfig
+		config *connection.MultiClientConfig
 	}
 )
 
 // NewVCAdapter instantiate VcAdapter.
-func NewVCAdapter(config *VCClientConfig, res *ClientResources) *VcAdapter {
+func NewVCAdapter(config *connection.MultiClientConfig, res *ClientResources) *VcAdapter {
 	return &VcAdapter{
 		commonAdapter: commonAdapter{res: res},
 		config:        config,
@@ -38,7 +36,11 @@ func NewVCAdapter(config *VCClientConfig, res *ClientResources) *VcAdapter {
 
 // RunWorkload applies load on the VC.
 func (c *VcAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
-	commonConn, connErr := connection.Connect(connection.NewInsecureLoadBalancedDialConfig(c.config.Endpoints))
+	commonDial, dialErr := connection.NewLoadBalancedDialConfig(*c.config)
+	if dialErr != nil {
+		return errors.Wrapf(dialErr, "could not create dial config for vcs")
+	}
+	commonConn, connErr := connection.Connect(commonDial)
 	if connErr != nil {
 		return errors.Wrapf(connErr, "failed to create connection to validator persisters")
 	}
@@ -55,8 +57,7 @@ func (c *VcAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWi
 	} else {
 		c.nextBlockNum.Store(0)
 	}
-
-	connections, connErr := connection.OpenConnections(c.config.Endpoints, insecure.NewCredentials())
+	connections, connErr := connection.OpenConnections(*c.config)
 	if connErr != nil {
 		return errors.Wrap(connErr, "failed opening connection to vc-service")
 	}
@@ -78,7 +79,7 @@ func (c *VcAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWi
 	g, gCtx := errgroup.WithContext(dCtx)
 	for _, stream := range streams {
 		g.Go(func() error {
-			return sendBlocks(ctx, &c.commonAdapter, txStream, c.mapToBatch, stream.Send)
+			return sendBlocks(ctx, &c.commonAdapter, txStream, workload.MapToVcBatch, stream.Send)
 		})
 		g.Go(func() error {
 			defer dCancel() // We stop sending if we can't track the received items.
@@ -109,18 +110,4 @@ func (c *VcAdapter) receiveStatus(
 		}
 	}
 	return nil
-}
-
-// mapToBatch creates a VC batch. It uses the protoblocktx.Tx.Id to track the TXs latency.
-func (c *VcAdapter) mapToBatch(txs []*protoblocktx.Tx) (*protovcservice.TransactionBatch, []string, error) {
-	batchTxs := make([]*protovcservice.Transaction, len(txs))
-	for i, tx := range txs {
-		batchTxs[i] = &protovcservice.Transaction{
-			ID:          tx.Id,
-			Namespaces:  tx.Namespaces,
-			BlockNumber: c.NextBlockNum(),
-			TxNum:       uint32(i), //nolint:gosec // int -> uint32.
-		}
-	}
-	return &protovcservice.TransactionBatch{Transactions: batchTxs}, getTXsIDs(txs), nil
 }

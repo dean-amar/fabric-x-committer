@@ -21,10 +21,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 // CommandTest is a struct that represents a CMD unit test.
@@ -46,7 +48,7 @@ func StartDefaultSystem(t *testing.T) SystemConfig {
 	_, orderer := mock.StartMockOrderingServices(t, &mock.OrdererConfig{NumService: 1})
 	_, coordinator := mock.StartMockCoordinatorService(t)
 	conn := dbtest.PrepareTestEnv(t)
-	server := connection.NewLocalHostServer()
+	server := connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig)
 	listen, err := server.Listener()
 	require.NoError(t, err)
 	connection.CloseConnectionsLog(listen)
@@ -65,8 +67,10 @@ func StartDefaultSystem(t *testing.T) SystemConfig {
 			LoadBalance: false,
 			Endpoints:   conn.Endpoints,
 		},
+		Policy: &workload.PolicyProfile{
+			ChannelID: "channel1",
+		},
 		LedgerPath: t.TempDir(),
-		ChannelID:  "channel1",
 	}
 }
 

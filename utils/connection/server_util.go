@@ -14,6 +14,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -27,30 +29,27 @@ type (
 		// WaitForReady waits for the service resources to initialize.
 		// If the context ended before the service is ready, returns false.
 		WaitForReady(ctx context.Context) bool
+		// RegisterService registers the supported APIs for this service.
+		RegisterService(server *grpc.Server)
 	}
 )
 
-// NewLocalHostServer returns a default server config with endpoint "localhost:0".
-func NewLocalHostServer() *ServerConfig {
-	return &ServerConfig{Endpoint: *NewLocalHost()}
-}
-
-// NewLocalHostServerWithCreds returns a default server config with endpoint "localhost:0" given server credentials.
-func NewLocalHostServerWithCreds(creds *ConfigTLS) *ServerConfig {
+// NewLocalHostServerWithTLS returns a default server config with endpoint "localhost:0" given server credentials.
+func NewLocalHostServerWithTLS(creds TLSConfig) *ServerConfig {
 	return &ServerConfig{
-		Endpoint:    *NewLocalHost(),
-		ServerCreds: creds,
+		Endpoint: *NewLocalHost(),
+		TLS:      creds,
 	}
 }
 
-// GrpcServer instantiate a [*grpc.Server].
+// GrpcServer instantiate a [grpc.Server].
 func (c *ServerConfig) GrpcServer() (*grpc.Server, error) {
-	var opts []grpc.ServerOption
-	serverGrpcCreds, err := c.ServerCreds.ServerOption()
+	opts := []grpc.ServerOption{grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize)}
+	serverGrpcTransportCreds, err := c.TLS.ServerCredentials()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed loading the server's grpc credentials")
 	}
-	opts = append(opts, serverGrpcCreds)
+	opts = append(opts, grpc.Creds(serverGrpcTransportCreds))
 
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
 		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
@@ -102,8 +101,8 @@ func (c *ServerConfig) PreAllocateListener() (net.Listener, error) {
 	return listener, nil
 }
 
-// RunGrpcServerMainWithError runs a server and returns error if failed.
-func RunGrpcServerMainWithError(
+// RunGrpcServer runs a server and returns error if failed.
+func RunGrpcServer(
 	ctx context.Context,
 	serverConfig *ServerConfig,
 	register func(server *grpc.Server),
@@ -128,13 +127,12 @@ func RunGrpcServerMainWithError(
 	return g.Wait()
 }
 
-// StartService runs a service, waits until it is ready, and register the gRPC server.
+// StartService runs a service, waits until it is ready, and register the gRPC server(s).
 // It will stop if either the service ended or its respective gRPC server.
 func StartService(
 	ctx context.Context,
 	service Service,
-	serverConfig *ServerConfig,
-	register func(server *grpc.Server),
+	serverConfigs ...*ServerConfig,
 ) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -153,14 +151,20 @@ func StartService(
 		return errors.Wrapf(g.Wait(), "service is not ready")
 	}
 
-	if register != nil && serverConfig != nil {
+	for _, server := range serverConfigs {
+		server := server
 		g.Go(func() error {
-			// If the GRPC server stops, there is no reason to continue the service.
+			// If the GRPC servers stop, there is no reason to continue the service.
 			defer cancel()
-			return RunGrpcServerMainWithError(gCtx, serverConfig, func(server *grpc.Server) {
-				register(server)
-			})
+			return RunGrpcServer(gCtx, server, service.RegisterService)
 		})
 	}
 	return g.Wait()
+}
+
+// DefaultHealthCheckService returns a health-check service that returns SERVING for all services.
+func DefaultHealthCheckService() *health.Server {
+	healthcheck := health.NewServer()
+	healthcheck.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
+	return healthcheck
 }

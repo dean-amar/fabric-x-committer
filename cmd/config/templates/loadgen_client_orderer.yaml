@@ -6,16 +6,14 @@
 # It should be complimented by the common load generator configuration.
 
 orderer-client:
-  sidecar-client-config:
-    endpoints:
-      - {{ .Endpoints.Sidecar.Server }}
-    client-creds:
-      tls-mode: {{ .ClientsCreds.Sidecar.Mode }}
-      server-name: {{ .ClientsCreds.Sidecar.ServerName }}
-      cert-path: {{ .ClientsCreds.Sidecar.CertPath }}
-      key-path: {{ .ClientsCreds.Sidecar.KeyPath }}
+  sidecar-client:
+    endpoint: {{ .Endpoints.Sidecar.Server }}
+    tls:
+      mode: {{ .ClientTLS.Mode }}
+      key-path: {{ .ClientTLS.KeyPath }}
+      cert-path: {{ .ClientTLS.CertPath }}
       ca-cert-paths:
-        {{- range .ClientsCreds.Sidecar.CACertPaths }}
+        {{- range .ClientTLS.CACertPaths }}
         - {{ . }}
         {{- end }}
   orderer:
@@ -25,5 +23,5 @@ orderer-client:
         - {{ .Server }}
         {{- end }}
     consensus-type: BFT
-    channel-id: {{ .ChannelID }}
+    channel-id: {{ .Policy.ChannelID }}
   broadcast-parallelism: 5

@@ -20,6 +20,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -46,10 +47,8 @@ const (
 // It digests the current time, the test name, and a random string to a base32 string.
 func randDbName(t *testing.T) string {
 	t.Helper()
-	b := make([]byte, 1024)
-	_, err := rand.Read(b)
-	require.NoError(t, err)
-	b, err = time.Now().AppendBinary(b)
+	b := utils.MustRead(rand.Reader, 1024)
+	b, err := time.Now().AppendBinary(b)
 	require.NoError(t, err)
 	s := sha256.New()
 	s.Write([]byte(t.Name()))
@@ -159,7 +158,7 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 			fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP),
 			fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP),
 		)
-		require.NoError(t, node.EnsureNodeReadiness(t, YugabyteReadinessOutput))
+		node.EnsureNodeReadiness(t, YugabyteReadinessOutput)
 		conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
 	case PostgresDBType:
 		node.fixCertificatePermissions(t,
@@ -167,7 +166,7 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 			"/creds/server.crt",
 			"/creds/server.key",
 		)
-		require.NoError(t, node.EnsureNodeReadiness(t, PostgresReadinessOutput))
+		node.EnsureNodeReadiness(t, PostgresReadinessOutput)
 		node.ExecuteCommand(t, enforcePostgresSSLScript)
 		node.ExecuteCommand(t, reloadPostgresConfigScript)
 	default:

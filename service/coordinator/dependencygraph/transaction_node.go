@@ -7,11 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package dependencygraph
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
 	"github.com/hyperledger/fabric-x-committer/api/protovcservice"
 	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/utils"
@@ -20,7 +20,9 @@ import (
 type (
 	// TransactionNode is a node in the dependency graph.
 	TransactionNode struct {
-		Tx *protovcservice.Transaction
+		Tx         *protovcservice.Tx
+		Signatures [][]byte
+
 		// dependsOnTxs is a set of transactions that this transaction depends on.
 		// A transaction is eligible for validation once all the transactions
 		// in dependsOnTxs set are validated.
@@ -50,7 +52,6 @@ type (
 		// from each dependent transaction.
 		dependentTxs utils.SyncMap[*TransactionNode, any]
 		rwKeys       *readWriteKeys
-		Signatures   [][]byte
 
 		// Used by the simple dependency graph.
 		waitForKeysCount uint64
@@ -68,16 +69,25 @@ type (
 	}
 )
 
-func newTransactionNode(blockNum uint64, txNum uint32, tx *protoblocktx.Tx) *TransactionNode {
+// newTransactionNode creates a TX node for coordinator's TX.
+func newTransactionNode(tx *protocoordinatorservice.Tx) *TransactionNode {
 	return &TransactionNode{
-		Tx: &protovcservice.Transaction{
-			ID:          tx.Id,
-			Namespaces:  tx.Namespaces,
-			BlockNumber: blockNum,
-			TxNum:       txNum,
+		Tx: &protovcservice.Tx{
+			Ref:        tx.Ref,
+			Namespaces: tx.Content.Namespaces,
 		},
-		rwKeys:     readAndWriteKeys(tx.Namespaces),
-		Signatures: tx.Signatures,
+		Signatures: tx.Content.Signatures,
+		rwKeys:     readAndWriteKeys(tx.Content.Namespaces),
+	}
+}
+
+// NewRejectedTransactionNode creates a TX node for a rejected TX.
+func NewRejectedTransactionNode(tx *protocoordinatorservice.TxStatusInfo) *TransactionNode {
+	return &TransactionNode{
+		Tx: &protovcservice.Tx{
+			Ref:                   tx.Ref,
+			PrelimInvalidTxStatus: &protovcservice.InvalidTxStatus{Code: tx.Status},
+		},
 	}
 }
 
@@ -200,12 +210,15 @@ func (rw *readWriteKeys) size() int {
 	return len(rw.readsOnly) + len(rw.readsAndWrites) + len(rw.writesOnly)
 }
 
+// constructCompositeKey must ensures no false positives collisions in the composite key space.
 func constructCompositeKey(ns string, key []byte) string {
-	// NOTE: composite key construction must ensure
-	//       no false positives collisions in the
-	//       composite key space.
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%03d", len(ns)))
+	// We pre-allocate the buffer to prevent multiple allocations.
+	sb.Grow(1 + len(ns) + len(key))
+	// We encode the namespace as length-value to ensure 1:1 transformation.
+	// The maximum namespace length is 60, so it can fit in one byte.
+	// The key length is implicit as it is encoded with the remaining bytes.
+	sb.WriteByte(byte(len(ns)))
 	sb.WriteString(ns)
 	sb.Write(key)
 	return sb.String()

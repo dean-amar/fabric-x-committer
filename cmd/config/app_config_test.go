@@ -25,9 +25,10 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
-	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
+	"github.com/hyperledger/fabric-x-committer/utils/signature"
 )
 
 func TestReadConfigSidecar(t *testing.T) {
@@ -40,29 +41,31 @@ func TestReadConfigSidecar(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &sidecar.Config{
-			Server:     makeServer("localhost", 4001),
-			Monitoring: makeMonitoring("localhost", 2114),
-			Orderer: broadcastdeliver.Config{
-				Connection: broadcastdeliver.ConnectionConfig{
-					Endpoints: connection.NewOrdererEndpoints(0, "", makeServer("localhost", 7050)),
+			Server:     newServerConfig("localhost", 4001),
+			Monitoring: newMonitoringConfig("localhost", 2114),
+			Orderer: ordererconn.Config{
+				Connection: ordererconn.ConnectionConfig{
+					Endpoints: ordererconn.NewEndpoints(0, "", newServerConfig("localhost", 7050)),
 				},
 				ChannelID: "mychannel",
 			},
-			Committer: sidecar.CoordinatorConfig{
-				Config: makeClientConfig("localhost", 9001),
-			},
+			Committer: newClientConfig("localhost", 9001),
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
 			},
+			Notification: sidecar.NotificationServiceConfig{
+				MaxTimeout: time.Minute,
+			},
 			LastCommittedBlockSetInterval: 3 * time.Second,
 			WaitingTxsLimit:               100_000,
+			ChannelBufferSize:             100,
 		},
 	}, {
 		name:           "sample",
 		configFilePath: "samples/sidecar.yaml",
 		expectedConfig: &sidecar.Config{
 			Server: &connection.ServerConfig{
-				Endpoint: *makeEndpoint("", 4001),
+				Endpoint: *newEndpoint("", 4001),
 				KeepAlive: &connection.ServerKeepAliveConfig{
 					Params: &connection.ServerKeepAliveParamsConfig{
 						Time:    300 * time.Second,
@@ -74,23 +77,25 @@ func TestReadConfigSidecar(t *testing.T) {
 					},
 				},
 			},
-			Monitoring: makeMonitoring("", 2114),
-			Orderer: broadcastdeliver.Config{
-				Connection: broadcastdeliver.ConnectionConfig{
-					Endpoints: connection.NewOrdererEndpoints(
-						0, "", makeServer("ordering-service", 7050),
+			Monitoring: newMonitoringConfig("", 2114),
+			Orderer: ordererconn.Config{
+				Connection: ordererconn.ConnectionConfig{
+					Endpoints: ordererconn.NewEndpoints(
+						0, "", newServerConfig("ordering-service", 7050),
 					),
 				},
 				ChannelID: "mychannel",
 			},
-			Committer: sidecar.CoordinatorConfig{
-				Config: makeClientConfig("coordinator", 9001),
-			},
+			Committer: newClientConfig("coordinator", 9001),
 			Ledger: sidecar.LedgerConfig{
 				Path: "/root/sc/ledger",
 			},
+			Notification: sidecar.NotificationServiceConfig{
+				MaxTimeout: 10 * time.Minute,
+			},
 			LastCommittedBlockSetInterval: 5 * time.Second,
 			WaitingTxsLimit:               20_000_000,
+			ChannelBufferSize:             100,
 		},
 	}}
 	for _, test := range tests {
@@ -115,12 +120,11 @@ func TestReadConfigCoordinator(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &coordinator.Config{
-			Server:     makeServer("localhost", 9001),
-			Monitoring: makeMonitoring("localhost", 2119),
-			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
-				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 100_000,
-				NumOfWorkersForGlobalDepManager: 1,
+			Server:     newServerConfig("localhost", 9001),
+			Monitoring: newMonitoringConfig("localhost", 2119),
+			DependencyGraph: &coordinator.DependencyGraphConfig{
+				NumOfLocalDepConstructors: 1,
+				WaitingTxsLimit:           100_000,
 			},
 			ChannelBufferSizePerGoroutine: 10,
 		},
@@ -128,14 +132,13 @@ func TestReadConfigCoordinator(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/coordinator.yaml",
 		expectedConfig: &coordinator.Config{
-			Server:                   makeServer("", 9001),
-			Monitoring:               makeMonitoring("", 2119),
-			VerifierConfig:           *makeClientConfig("signature-verifier", 5001),
-			ValidatorCommitterConfig: *makeClientConfig("validator-persister", 6001),
-			DependencyGraphConfig: &coordinator.DependencyGraphConfig{
-				NumOfLocalDepConstructors:       1,
-				WaitingTxsLimit:                 10_000,
-				NumOfWorkersForGlobalDepManager: 1,
+			Server:             newServerConfig("", 9001),
+			Monitoring:         newMonitoringConfig("", 2119),
+			Verifier:           newMultiClientConfig("signature-verifier", 5001),
+			ValidatorCommitter: newMultiClientConfig("validator-persister", 6001),
+			DependencyGraph: &coordinator.DependencyGraphConfig{
+				NumOfLocalDepConstructors: 1,
+				WaitingTxsLimit:           100_000,
 			},
 			ChannelBufferSizePerGoroutine: 10,
 		},
@@ -163,8 +166,8 @@ func TestReadConfigVC(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &vc.Config{
-			Server:     makeServer("localhost", 6001),
-			Monitoring: makeMonitoring("localhost", 2116),
+			Server:     newServerConfig("localhost", 6001),
+			Monitoring: newMonitoringConfig("localhost", 2116),
 			Database:   defaultDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
 				MaxWorkersForPreparer:             1,
@@ -178,8 +181,8 @@ func TestReadConfigVC(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/vcservice.yaml",
 		expectedConfig: &vc.Config{
-			Server:     makeServer("", 6001),
-			Monitoring: makeMonitoring("", 2116),
+			Server:     newServerConfig("", 6001),
+			Monitoring: newMonitoringConfig("", 2116),
 			Database:   defaultSampleDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
 				MaxWorkersForPreparer:             1,
@@ -213,8 +216,8 @@ func TestReadConfigVerifier(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &verifier.Config{
-			Server:     makeServer("localhost", 5001),
-			Monitoring: makeMonitoring("localhost", 2115),
+			Server:     newServerConfig("localhost", 5001),
+			Monitoring: newMonitoringConfig("localhost", 2115),
 			ParallelExecutor: verifier.ExecutorConfig{
 				Parallelism:       4,
 				BatchSizeCutoff:   50,
@@ -226,8 +229,8 @@ func TestReadConfigVerifier(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/sigservice.yaml",
 		expectedConfig: &verifier.Config{
-			Server:     makeServer("", 5001),
-			Monitoring: makeMonitoring("", 2115),
+			Server:     newServerConfig("", 5001),
+			Monitoring: newMonitoringConfig("", 2115),
 			ParallelExecutor: verifier.ExecutorConfig{
 				BatchSizeCutoff:   50,
 				BatchTimeCutoff:   10 * time.Millisecond,
@@ -259,8 +262,8 @@ func TestReadConfigQuery(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &query.Config{
-			Server:                makeServer("localhost", 7001),
-			Monitoring:            makeMonitoring("localhost", 2117),
+			Server:                newServerConfig("localhost", 7001),
+			Monitoring:            newMonitoringConfig("localhost", 2117),
 			Database:              defaultDBConfig(),
 			MinBatchKeys:          1024,
 			MaxBatchWait:          100 * time.Millisecond,
@@ -272,8 +275,8 @@ func TestReadConfigQuery(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/queryservice.yaml",
 		expectedConfig: &query.Config{
-			Server:                makeServer("", 7001),
-			Monitoring:            makeMonitoring("", 2117),
+			Server:                newServerConfig("", 7001),
+			Monitoring:            newMonitoringConfig("", 2117),
 			Database:              defaultSampleDBConfig(),
 			MinBatchKeys:          1024,
 			MaxBatchWait:          100 * time.Millisecond,
@@ -305,18 +308,18 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &loadgen.ClientConfig{
-			Server: makeServer("localhost", 8001),
+			Server: newServerConfig("localhost", 8001),
 			Monitoring: metrics.Config{
-				Config: makeMonitoring("localhost", 2118),
+				Config: newMonitoringConfig("localhost", 2118),
 			},
 		},
 	}, {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
 		expectedConfig: &loadgen.ClientConfig{
-			Server: makeServer("", 8001),
+			Server: newServerConfig("", 8001),
 			Monitoring: metrics.Config{
-				Config: makeMonitoring("", 2118),
+				Config: newMonitoringConfig("", 2118),
 				Latency: metrics.LatencyConfig{
 					SamplerConfig: metrics.SamplerConfig{
 						Portion: 0.01,
@@ -330,15 +333,15 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarConfig: makeClientConfig("sidecar", 4001),
-					Orderer: broadcastdeliver.Config{
-						Connection: broadcastdeliver.ConnectionConfig{
-							Endpoints: connection.NewOrdererEndpoints(
-								0, "", makeServer("ordering-service", 7050),
+					SidecarClient: newClientConfig("sidecar", 4001),
+					Orderer: ordererconn.Config{
+						Connection: ordererconn.ConnectionConfig{
+							Endpoints: ordererconn.NewEndpoints(
+								0, "", newServerConfig("ordering-service", 7050),
 							),
 						},
 						ChannelID:     "mychannel",
-						ConsensusType: "BFT",
+						ConsensusType: ordererconn.Bft,
 					},
 					BroadcastParallelism: 1,
 				},
@@ -349,19 +352,20 @@ func TestReadConfigLoadGen(t *testing.T) {
 				Transaction: workload.TransactionProfile{
 					ReadWriteCount: workload.NewConstantDistribution(2),
 					Policy: &workload.PolicyProfile{
+						ChannelID: "mychannel",
 						NamespacePolicies: map[string]*workload.Policy{
 							workload.GeneratedNamespaceID: {
-								Scheme: "ECDSA", Seed: 10,
+								Scheme: signature.Ecdsa, Seed: 10,
 							},
 							types.MetaNamespaceID: {
-								Scheme: "ECDSA", Seed: 11,
+								Scheme: signature.Ecdsa, Seed: 11,
 							},
 						},
-						OrdererEndpoints: []*connection.OrdererEndpoint{{
+						OrdererEndpoints: []*ordererconn.Endpoint{{
 							ID:       0,
 							MspID:    "org",
 							API:      []string{"broadcast", "deliver"},
-							Endpoint: *makeEndpoint("ordering-service", 7050),
+							Endpoint: *newEndpoint("ordering-service", 7050),
 						}},
 					},
 				},
@@ -373,7 +377,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Stream: &workload.StreamOptions{
 				RateLimit: &workload.LimiterConfig{
-					Endpoint:     *makeEndpoint("", 6997),
+					Endpoint:     *newEndpoint("", 6997),
 					InitialLimit: 10_000,
 				},
 				BuffersSize: 10,
@@ -403,7 +407,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 
 func defaultDBConfig() *vc.DatabaseConfig {
 	return &vc.DatabaseConfig{
-		Endpoints:      []*connection.Endpoint{makeEndpoint("localhost", 5433)},
+		Endpoints:      []*connection.Endpoint{newEndpoint("localhost", 5433)},
 		Username:       "yugabyte",
 		Password:       "yugabyte",
 		Database:       "yugabyte",
@@ -417,7 +421,7 @@ func defaultDBConfig() *vc.DatabaseConfig {
 
 func defaultSampleDBConfig() *vc.DatabaseConfig {
 	return &vc.DatabaseConfig{
-		Endpoints:      []*connection.Endpoint{makeEndpoint("db", 5433)},
+		Endpoints:      []*connection.Endpoint{newEndpoint("db", 5433)},
 		Username:       "yugabyte",
 		Password:       "yugabyte",
 		Database:       "yugabyte",
@@ -434,29 +438,37 @@ func defaultSampleDBConfig() *vc.DatabaseConfig {
 	}
 }
 
-func makeClientConfig(host string, port int) *connection.ClientConfig {
+func newClientConfig(host string, port int) *connection.ClientConfig {
 	return &connection.ClientConfig{
+		Endpoint: newEndpoint(host, port),
+	}
+}
+
+func newMultiClientConfig(host string, port int) connection.MultiClientConfig {
+	return connection.MultiClientConfig{
 		Endpoints: []*connection.Endpoint{
-			makeEndpoint(host, port),
+			newEndpoint(host, port),
 		},
 	}
 }
 
-func makeServer(host string, port int) *connection.ServerConfig {
-	return &connection.ServerConfig{
-		Endpoint: *makeEndpoint(host, port),
+func newMonitoringConfig(host string, port int) monitoring.Config {
+	return monitoring.Config{
+		Server: newServerConfig(host, port),
 	}
 }
 
-func makeEndpoint(host string, port int) *connection.Endpoint {
+func newServerConfig(host string, port int) *connection.ServerConfig {
+	return &connection.ServerConfig{
+		Endpoint: *newEndpoint(host, port),
+	}
+}
+
+func newEndpoint(host string, port int) *connection.Endpoint {
 	return &connection.Endpoint{
 		Host: host,
 		Port: port,
 	}
-}
-
-func makeMonitoring(host string, port int) monitoring.Config {
-	return monitoring.Config{Server: makeServer(host, port)}
 }
 
 func emptyConfig(t *testing.T) string {

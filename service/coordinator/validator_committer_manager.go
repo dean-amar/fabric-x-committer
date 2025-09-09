@@ -25,6 +25,8 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 )
 
+const streamEndErrWrap = "sending to stream ended with an error"
+
 type (
 	// validatorCommitterManager is responsible for managing all communication with
 	// all vcservices. It is responsible for:
@@ -55,7 +57,7 @@ type (
 	}
 
 	validatorCommitterManagerConfig struct {
-		clientConfig                   *connection.ClientConfig
+		clientConfig                   *connection.MultiClientConfig
 		incomingTxsForValidationCommit <-chan dependencygraph.TxNodeBatch
 		outgoingValidatedTxsNode       chan<- dependencygraph.TxNodeBatch
 		outgoingTxsStatus              chan<- *protoblocktx.TransactionsStatus
@@ -91,7 +93,7 @@ func (vcm *validatorCommitterManager) run(ctx context.Context) error {
 		return nil
 	})
 
-	commonDial, dialErr := connection.NewLoadBalancedDialConfig(c.clientConfig)
+	commonDial, dialErr := connection.NewLoadBalancedDialConfig(*c.clientConfig)
 	if dialErr != nil {
 		return fmt.Errorf("failed to create connection to validator persisters: %w", dialErr)
 	}
@@ -247,6 +249,7 @@ func (vc *validatorCommitter) sendTransactionsToVCService(
 	stream protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient,
 	inputTxsNode channel.Reader[dependencygraph.TxNodeBatch],
 ) error {
+	firstBatch := true
 	for {
 		txsNode, ok := inputTxsNode.Read()
 		if !ok {
@@ -254,21 +257,53 @@ func (vc *validatorCommitter) sendTransactionsToVCService(
 		}
 
 		logger.Debugf("New TX node came from dependency graph manager to vc manager")
-		txBatch := make([]*protovcservice.Transaction, len(txsNode))
+		txBatch := make([]*protovcservice.Tx, len(txsNode))
 		for i, txNode := range txsNode {
-			vc.txBeingValidated.Store(txNode.Tx.ID, txNode)
+			vc.txBeingValidated.Store(txNode.Tx.Ref.TxId, txNode)
 			txBatch[i] = txNode.Tx
 		}
 
-		err := stream.Send(&protovcservice.TransactionBatch{
+		if firstBatch {
+			if err := splitAndSendToVC(stream, txBatch); err != nil {
+				return err
+			}
+			firstBatch = false
+			continue
+		}
+
+		if err := stream.Send(&protovcservice.Batch{
 			Transactions: txBatch,
-		})
-		if err != nil {
-			// The stream ended or the VCM was closed.
-			return errors.Wrap(err, "receive from stream ended with error")
+		}); err != nil {
+			return errors.Wrap(err, streamEndErrWrap)
 		}
 		logger.Debugf("TX node contains %d TXs, and was sent to a vcservice", len(txBatch))
 	}
+}
+
+func splitAndSendToVC(
+	stream protovcservice.ValidationAndCommitService_StartValidateAndCommitStreamClient,
+	txBatch []*protovcservice.Tx,
+) error {
+	blkToBatch := make(map[uint64]*protovcservice.Batch)
+	for _, tx := range txBatch {
+		rBatch, ok := blkToBatch[tx.Ref.BlockNum]
+		if !ok {
+			rBatch = &protovcservice.Batch{
+				Transactions: make([]*protovcservice.Tx, 0, len(txBatch)),
+			}
+			blkToBatch[tx.Ref.BlockNum] = rBatch
+		}
+
+		rBatch.Transactions = append(rBatch.Transactions, tx)
+	}
+
+	for _, rBatch := range blkToBatch {
+		if err := stream.Send(rBatch); err != nil {
+			return errors.Wrap(err, streamEndErrWrap)
+		}
+	}
+
+	return nil
 }
 
 func (vc *validatorCommitter) receiveStatusAndForwardToOutput(

@@ -24,7 +24,7 @@ type (
 	// LoadGenAdapter applies load on another load generator.
 	LoadGenAdapter struct {
 		commonAdapter
-		config *LoadGenClientConfig
+		config *connection.ClientConfig
 	}
 
 	receivedBatch struct {
@@ -34,7 +34,7 @@ type (
 )
 
 // NewLoadGenAdapter instantiate LoadGenAdapter.
-func NewLoadGenAdapter(config *LoadGenClientConfig, res *ClientResources) *LoadGenAdapter {
+func NewLoadGenAdapter(config *connection.ClientConfig, res *ClientResources) *LoadGenAdapter {
 	return &LoadGenAdapter{
 		commonAdapter: commonAdapter{res: res},
 		config:        config,
@@ -43,7 +43,11 @@ func NewLoadGenAdapter(config *LoadGenClientConfig, res *ClientResources) *LoadG
 
 // RunWorkload applies load on the SV.
 func (c *LoadGenAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
-	conn, err := connection.Connect(connection.NewInsecureDialConfig(c.config.Endpoint))
+	loadgenDialConfig, err := connection.NewSingleDialConfig(c.config)
+	if err != nil {
+		return errors.Wrapf(err, "failed creating loadgen dial config")
+	}
+	conn, err := connection.Connect(loadgenDialConfig)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to %s", c.config.Endpoint)
 	}
@@ -57,18 +61,20 @@ func (c *LoadGenAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 	g, gCtx := errgroup.WithContext(dCtx)
 	g.Go(func() error {
 		receiveQueueCtx := channel.NewWriter(gCtx, receiveQueue)
-		return sendBlocks(dCtx, &c.commonAdapter, txStream, mapToLoadGenBatch, func(batch *protoloadgen.Batch) error {
-			_, appendErr := client.AppendBatch(dCtx, batch)
-			status := protoblocktx.Status_COMMITTED
-			if appendErr != nil {
-				status = protoblocktx.Status_NOT_VALIDATED
-			}
-			receiveQueueCtx.Write(receivedBatch{
-				batch:  batch,
-				status: status,
-			})
-			return appendErr
-		})
+		return sendBlocks(dCtx, &c.commonAdapter, txStream, workload.MapToLoadGenBatch,
+			func(batch *protoloadgen.Batch) error {
+				_, appendErr := client.AppendBatch(dCtx, batch)
+				status := protoblocktx.Status_COMMITTED
+				if appendErr != nil {
+					status = protoblocktx.Status_NOT_VALIDATED
+				}
+				receiveQueueCtx.Write(receivedBatch{
+					batch:  batch,
+					status: status,
+				})
+				return appendErr
+			},
+		)
 	})
 	g.Go(func() error {
 		defer dCancel() // We stop sending if we can't track the received items.
@@ -87,11 +93,6 @@ func (*LoadGenAdapter) Supports() Phases {
 		Namespaces: false,
 		Load:       true,
 	}
-}
-
-// mapToBlock creates a Fabric block. It uses the envelope's TX ID to track the TXs latency.
-func mapToLoadGenBatch(txs []*protoblocktx.Tx) (*protoloadgen.Batch, []string, error) {
-	return &protoloadgen.Batch{Tx: txs}, getTXsIDs(txs), nil
 }
 
 func (c *LoadGenAdapter) receiveStatus(ctx context.Context, queue <-chan receivedBatch) {

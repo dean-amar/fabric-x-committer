@@ -12,12 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protosigverifierservice"
+	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -28,38 +27,32 @@ import (
 )
 
 const testTimeout = 3 * time.Second
+const fakeTxID = "fake-id"
 
 func TestVerifierSecureConnection(t *testing.T) {
 	t.Parallel()
 	test.RunSecureConnectionTest(t,
-		test.SecureConnectionFunctionArguments{
-			ServerCN: "verifier",
-			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
+		func(t *testing.T, tlsCfg connection.TLSConfig) test.RPCAttempt {
+			t.Helper()
+			env := newTestState(t, defaultConfigWithTLS(tlsCfg))
+			return func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error {
 				t.Helper()
-				env := newTestState(t, defaultConfigWithCreds(tlsCfg))
-				return env.Service.config.Server.Endpoint
-			},
-			ClientStarter: func(t *testing.T, ep *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-				t.Helper()
-				client := createVerifierClientWithTLS(t, ep, cfg)
-				return func(ctx context.Context) error {
-					_, err := client.StartStream(ctx)
-					return err
-				}
-			},
-			Parallel: true,
+				client := createVerifierClientWithTLS(t, &env.Service.config.Server.Endpoint, cfg)
+				_, err := client.StartStream(ctx)
+				return err
+			}
 		},
 	)
 }
 
 func TestNoVerificationKeySet(t *testing.T) {
 	t.Parallel()
-	c := newTestState(t, defaultConfig())
+	c := newTestState(t, defaultConfigWithTLS(test.InsecureTLSConfig))
 
 	stream, err := c.Client.StartStream(t.Context())
 	require.NoError(t, err)
 
-	err = stream.Send(&protosigverifierservice.RequestBatch{})
+	err = stream.Send(&protosigverifierservice.Batch{})
 	require.NoError(t, err)
 
 	t.Log("We should not receive any results with empty batch")
@@ -70,12 +63,12 @@ func TestNoVerificationKeySet(t *testing.T) {
 func TestNoInput(t *testing.T) {
 	t.Parallel()
 	test.FailHandler(t)
-	c := newTestState(t, defaultConfig())
+	c := newTestState(t, defaultConfigWithTLS(test.InsecureTLSConfig))
 
 	stream, _ := c.Client.StartStream(t.Context())
 
 	update, _ := defaultUpdate(t)
-	err := stream.Send(&protosigverifierservice.RequestBatch{Update: update})
+	err := stream.Send(&protosigverifierservice.Batch{Update: update})
 	require.NoError(t, err)
 
 	_, ok := readStream(t, stream, testTimeout)
@@ -85,7 +78,7 @@ func TestNoInput(t *testing.T) {
 func TestMinimalInput(t *testing.T) {
 	t.Parallel()
 	test.FailHandler(t)
-	c := newTestState(t, defaultConfig())
+	c := newTestState(t, defaultConfigWithTLS(test.InsecureTLSConfig))
 
 	stream, _ := c.Client.StartStream(t.Context())
 
@@ -100,7 +93,7 @@ func TestMinimalInput(t *testing.T) {
 			}},
 		}},
 	}
-	s, _ := txSigner.SignNs(tx1, 0)
+	s, _ := txSigner.SignNs(fakeTxID, tx1, 0)
 	tx1.Signatures = append(tx1.Signatures, s)
 
 	tx2 := &protoblocktx.Tx{
@@ -113,7 +106,7 @@ func TestMinimalInput(t *testing.T) {
 		}},
 	}
 
-	s, _ = txSigner.SignNs(tx2, 0)
+	s, _ = txSigner.SignNs(fakeTxID, tx2, 0)
 	tx2.Signatures = append(tx2.Signatures, s)
 
 	tx3 := &protoblocktx.Tx{
@@ -125,15 +118,15 @@ func TestMinimalInput(t *testing.T) {
 			}},
 		}},
 	}
-	s, _ = txSigner.SignNs(tx3, 0)
+	s, _ = txSigner.SignNs(fakeTxID, tx3, 0)
 	tx3.Signatures = append(tx3.Signatures, s)
 
-	err := stream.Send(&protosigverifierservice.RequestBatch{
+	err := stream.Send(&protosigverifierservice.Batch{
 		Update: update,
-		Requests: []*protosigverifierservice.Request{
-			{BlockNum: 1, TxNum: 1, Tx: tx1},
-			{BlockNum: 1, TxNum: 2, Tx: tx2},
-			{BlockNum: 1, TxNum: 3, Tx: tx3},
+		Requests: []*protosigverifierservice.Tx{
+			{Ref: types.TxRef(fakeTxID, 1, 1), Tx: tx1},
+			{Ref: types.TxRef(fakeTxID, 1, 1), Tx: tx2},
+			{Ref: types.TxRef(fakeTxID, 1, 1), Tx: tx3},
 		},
 	})
 	require.NoError(t, err)
@@ -143,31 +136,33 @@ func TestMinimalInput(t *testing.T) {
 	require.Len(t, ret, 3)
 }
 
-func TestBadTxFormat(t *testing.T) {
+func TestBadSignature(t *testing.T) {
 	t.Parallel()
-	test.FailHandler(t)
 	c := newTestState(t, defaultConfigQuickCutoff())
 
-	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
-	t.Cleanup(cancel)
-	stream, _ := c.Client.StartStream(ctx)
-
-	update, _ := defaultUpdate(t)
-	err := stream.Send(&protosigverifierservice.RequestBatch{Update: update})
+	stream, err := c.Client.StartStream(t.Context())
 	require.NoError(t, err)
 
-	blockNumber := uint64(1)
-	for _, tt := range BadTxFormatTestCases { //nolint:paralleltest
-		t.Run(tt.Tx.Id, func(t *testing.T) {
-			requireTestCase(t, stream, &testCase{
-				blkNum:         blockNumber,
-				txNum:          0,
-				tx:             tt.Tx,
-				expectedStatus: tt.ExpectedStatus,
-			})
-			blockNumber++
-		})
-	}
+	update, _ := defaultUpdate(t)
+	err = stream.Send(&protosigverifierservice.Batch{Update: update})
+	require.NoError(t, err)
+
+	requireTestCase(t, stream, &testCase{
+		req: &protosigverifierservice.Tx{
+			Ref: types.TxRef(fakeTxID, 1, 0),
+			Tx: &protoblocktx.Tx{
+				Namespaces: []*protoblocktx.TxNamespace{{
+					NsId:      "1",
+					NsVersion: 0,
+					ReadWrites: []*protoblocktx.ReadWrite{
+						{Key: make([]byte, 0)},
+					},
+				}},
+				Signatures: [][]byte{{0, 1, 2}},
+			},
+		},
+		expectedStatus: protoblocktx.Status_ABORTED_SIGNATURE_INVALID,
+	})
 }
 
 func TestUpdatePolicies(t *testing.T) {
@@ -177,7 +172,7 @@ func TestUpdatePolicies(t *testing.T) {
 
 	ns1 := "ns1"
 	ns2 := "ns2"
-	tx := makeTX("update", ns1, ns2)
+	tx := makeTX(ns1, ns2)
 
 	t.Run("invalid update stops stream", func(t *testing.T) {
 		t.Parallel()
@@ -186,7 +181,7 @@ func TestUpdatePolicies(t *testing.T) {
 
 		ns1Policy, _ := makePolicyItem(t, ns1)
 		ns2Policy, _ := makePolicyItem(t, ns2)
-		err = stream.Send(&protosigverifierservice.RequestBatch{
+		err = stream.Send(&protosigverifierservice.Batch{
 			Update: &protosigverifierservice.Update{
 				NamespacePolicies: &protoblocktx.NamespacePolicies{
 					Policies: []*protoblocktx.PolicyItem{ns1Policy, ns2Policy},
@@ -198,7 +193,7 @@ func TestUpdatePolicies(t *testing.T) {
 		// We attempt a bad policies update.
 		// We expect no update since one of the given policies are invalid.
 		p3, _ := makePolicyItem(t, ns1)
-		err = stream.Send(&protosigverifierservice.RequestBatch{
+		err = stream.Send(&protosigverifierservice.Batch{
 			Update: &protosigverifierservice.Update{
 				NamespacePolicies: &protoblocktx.NamespacePolicies{
 					Policies: []*protoblocktx.PolicyItem{
@@ -225,7 +220,7 @@ func TestUpdatePolicies(t *testing.T) {
 
 		ns1Policy, ns1Signer := makePolicyItem(t, ns1)
 		ns2Policy, _ := makePolicyItem(t, ns2)
-		err = stream.Send(&protosigverifierservice.RequestBatch{
+		err = stream.Send(&protosigverifierservice.Batch{
 			Update: &protosigverifierservice.Update{
 				NamespacePolicies: &protoblocktx.NamespacePolicies{
 					Policies: []*protoblocktx.PolicyItem{ns1Policy, ns2Policy},
@@ -235,7 +230,7 @@ func TestUpdatePolicies(t *testing.T) {
 		require.NoError(t, err)
 
 		ns2PolicyUpdate, ns2Signer := makePolicyItem(t, ns2)
-		err = stream.Send(&protosigverifierservice.RequestBatch{
+		err = stream.Send(&protosigverifierservice.Batch{
 			Update: &protosigverifierservice.Update{
 				NamespacePolicies: &protoblocktx.NamespacePolicies{
 					Policies: []*protoblocktx.PolicyItem{ns2PolicyUpdate},
@@ -246,9 +241,10 @@ func TestUpdatePolicies(t *testing.T) {
 
 		sign(t, tx, ns1Signer, ns2Signer)
 		requireTestCase(t, stream, &testCase{
-			blkNum:         1,
-			txNum:          1,
-			tx:             tx,
+			req: &protosigverifierservice.Tx{
+				Ref: types.TxRef(fakeTxID, 1, 1),
+				Tx:  tx,
+			},
 			expectedStatus: protoblocktx.Status_COMMITTED,
 		})
 	})
@@ -281,7 +277,7 @@ func TestMultipleUpdatePolicies(t *testing.T) {
 				Policies: []*protoblocktx.PolicyItem{uniqueNsPolicy, commonNsPolicy},
 			},
 		}
-		err = stream.Send(&protosigverifierservice.RequestBatch{
+		err = stream.Send(&protosigverifierservice.Batch{
 			Update: p,
 		})
 		require.NoError(t, err)
@@ -290,18 +286,15 @@ func TestMultipleUpdatePolicies(t *testing.T) {
 	// The following TX updates all the namespaces.
 	// We attempt this TX with each of the attempted policies for the common namespace.
 	// One and only one should succeed.
-	tx := makeTX("all", ns...)
+	tx := makeTX(ns...)
 	success := 0
 	for i := range updateCount {
 		sign(t, tx, append(uniqueNsSigners, commonNsSigners[i])...)
-		require.NoError(t, stream.Send(&protosigverifierservice.RequestBatch{
-			Requests: []*protosigverifierservice.Request{
-				{
-					BlockNum: 0,
-					TxNum:    0,
-					Tx:       tx,
-				},
-			},
+		require.NoError(t, stream.Send(&protosigverifierservice.Batch{
+			Requests: []*protosigverifierservice.Tx{{
+				Ref: types.TxRef(fakeTxID, 0, 0),
+				Tx:  tx,
+			}},
 		}))
 
 		txStatus, err := stream.Recv()
@@ -316,20 +309,19 @@ func TestMultipleUpdatePolicies(t *testing.T) {
 
 	// The following TX updates all the namespaces but the common one.
 	// It must succeed.
-	tx = makeTX("all", ns[:updateCount]...)
+	tx = makeTX(ns[:updateCount]...)
 	sign(t, tx, uniqueNsSigners...)
 	requireTestCase(t, stream, &testCase{
-		blkNum:         1,
-		txNum:          1,
-		tx:             tx,
+		req: &protosigverifierservice.Tx{
+			Ref: types.TxRef(fakeTxID, 1, 1),
+			Tx:  tx,
+		},
 		expectedStatus: protoblocktx.Status_COMMITTED,
 	})
 }
 
 type testCase struct {
-	blkNum         uint64
-	txNum          uint64
-	tx             *protoblocktx.Tx
+	req            *protosigverifierservice.Tx
 	expectedStatus protoblocktx.Status
 }
 
@@ -337,15 +329,14 @@ func sign(t *testing.T, tx *protoblocktx.Tx, signers ...*sigtest.NsSigner) {
 	t.Helper()
 	tx.Signatures = make([][]byte, len(signers))
 	for i, s := range signers {
-		s, err := s.SignNs(tx, i)
+		s, err := s.SignNs(fakeTxID, tx, i)
 		require.NoError(t, err)
 		tx.Signatures[i] = s
 	}
 }
 
-func makeTX(name string, namespaces ...string) *protoblocktx.Tx {
+func makeTX(namespaces ...string) *protoblocktx.Tx {
 	tx := &protoblocktx.Tx{
-		Id:         name,
 		Namespaces: make([]*protoblocktx.TxNamespace, len(namespaces)),
 	}
 	for i, ns := range namespaces {
@@ -379,14 +370,8 @@ func requireTestCase(
 	tt *testCase,
 ) {
 	t.Helper()
-	err := stream.Send(&protosigverifierservice.RequestBatch{
-		Requests: []*protosigverifierservice.Request{
-			{
-				BlockNum: tt.blkNum,
-				TxNum:    tt.txNum,
-				Tx:       tt.tx,
-			},
-		},
+	err := stream.Send(&protosigverifierservice.Batch{
+		Requests: []*protosigverifierservice.Tx{tt.req},
 	})
 	require.NoError(t, err)
 
@@ -396,9 +381,7 @@ func requireTestCase(
 	require.Len(t, txStatus.Responses, 1)
 	resp := txStatus.Responses[0]
 	require.NotNil(t, resp)
-	require.Equal(t, tt.blkNum, resp.BlockNum)
-	require.Equal(t, tt.txNum, resp.TxNum)
-	require.Equal(t, tt.tx.Id, resp.TxId)
+	test.RequireProtoEqual(t, tt.req.Ref, resp.Ref)
 	t.Logf(tt.expectedStatus.String(), resp.Status.String())
 	require.Equal(t, tt.expectedStatus, resp.Status)
 }
@@ -412,18 +395,11 @@ type State struct {
 func newTestState(t *testing.T, config *Config) *State {
 	t.Helper()
 	service := New(config)
-	test.RunServiceAndGrpcForTest(t.Context(), t, service, config.Server, func(grpcServer *grpc.Server) {
-		protosigverifierservice.RegisterVerifierServer(grpcServer, service)
-	})
+	test.RunServiceAndGrpcForTest(t.Context(), t, service, config.Server)
 
-	clientConnection, err := connection.Connect(connection.NewInsecureDialConfig(&config.Server.Endpoint))
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, clientConnection.Close())
-	})
 	return &State{
 		Service: service,
-		Client:  protosigverifierservice.NewVerifierClient(clientConnection),
+		Client:  createVerifierClientWithTLS(t, &config.Server.Endpoint, test.InsecureTLSConfig),
 	}
 }
 
@@ -463,13 +439,9 @@ func defaultUpdate(t *testing.T) (*protosigverifierservice.Update, *sigtest.NsSi
 	return update, txSigner
 }
 
-func defaultConfig() *Config {
-	return defaultConfigWithCreds(nil)
-}
-
-func defaultConfigWithCreds(creds *connection.ConfigTLS) *Config {
+func defaultConfigWithTLS(tlsConfig connection.TLSConfig) *Config {
 	return &Config{
-		Server: connection.NewLocalHostServerWithCreds(creds),
+		Server: connection.NewLocalHostServerWithTLS(tlsConfig),
 		ParallelExecutor: ExecutorConfig{
 			BatchSizeCutoff:   3,
 			BatchTimeCutoff:   1 * time.Hour,
@@ -477,13 +449,13 @@ func defaultConfigWithCreds(creds *connection.ConfigTLS) *Config {
 			ChannelBufferSize: 1,
 		},
 		Monitoring: monitoring.Config{
-			Server: connection.NewLocalHostServer(),
+			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 		},
 	}
 }
 
 func defaultConfigQuickCutoff() *Config {
-	config := defaultConfig()
+	config := defaultConfigWithTLS(test.InsecureTLSConfig)
 	config.ParallelExecutor.BatchSizeCutoff = 1
 	return config
 }
@@ -492,7 +464,7 @@ func defaultConfigQuickCutoff() *Config {
 func createVerifierClientWithTLS(
 	t *testing.T,
 	ep *connection.Endpoint,
-	tlsCfg *connection.ConfigTLS,
+	tlsCfg connection.TLSConfig,
 ) protosigverifierservice.VerifierClient {
 	t.Helper()
 	return test.CreateClientWithTLS(t, ep, tlsCfg, protosigverifierservice.NewVerifierClient)

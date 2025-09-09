@@ -8,10 +8,10 @@ package sidecar
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,24 +19,25 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/hyperledger/fabric/common/ledger/blkstorage"
-	"github.com/hyperledger/fabric/protoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
+	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
+	"github.com/hyperledger/fabric-x-committer/api/protonotify"
 	"github.com/hyperledger/fabric-x-committer/api/types"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
-	"github.com/hyperledger/fabric-x-committer/utils/broadcastdeliver"
+	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
@@ -50,6 +51,7 @@ type sidecarTestEnv struct {
 	sidecar        *Service
 	committedBlock chan *common.Block
 	configBlock    *common.Block
+	notifyStream   protonotify.Notifier_OpenNotificationStreamClient
 }
 
 type sidecarTestConfig struct {
@@ -83,44 +85,32 @@ func (c *sidecarTestConfig) String() string {
 
 func TestSidecarSecureConnection(t *testing.T) {
 	t.Parallel()
-	var env *sidecarTestEnv
 	test.RunSecureConnectionTest(t,
-		test.SecureConnectionFunctionArguments{
-			ServerCN: "sidecar",
-			ServerStarter: func(t *testing.T, tlsCfg *connection.ConfigTLS) connection.Endpoint {
+		func(t *testing.T, tlsCfg connection.TLSConfig) test.RPCAttempt {
+			t.Helper()
+			env := newSidecarTestEnvWithTLS(
+				t,
+				sidecarTestConfig{NumService: 1},
+				tlsCfg,
+			)
+			env.startSidecarService(t.Context(), t)
+			return func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error {
 				t.Helper()
-				env = newSidecarTestEnvWithCreds(
-					t,
-					sidecarTestConfig{NumService: 1},
-					tlsCfg,
-				)
-				env.startSidecarService(t.Context(), t)
-				return env.config.Server.Endpoint
-			},
-			ClientStarter: func(t *testing.T, _ *connection.Endpoint, cfg *connection.ConfigTLS) test.RequestFunc {
-				t.Helper()
-				return func(ctx context.Context) error {
-					env.startSidecarClient(ctx, t, 0, cfg)
-					if _, ok := channel.NewReader(ctx, env.committedBlock).Read(); !ok {
-						return errors.New("failed to read committed block")
-					}
-					return nil
+				env.startSidecarClient(ctx, t, 0, cfg)
+				committerBlock := channel.NewReader(ctx, env.committedBlock)
+				if _, ok := committerBlock.Read(); !ok {
+					return errors.New("failed to read committed block")
 				}
-			},
-			Parallel: false,
+				return nil
+			}
 		},
 	)
 }
 
-func newSidecarTestEnv(t *testing.T, conf sidecarTestConfig) *sidecarTestEnv {
-	t.Helper()
-	return newSidecarTestEnvWithCreds(t, conf, nil)
-}
-
-func newSidecarTestEnvWithCreds(
+func newSidecarTestEnvWithTLS(
 	t *testing.T,
 	conf sidecarTestConfig,
-	serverCreds *connection.ConfigTLS,
+	serverCreds connection.TLSConfig,
 ) *sidecarTestEnv {
 	t.Helper()
 	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t)
@@ -153,23 +143,21 @@ func newSidecarTestEnvWithCreds(
 		initOrdererEndpoints = nil
 	}
 	sidecarConf := &Config{
-		Server: connection.NewLocalHostServerWithCreds(serverCreds),
-		Orderer: broadcastdeliver.Config{
+		Server: connection.NewLocalHostServerWithTLS(serverCreds),
+		Orderer: ordererconn.Config{
 			ChannelID: ordererEnv.TestConfig.ChanID,
-			Connection: broadcastdeliver.ConnectionConfig{
+			Connection: ordererconn.ConnectionConfig{
 				Endpoints: initOrdererEndpoints,
 			},
 		},
-		Committer: CoordinatorConfig{
-			Config: test.MakeClientConfig(&coordinatorServer.Configs[0].Endpoint),
-		},
+		Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
 		Ledger: LedgerConfig{
 			Path: t.TempDir(),
 		},
 		LastCommittedBlockSetInterval: 100 * time.Millisecond,
 		WaitingTxsLimit:               1000,
 		Monitoring: monitoring.Config{
-			Server: connection.NewLocalHostServer(),
+			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 		},
 		Bootstrap: Bootstrap{
 			GenesisBlockFilePath: genesisBlockFilePath,
@@ -189,40 +177,46 @@ func newSidecarTestEnvWithCreds(
 	}
 }
 
-func (env *sidecarTestEnv) start(ctx context.Context, t *testing.T, startBlkNum int64) {
-	t.Helper()
-	env.startWithSidecarClientCreds(ctx, t, startBlkNum, nil)
-}
-
-func (env *sidecarTestEnv) startWithSidecarClientCreds(
+func (env *sidecarTestEnv) startSidecarServiceAndClientAndNotificationStream(
 	ctx context.Context,
 	t *testing.T,
 	startBlkNum int64,
-	sidecarClientCreds *connection.ConfigTLS,
+	sidecarClientCreds connection.TLSConfig,
 ) {
 	t.Helper()
 	env.startSidecarService(ctx, t)
 	env.startSidecarClient(ctx, t, startBlkNum, sidecarClientCreds)
+	env.startNotificationStream(ctx, t, sidecarClientCreds)
 }
 
 func (env *sidecarTestEnv) startSidecarService(ctx context.Context, t *testing.T) {
 	t.Helper()
-	test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server, func(server *grpc.Server) {
-		peer.RegisterDeliverServer(server, env.sidecar.GetLedgerService())
-	})
+	test.RunServiceAndGrpcForTest(ctx, t, env.sidecar, env.config.Server)
 }
 
 func (env *sidecarTestEnv) startSidecarClient(
 	ctx context.Context,
 	t *testing.T,
 	startBlkNum int64,
-	sidecarClientCreds *connection.ConfigTLS,
+	sidecarClientCreds connection.TLSConfig,
 ) {
 	t.Helper()
-	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Config{
-		ChannelID:    env.config.Orderer.ChannelID,
-		ClientConfig: test.MakeClientConfigWithCreds(sidecarClientCreds, &env.config.Server.Endpoint),
+	env.committedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
+		ChannelID: env.config.Orderer.ChannelID,
+		Client:    test.NewTLSClientConfig(sidecarClientCreds, &env.config.Server.Endpoint),
 	}, startBlkNum)
+}
+
+func (env *sidecarTestEnv) startNotificationStream(
+	ctx context.Context,
+	t *testing.T,
+	sidecarClientCreds connection.TLSConfig,
+) {
+	t.Helper()
+	conn, err := connection.Connect(test.NewSecuredDialConfig(t, &env.config.Server.Endpoint, sidecarClientCreds))
+	require.NoError(t, err)
+	env.notifyStream, err = protonotify.NewNotifierClient(conn).OpenNotificationStream(ctx)
+	require.NoError(t, err)
 }
 
 func TestSidecar(t *testing.T) {
@@ -238,10 +232,10 @@ func TestSidecar(t *testing.T) {
 		conf := conf
 		t.Run(conf.String(), func(t *testing.T) {
 			t.Parallel()
-			env := newSidecarTestEnv(t, conf)
+			env := newSidecarTestEnvWithTLS(t, conf, test.InsecureTLSConfig)
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			t.Cleanup(cancel)
-			env.start(ctx, t, 0)
+			env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
 			env.requireBlock(ctx, t, 0)
 			env.sendTransactionsAndEnsureCommitted(ctx, t, 1)
 		})
@@ -250,10 +244,10 @@ func TestSidecar(t *testing.T) {
 
 func TestSidecarConfigUpdate(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnv(t, sidecarTestConfig{NumService: 3, NumHolders: 3})
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3, NumHolders: 3}, test.InsecureTLSConfig)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
-	env.start(ctx, t, 0)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
 	env.requireBlock(ctx, t, 0)
 
 	t.Log("Sanity check")
@@ -261,7 +255,7 @@ func TestSidecarConfigUpdate(t *testing.T) {
 	env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
 	expectedBlock++
 
-	submitConfigBlock := func(endpoints []*connection.OrdererEndpoint) {
+	submitConfigBlock := func(endpoints []*ordererconn.Endpoint) {
 		env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
 			OrdererEndpoints: endpoints,
 		})
@@ -308,10 +302,10 @@ func TestSidecarConfigUpdate(t *testing.T) {
 
 func TestSidecarConfigRecovery(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnv(t, sidecarTestConfig{NumService: 3})
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3}, test.InsecureTLSConfig)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
-	env.start(ctx, t, 0)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
 	env.requireBlock(ctx, t, 0)
 
 	t.Log("Stop the sidecar service and ledger service")
@@ -334,7 +328,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Log("Modify the Sidecar config, use illegal host endpoint")
 	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
 	// as the sidecar expects the Endpoints to be non-empty.
-	env.config.Orderer.Connection.Endpoints = []*connection.OrdererEndpoint{
+	env.config.Orderer.Connection.Endpoints = []*ordererconn.Endpoint{
 		{Endpoint: connection.Endpoint{Host: "localhost", Port: 9999}},
 	}
 
@@ -349,7 +343,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	env.coordinator.SetConfigTransaction(env.configBlock.Data.Data[0])
 
 	t.Log("Start the new sidecar")
-	env.start(newCtx, t, 0)
+	env.startSidecarServiceAndClientAndNotificationStream(newCtx, t, 0, test.InsecureTLSConfig)
 
 	env.requireBlock(newCtx, t, 0)
 
@@ -359,10 +353,10 @@ func TestSidecarConfigRecovery(t *testing.T) {
 
 func TestSidecarRecovery(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnv(t, sidecarTestConfig{})
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{}, test.InsecureTLSConfig)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
-	env.start(ctx, t, 0)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
 	env.requireBlock(ctx, t, 0)
 
 	t.Log("1. Commit block 1 to 10")
@@ -418,7 +412,7 @@ func TestSidecarRecovery(t *testing.T) {
 	env.coordinator.SetWaitingTxsCount(10)
 
 	t.Log("5. Restart the sidecar service and ledger service")
-	env.start(ctx2, t, 11)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx2, t, 11, test.InsecureTLSConfig)
 
 	t.Log("6. Recovery should not happen when coordinator is not idle.")
 	require.Never(t, func() bool {
@@ -429,22 +423,22 @@ func TestSidecarRecovery(t *testing.T) {
 	env.coordinator.SetWaitingTxsCount(0)
 
 	t.Log("8. Blockstore would recover lost blocks")
-	ensureAtLeastHeight(t, env.sidecar.GetLedgerService(), 11)
+	ensureAtLeastHeight(t, env.sidecar.ledgerService, 11)
 
 	t.Log("9. Send the next expected block by the coordinator.")
 	env.sendTransactionsAndEnsureCommitted(ctx2, t, 11)
 
 	checkLastCommittedBlock(ctx2, t, env.coordinator, 11)
-	ensureAtLeastHeight(t, env.sidecar.GetLedgerService(), 12)
+	ensureAtLeastHeight(t, env.sidecar.ledgerService, 12)
 	cancel2()
 }
 
 func TestSidecarRecoveryAfterCoordinatorFailure(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnv(t, sidecarTestConfig{})
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{}, test.InsecureTLSConfig)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
-	env.start(ctx, t, 0)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
 	env.requireBlock(ctx, t, 0)
 
 	coordLabel := env.getCoordinatorLabel(t)
@@ -469,7 +463,7 @@ func TestSidecarRecoveryAfterCoordinatorFailure(t *testing.T) {
 	)
 
 	t.Log("3. Send transactions to ordering service to create block 11 after stopping the coordinator")
-	txs := env.sendTransactions(ctx, t)
+	txs := env.sendGeneratedTransactionsForBlock(ctx, t)
 
 	t.Log("4. Restart the coordinator and validate processing block 11")
 	env.coordinatorServer = mock.StartMockCoordinatorServiceFromListWithConfig(t, env.coordinator,
@@ -486,7 +480,7 @@ func TestSidecarRecoveryAfterCoordinatorFailure(t *testing.T) {
 
 func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnv(t, sidecarTestConfig{})
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{}, test.InsecureTLSConfig)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 
@@ -496,7 +490,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	test.CheckServerStopped(t, coordLabel)
 
 	t.Log("Start the service")
-	env.start(ctx, t, 0)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
 	monitoring.RequireConnectionMetrics(
 		t, coordLabel,
 		env.sidecar.metrics.coordConnection,
@@ -521,9 +515,29 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	}
 }
 
+func TestSidecarVerifyBadTxForm(t *testing.T) {
+	t.Parallel()
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{WithConfigBlock: true}, test.InsecureTLSConfig)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
+	env.requireBlock(ctx, t, 0)
+	txs, expected := MalformedTxTestCases(&workload.TxBuilder{ChannelID: env.ordererEnv.TestConfig.ChanID})
+	testSize := len(expected)
+	t.Logf("sending %d malformed txs", testSize)
+	env.submitTXs(ctx, t, txs)
+	t.Logf("sending %d good txs", blockSize-testSize)
+	extraTxs := env.sendGeneratedTransactions(ctx, t, blockSize-testSize)
+	txs = append(txs, extraTxs...)
+	for range extraTxs {
+		expected = append(expected, protoblocktx.Status_COMMITTED)
+	}
+	env.requireBlockWithTXsAndStatus(ctx, t, 1, txs, expected)
+}
+
 func (env *sidecarTestEnv) getCoordinatorLabel(t *testing.T) string {
 	t.Helper()
-	dialConfig, err := connection.NewLoadBalancedDialConfig(env.config.Committer.Config)
+	dialConfig, err := connection.NewSingleDialConfig(env.config.Committer)
 	require.NoError(t, err)
 	conn, err := connection.Connect(dialConfig)
 	require.NoError(t, err)
@@ -537,54 +551,104 @@ func (env *sidecarTestEnv) sendTransactionsAndEnsureCommitted(
 	expectedBlockNumber uint64,
 ) {
 	t.Helper()
-	txs := env.sendTransactions(ctx, t)
+	txs := env.sendGeneratedTransactionsForBlock(ctx, t)
 	env.requireBlockWithTXs(ctx, t, expectedBlockNumber, txs)
 }
 
-func (env *sidecarTestEnv) sendTransactions(
+func (env *sidecarTestEnv) sendGeneratedTransactionsForBlock(
 	ctx context.Context,
 	t *testing.T,
-) []*protoblocktx.Tx {
+) []*protoloadgen.TX {
 	t.Helper()
-	txIDPrefix := uuid.New().String()
 	// mock-orderer expects <blockSize> txs to create the next block.
-	txs := make([]*protoblocktx.Tx, blockSize)
+	return env.sendGeneratedTransactions(ctx, t, blockSize)
+}
+
+func (env *sidecarTestEnv) sendGeneratedTransactions(
+	ctx context.Context,
+	t *testing.T,
+	count int,
+) []*protoloadgen.TX {
+	t.Helper()
+	txs := make([]*protoloadgen.TX, count)
 	for i := range txs {
-		txs[i] = &protoblocktx.Tx{
-			Id:         txIDPrefix + strconv.Itoa(i),
-			Namespaces: []*protoblocktx.TxNamespace{{NsId: strconv.Itoa(i)}},
-		}
-		_, err := env.ordererEnv.Orderer.SubmitPayload(ctx, env.ordererEnv.TestConfig.ChanID, txs[i])
-		require.NoErrorf(t, err, "tx %d", i)
+		txs[i] = makeValidTx(t, env.ordererEnv.TestConfig.ChanID)
 	}
+	env.submitTXs(ctx, t, txs)
 	return txs
+}
+
+// submitTXs submits the given TXs and register them in the notification service.
+func (env *sidecarTestEnv) submitTXs(ctx context.Context, t *testing.T, txs []*protoloadgen.TX) {
+	t.Helper()
+	txIDs := make([]string, len(txs))
+	for i, tx := range txs {
+		txIDs[i] = tx.Id
+	}
+	err := env.notifyStream.Send(&protonotify.NotificationRequest{
+		TxStatusRequest: &protonotify.TxStatusRequest{
+			TxIds: txIDs,
+		},
+		Timeout: durationpb.New(3 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	// Allows processing the request before submitting the payload.
+	time.Sleep(1 * time.Second)
+
+	for i, tx := range workload.MapToEnvelopeBatch(0, txs) {
+		ok := env.ordererEnv.Orderer.SubmitEnv(ctx, tx)
+		require.True(t, ok, "tx %d", i)
+	}
 }
 
 func (env *sidecarTestEnv) requireBlockWithTXs(
 	ctx context.Context,
 	t *testing.T,
 	expectedBlockNumber uint64,
-	txs []*protoblocktx.Tx,
+	txs []*protoloadgen.TX,
 ) {
 	t.Helper()
+	allValid := make([]protoblocktx.Status, len(txs))
+	for i := range allValid {
+		allValid[i] = protoblocktx.Status_COMMITTED
+	}
+	env.requireBlockWithTXsAndStatus(ctx, t, expectedBlockNumber, txs, allValid)
+}
+
+//nolint:revive // 5 arguments.
+func (env *sidecarTestEnv) requireBlockWithTXsAndStatus(
+	ctx context.Context,
+	t *testing.T,
+	expectedBlockNumber uint64,
+	txs []*protoloadgen.TX,
+	status []protoblocktx.Status,
+) {
+	t.Helper()
+	require.Len(t, status, len(txs))
 	block := env.requireBlock(ctx, t, expectedBlockNumber)
 	require.NotNil(t, block.Data)
 	require.Len(t, block.Data.Data, blockSize)
-	for i := range block.Data.Data {
-		actualEnv, err := protoutil.ExtractEnvelope(block, i)
+	for i, msg := range block.Data.Data {
+		payload, hdr, err := serialization.UnwrapEnvelope(msg)
 		require.NoError(t, err)
-		payload, _, err := serialization.ParseEnvelope(actualEnv)
+		require.Equal(t, txs[i].Id, hdr.TxId)
+		tx, err := serialization.UnmarshalTx(payload)
 		require.NoError(t, err)
-		tx, err := serialization.UnmarshalTx(payload.Data)
-		require.NoError(t, err)
-		require.True(t, proto.Equal(txs[i], tx))
+		require.True(t, proto.Equal(txs[i].Tx, tx))
 	}
 	require.NotNil(t, block.Metadata)
-	require.Len(t, block.Metadata.Metadata, 3)
+	require.GreaterOrEqual(t, len(block.Metadata.Metadata), 3)
 	require.Len(t, block.Metadata.Metadata[2], blockSize)
-	for _, status := range block.Metadata.Metadata[2] {
-		require.Equal(t, valid, status)
+	for i, actualStatus := range block.Metadata.Metadata[2] {
+		require.Equalf(t, status[i].String(), protoblocktx.Status(actualStatus).String(), "tx index: %d", i)
 	}
+
+	txIDs := make([]string, len(txs))
+	for i := range txs {
+		txIDs[i] = txs[i].Id
+	}
+	RequireNotifications(t, env.notifyStream, expectedBlockNumber, txIDs, status)
 }
 
 func (env *sidecarTestEnv) requireBlock(
@@ -594,7 +658,7 @@ func (env *sidecarTestEnv) requireBlock(
 ) *common.Block {
 	t.Helper()
 	checkLastCommittedBlock(ctx, t, env.coordinator, expectedBlockNumber)
-	ensureAtLeastHeight(t, env.sidecar.GetLedgerService(), expectedBlockNumber+1)
+	ensureAtLeastHeight(t, env.sidecar.ledgerService, expectedBlockNumber+1)
 
 	block, ok := channel.NewReader(ctx, env.committedBlock).Read()
 	require.True(t, ok)
@@ -618,7 +682,7 @@ func TestConstructStatuses(t *testing.T) {
 			TxNumber:    3,
 		},
 		"tx3": {
-			Code:        protoblocktx.Status_ABORTED_BLIND_WRITES_NOT_ALLOWED,
+			Code:        protoblocktx.Status_MALFORMED_BLIND_WRITES_NOT_ALLOWED,
 			BlockNumber: 2,
 			TxNumber:    3,
 		},
@@ -635,18 +699,18 @@ func TestConstructStatuses(t *testing.T) {
 		"tx4": types.NewHeight(1, 6),
 	}
 
-	expectedFinalStatuses := []byte{
-		byte(peer.TxValidationCode_VALID),
-		byte(protoblocktx.Status_COMMITTED),
-		byte(peer.TxValidationCode_VALID),
-		byte(protoblocktx.Status_ABORTED_SIGNATURE_INVALID),
-		byte(peer.TxValidationCode_VALID),
-		byte(protoblocktx.Status_ABORTED_DUPLICATE_TXID),
-		byte(protoblocktx.Status_COMMITTED),
+	expectedFinalStatuses := []protoblocktx.Status{
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_ABORTED_SIGNATURE_INVALID,
+		protoblocktx.Status_COMMITTED,
+		protoblocktx.Status_REJECTED_DUPLICATE_TX_ID,
+		protoblocktx.Status_COMMITTED,
 	}
-	actualFinalStatuses := newValidationCodes(7)
+	actualFinalStatuses := make([]protoblocktx.Status, 7)
 	for _, skippedIdx := range []int{0, 2, 4} {
-		actualFinalStatuses[skippedIdx] = byte(peer.TxValidationCode_VALID)
+		actualFinalStatuses[skippedIdx] = protoblocktx.Status_COMMITTED
 	}
 	require.NoError(t, fillStatuses(actualFinalStatuses, statuses, expectedHeight))
 	require.Equal(t, expectedFinalStatuses, actualFinalStatuses)
@@ -665,4 +729,16 @@ func checkLastCommittedBlock(
 		require.NotNil(ct, lastCommittedBlock.Block)
 		require.Equal(ct, expectedBlockNumber, lastCommittedBlock.Block.Number)
 	}, expectedProcessingTime, 50*time.Millisecond)
+}
+
+func makeValidTx(t *testing.T, chanID string) *protoloadgen.TX {
+	t.Helper()
+	txb := workload.TxBuilder{ChannelID: chanID}
+	return txb.MakeTx(&protoblocktx.Tx{
+		Namespaces: []*protoblocktx.TxNamespace{{
+			NsId:        strings.ReplaceAll(uuid.New().String(), "-", "")[:32],
+			NsVersion:   0,
+			BlindWrites: []*protoblocktx.Write{{Key: utils.MustRead(rand.Reader, 32)}},
+		}},
+	})
 }
