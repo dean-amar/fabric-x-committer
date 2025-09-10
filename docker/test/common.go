@@ -128,18 +128,18 @@ func monitorMetrics(t *testing.T, metricsPort string) {
 	}, 15*time.Minute, 100*time.Millisecond)
 }
 
-func retrieveLocalMappedPortDockerContainer(
-	ctx context.Context, t *testing.T, containerName, mappedPort string,
+func containerMappedHostPort(
+	ctx context.Context, t *testing.T, containerName, containerPort string,
 ) string {
 	t.Helper()
 	info, err := createDockerClient(t).ContainerInspect(ctx, containerName)
 	require.NoError(t, err)
 	require.NotNil(t, info)
-	portKey := nat.Port(fmt.Sprintf("%s/%s", mappedPort, "tcp"))
-	value, ok := info.NetworkSettings.Ports[portKey]
+	portKey := nat.Port(fmt.Sprintf("%s/%s", containerPort, "tcp"))
+	bindings, ok := info.NetworkSettings.Ports[portKey]
 	require.True(t, ok)
-	require.NotEmpty(t, value)
-	return value[0].HostPort
+	require.NotEmpty(t, bindings)
+	return bindings[0].HostPort
 }
 
 func createDockerClient(t *testing.T) *client.Client {

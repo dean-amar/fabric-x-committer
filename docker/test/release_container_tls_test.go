@@ -93,7 +93,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 					startCommitterNodeWithReleaseImage(ctx, t, dockerClient, params)
 				}
 			}
-			monitorMetrics(t, retrieveLocalMappedPortDockerContainer(ctx, t, "loadgen", loadGenMetricsPort))
+			monitorMetrics(t, containerMappedHostPort(ctx, t, "loadgen", loadGenMetricsPort))
 		})
 	}
 }

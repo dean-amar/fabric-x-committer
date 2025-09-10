@@ -40,7 +40,7 @@ func TestStartTestNode(t *testing.T) {
 
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint, err := connection.NewEndpoint(
-		"localhost:" + retrieveLocalMappedPortDockerContainer(ctx, t, "committer", sidecarPort),
+		"localhost:" + containerMappedHostPort(ctx, t, "committer", sidecarPort),
 	)
 	require.NoError(t, err)
 	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
@@ -51,7 +51,7 @@ func TestStartTestNode(t *testing.T) {
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
 
-	monitorMetrics(t, retrieveLocalMappedPortDockerContainer(ctx, t, "committer", loadGenMetricsPort))
+	monitorMetrics(t, containerMappedHostPort(ctx, t, "committer", loadGenMetricsPort))
 }
 
 func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Client, name string) {
