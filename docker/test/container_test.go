@@ -51,7 +51,7 @@ func TestStartTestNode(t *testing.T) {
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
 
-	monitorMetrics(t, containerMappedHostPort(ctx, t, "committer", loadGenMetricsPort))
+	monitorMetric(t, containerMappedHostPort(ctx, t, "committer", loadGenMetricsPort))
 }
 
 func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Client, name string) {
@@ -72,12 +72,12 @@ func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Clie
 			// sidecar port binding
 			nat.Port(sidecarPort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: "0",
+				HostPort: "0", // auto port assign
 			}},
 			// loadgen service port bindings
 			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: "0", // auto port catch
+				HostPort: "0", // auto port assign
 			}},
 		},
 	}

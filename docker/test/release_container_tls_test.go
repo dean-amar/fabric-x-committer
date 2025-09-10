@@ -24,7 +24,8 @@ import (
 
 type startNodeParameters struct {
 	credsFactory    *testutils.CredentialsFactory
-	nodeName        string
+	client          *client.Client
+	node            string
 	clientCredsPath string
 	networkName     string
 	tlsMode         string
@@ -61,7 +62,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	t.Cleanup(func() {
 		testutils.RemoveDockerNetwork(t, networkName)
 	})
-
+	credsFactory := testutils.NewCredentialsFactory(t)
 	//nolint:paralleltest // This test is hard to parallelize for several reasons.
 	// We start the sidecar using a genesis block that is precompiled ahead of time.
 	// To run this test in parallel, we would need multiple instances of the same
@@ -72,13 +73,12 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	for _, mode := range testutils.ServerModes {
 		mode := mode
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
-			// one factory per test and client credentials for mutual TLS.
-			credsFactory := testutils.NewCredentialsFactory(t)
 			_, clientCredsPath := credsFactory.CreateClientCredentials(t, mode)
 			for _, name := range serviceNames {
 				params := startNodeParameters{
 					credsFactory:    credsFactory,
-					nodeName:        name,
+					client:          dockerClient,
+					node:            name,
 					clientCredsPath: clientCredsPath,
 					networkName:     networkName,
 					tlsMode:         mode,
@@ -86,14 +86,14 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 
 				switch name {
 				case "db", "orderer":
-					startNodeWithTestImage(ctx, t, dockerClient, params)
+					startNodeWithTestImage(ctx, t, params)
 				case "loadgen":
-					startLoadgenNodeWithReleaseImage(ctx, t, dockerClient, params)
+					startLoadgenNodeWithReleaseImage(ctx, t, params)
 				default:
-					startCommitterNodeWithReleaseImage(ctx, t, dockerClient, params)
+					startCommitterNodeWithReleaseImage(ctx, t, params)
 				}
 			}
-			monitorMetrics(t, containerMappedHostPort(ctx, t, "loadgen", loadGenMetricsPort))
+			monitorMetric(t, containerMappedHostPort(ctx, t, "loadgen", loadGenMetricsPort))
 		})
 	}
 }
@@ -102,21 +102,16 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 func startCommitterNodeWithReleaseImage(
 	ctx context.Context,
 	t *testing.T,
-	dockerClient *client.Client,
 	params startNodeParameters,
 ) {
 	t.Helper()
-
-	cfgPath := filepath.Join(mustGetWD(t), localConfigPath)
-	serverName := params.nodeName
-
 	containerCfg := &container.Config{
 		Image: committerReleaseImage,
 		Cmd: []string{
 			"committer",
-			fmt.Sprintf("start-%s", serverName),
+			fmt.Sprintf("start-%s", params.node),
 			"--config",
-			fmt.Sprintf("%s/%s.yaml", containerConfigPath, serverName),
+			fmt.Sprintf("%s/%s.yaml", containerConfigPath, params.node),
 		},
 		Env: []string{
 			"SC_COORDINATOR_SERVER_TLS_MODE=" + params.tlsMode,
@@ -131,7 +126,7 @@ func startCommitterNodeWithReleaseImage(
 		Tty: true,
 	}
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, serverName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.node)
 	require.NotEmpty(t, serverCredsPath)
 
 	hostCfg := &container.HostConfig{
@@ -139,15 +134,18 @@ func startCommitterNodeWithReleaseImage(
 		Binds: assembleBinds(t,
 			serverCredsPath,
 			params.clientCredsPath,
-			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", cfgPath, serverName, containerConfigPath, serverName),
+			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml",
+				filepath.Join(mustGetWD(t), localConfigPath), params.node,
+				containerConfigPath, params.node,
+			),
 		),
 	}
 
 	createContainerAndItsLogs(ctx, t, createContainerParameters{
-		dockerClient:    dockerClient,
+		dockerClient:    params.client,
 		containerConfig: containerCfg,
 		hostConfig:      hostCfg,
-		name:            serverName,
+		name:            params.node,
 	})
 }
 
@@ -155,21 +153,16 @@ func startCommitterNodeWithReleaseImage(
 func startLoadgenNodeWithReleaseImage(
 	ctx context.Context,
 	t *testing.T,
-	dockerClient *client.Client,
 	params startNodeParameters,
 ) {
 	t.Helper()
-
-	cfgPath := filepath.Join(mustGetWD(t), localConfigPath)
-	serverName := params.nodeName
-
 	containerCfg := &container.Config{
 		Image: loadgenReleaseImage,
 		Cmd: []string{
-			serverName,
+			params.node,
 			"start",
 			"--config",
-			fmt.Sprintf("%s/%s.yaml", containerConfigPath, serverName),
+			fmt.Sprintf("%s/%s.yaml", containerConfigPath, params.node),
 		},
 		ExposedPorts: nat.PortSet{
 			nat.Port(loadGenMetricsPort + "/tcp"): {},
@@ -181,7 +174,7 @@ func startLoadgenNodeWithReleaseImage(
 		},
 	}
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, serverName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.node)
 	require.NotEmpty(t, serverCredsPath)
 
 	hostCfg := &container.HostConfig{
@@ -189,39 +182,41 @@ func startLoadgenNodeWithReleaseImage(
 		PortBindings: nat.PortMap{
 			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: "0", // auto port catch
+				HostPort: "0", // auto port assign
 			}},
 		},
 		Binds: assembleBinds(t,
 			serverCredsPath,
 			params.clientCredsPath,
-			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml", cfgPath, serverName, containerConfigPath, serverName),
+			fmt.Sprintf("%s/%s.yaml:/%s/%s.yaml",
+				filepath.Join(mustGetWD(t), localConfigPath), params.node,
+				containerConfigPath, params.node,
+			),
 		),
 	}
 
 	createContainerAndItsLogs(ctx, t, createContainerParameters{
-		dockerClient:    dockerClient,
+		dockerClient:    params.client,
 		containerConfig: containerCfg,
 		hostConfig:      hostCfg,
-		name:            serverName,
+		name:            params.node,
 	})
 }
 
-// startNodeWithTestImage starts a basic test node (e.g., DB, orderer) using the test image.
+// startNodeWithTestImage starts a committer node using the test image (used for: DB, orderer).
 func startNodeWithTestImage(
 	ctx context.Context,
 	t *testing.T,
-	dockerClient *client.Client,
 	params startNodeParameters,
 ) {
 	t.Helper()
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.nodeName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.node)
 	require.NotEmpty(t, serverCredsPath)
 
 	containerCfg := &container.Config{
 		Image: testNodeImage,
-		Cmd:   []string{"run", params.nodeName},
+		Cmd:   []string{"run", params.node},
 		Tty:   true,
 		Env: []string{
 			"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
@@ -234,16 +229,17 @@ func startNodeWithTestImage(
 			serverCredsPath,
 			params.clientCredsPath,
 			fmt.Sprintf("%s/%s-release.proto.bin:/%s/%s.proto.bin",
-				filepath.Join(mustGetWD(t), binPath), genBlock, containerConfigPath, genBlock,
+				filepath.Join(mustGetWD(t), binPath), genBlock,
+				containerConfigPath, genBlock,
 			),
 		),
 	}
 
 	createContainerAndItsLogs(ctx, t, createContainerParameters{
-		dockerClient:    dockerClient,
+		dockerClient:    params.client,
 		containerConfig: containerCfg,
 		hostConfig:      hostCfg,
-		name:            params.nodeName,
+		name:            params.node,
 	})
 }
 

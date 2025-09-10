@@ -70,6 +70,25 @@ func createContainerAndItsLogs(
 	}()
 }
 
+func monitorMetric(t *testing.T, metricsPort string) {
+	t.Helper()
+	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + metricsPort)
+	require.NoError(t, err)
+
+	t.Logf("Check the load generator metrics from: %s", metricsURL)
+	// We check often since the load generator's metrics might be closed if the limit is reached.
+	// We log only if there are changes to avoid spamming the log.
+	prevCount := -1
+	require.Eventually(t, func() bool {
+		count := test.GetMetricValueFromURL(t, metricsURL, monitoredMetric)
+		if prevCount != count {
+			t.Logf("%s: %d", monitoredMetric, count)
+		}
+		prevCount = count
+		return count > 1_000
+	}, 15*time.Minute, 100*time.Millisecond)
+}
+
 func stopAndRemoveContainersByName(ctx context.Context, t *testing.T, dockerClient *client.Client, names ...string) {
 	t.Helper()
 	list, err := dockerClient.ContainerList(ctx, container.ListOptions{
@@ -107,25 +126,6 @@ func stopAndRemoveID(ctx context.Context, t *testing.T, dockerClient *client.Cli
 	if err != nil {
 		t.Logf("unable to remove container: %s", err)
 	}
-}
-
-func monitorMetrics(t *testing.T, metricsPort string) {
-	t.Helper()
-	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + metricsPort)
-	require.NoError(t, err)
-
-	t.Logf("Check the load generator metrics from: %s", metricsURL)
-	// We check often since the load generator's metrics might be closed if the limit is reached.
-	// We log only if there are changes to avoid spamming the log.
-	prevCount := -1
-	require.Eventually(t, func() bool {
-		count := test.GetMetricValueFromURL(t, metricsURL, monitoredMetric)
-		if prevCount != count {
-			t.Logf("%s: %d", monitoredMetric, count)
-		}
-		prevCount = count
-		return count > 1_000
-	}, 15*time.Minute, 100*time.Millisecond)
 }
 
 func containerMappedHostPort(
