@@ -39,8 +39,8 @@ type (
 	createTLSConfigParameters struct {
 		connectionMode string
 		keyPair        *tlsgen.CertKeyPair
-		caCertificate  []byte
-		namingFunction func(key string) string
+		namingStyle    CertStyle
+		san            string
 	}
 
 	// ServerStarter is a function that receives a TLS configuration, starts the server,
@@ -98,11 +98,11 @@ func (scm *CredentialsFactory) CreateServerCredentials(
 	t.Helper()
 	serverKeypair, err := scm.CertificateAuthority.NewServerCertKeyPair(san)
 	require.NoError(t, err)
-	return createTLSConfig(t, createTLSConfigParameters{
-		tlsMode,
-		serverKeypair,
-		scm.CertificateAuthority.CertBytes(),
-		selectFileNames(namingStyle, san),
+	return scm.createTLSConfig(t, createTLSConfigParameters{
+		connectionMode: tlsMode,
+		keyPair:        serverKeypair,
+		namingStyle:    namingStyle,
+		san:            san,
 	})
 }
 
@@ -112,11 +112,10 @@ func (scm *CredentialsFactory) CreateClientCredentials(t *testing.T, tlsMode str
 	t.Helper()
 	clientKeypair, err := scm.CertificateAuthority.NewClientCertKeyPair()
 	require.NoError(t, err)
-	return createTLSConfig(t, createTLSConfigParameters{
-		tlsMode,
-		clientKeypair,
-		scm.CertificateAuthority.CertBytes(),
-		selectFileNames(CertStyleDefault, ""),
+	return scm.createTLSConfig(t, createTLSConfigParameters{
+		connectionMode: tlsMode,
+		keyPair:        clientKeypair,
+		namingStyle:    CertStyleDefault,
 	})
 }
 
@@ -221,13 +220,13 @@ func CreateClientWithTLS[T any](
 
 // createTLSConfig creates and returns a TLS configuration based on the
 // given TLS mode and the credential bytes.
-func createTLSConfig(
+func (scm *CredentialsFactory) createTLSConfig(
 	t *testing.T,
 	params createTLSConfigParameters,
 ) (connection.TLSConfig, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	namingFunction := params.namingFunction
+	namingFunction := selectFileNames(params.namingStyle, params.san)
 	//nolint:gofumpt //Note: gofumpt reports this line as improperly formatted, but no actual formatting issue exists.
 	if sub := namingFunction(keySubDirectory); sub != "" {
 		tmpDir = filepath.Join(tmpDir, sub)
@@ -241,7 +240,7 @@ func createTLSConfig(
 	require.NoError(t, os.WriteFile(publicKeyPath, params.keyPair.Cert, 0o600))
 
 	caCertificatePath := filepath.Join(tmpDir, namingFunction("ca-certificate"))
-	require.NoError(t, os.WriteFile(caCertificatePath, params.caCertificate, 0o600))
+	require.NoError(t, os.WriteFile(caCertificatePath, scm.CertificateAuthority.CertBytes(), 0o600))
 
 	return connection.TLSConfig{
 		Mode:        params.connectionMode,
