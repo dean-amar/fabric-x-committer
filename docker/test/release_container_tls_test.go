@@ -52,7 +52,6 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	ctx := t.Context()
 	dockerClient := createDockerClient(t)
 
-	// creates a problem - we cant make this test in parallel because of the names if mess to use, we will need to change them in the
 	serviceNames := []string{"db", "verifier", "vc", "query", "coordinator", "sidecar", "orderer", "loadgen"}
 	stopAndRemoveContainersByName(ctx, t, dockerClient, serviceNames...)
 
@@ -63,13 +62,19 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 		testutils.RemoveDockerNetwork(t, networkName)
 	})
 
+	//nolint:paralleltest // This test is hard to parallelize for several reasons.
+	// We start the sidecar using a genesis block that is precompiled ahead of time.
+	// To run this test in parallel, we would need multiple instances of the same
+	// services with unique names, which would require regenerating the genesis block
+	// for each instance.
+	// We would also need to adjust the YAML configuration to support distinct
+	// hostnames, which would add unnecessary complexity.
 	for _, mode := range testutils.ServerModes {
 		mode := mode
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			// one factory per test and client credentials for mutual TLS.
 			credsFactory := testutils.NewCredentialsFactory(t)
 			_, clientCredsPath := credsFactory.CreateClientCredentials(t, mode)
-
 			for _, name := range serviceNames {
 				params := startNodeParameters{
 					credsFactory:    credsFactory,
@@ -88,7 +93,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 					startCommitterNodeWithReleaseImage(ctx, t, dockerClient, params)
 				}
 			}
-			monitorMetrics(t, retrieveLocalMappedPortDockerContainer(t, "loadgen", loadGenMetricsPort))
+			monitorMetrics(t, retrieveLocalMappedPortDockerContainer(ctx, t, "loadgen", loadGenMetricsPort))
 		})
 	}
 }
