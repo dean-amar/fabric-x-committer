@@ -62,7 +62,7 @@ type (
 func StartPostgresCluster(ctx context.Context, t *testing.T) (*PostgresClusterController, *dbtest.Connection) {
 	t.Helper()
 
-	if runtime.GOOS != linuxOS {
+	if runtime.GOOS != "linux" {
 		t.Skip("Container IP access not supported on non-linux Docker")
 	}
 
@@ -96,7 +96,7 @@ func (cc *PostgresClusterController) addPrimaryNode(ctx context.Context, t *test
 		},
 	})
 	node.StartContainer(ctx, t)
-	node.EnsureNodeReadiness(t, "database system is ready to accept connections")
+	node.EnsureNodeReadiness(t, dbtest.PostgresReadinessOutput)
 	return node
 }
 

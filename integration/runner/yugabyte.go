@@ -76,7 +76,7 @@ func StartYugaCluster(ctx context.Context, t *testing.T, numberOfMasters, number
 ) {
 	t.Helper()
 
-	if runtime.GOOS != linuxOS {
+	if runtime.GOOS != "linux" {
 		t.Skip("Container IP access not supported on non-linux Docker")
 	}
 
@@ -91,7 +91,7 @@ func StartYugaCluster(ctx context.Context, t *testing.T, numberOfMasters, number
 		replicationFactor: rf,
 		networkName:       fmt.Sprintf("%s%s", networkPrefix, uuid.NewString()),
 	}
-	dbtest.CreateDockerNetwork(t, cluster.networkName)
+	dbtest.CreateDockerNetwork(t, cluster.networkName, nil)
 	t.Cleanup(func() {
 		dbtest.RemoveDockerNetwork(t, cluster.networkName)
 	})

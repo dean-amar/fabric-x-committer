@@ -41,10 +41,10 @@ const (
 	gb         = 1 << 30 // gb is the number of bytes needed to represent 1 GB.
 	memorySwap = -1      // memorySwap disable memory swaps (don't store data on disk)
 
-	// ContainerPathForYugabytePassword holds the path to the database credentials.
-	// This work-around is needed due to a Yugabyte bug that prevents using default passwords in secure mode.
+	// containerPathForYugabytePassword holds the path to the database credentials inside the docker container.
+	// This work-around is needed due to a Yugabyte behavior that prevents using default passwords in secure mode.
 	// Instead, Yugabyte generates a random password, and this path points to the output file containing it.
-	ContainerPathForYugabytePassword = "/root/var/data/yugabyted_credentials.txt" //nolint:gosec
+	containerPathForYugabytePassword = "/root/var/data/yugabyted_credentials.txt" //nolint:gosec
 
 	defaultSubnet                 = "172.28.0.0/16"
 	defaultGateway                = "172.28.0.1"
@@ -53,8 +53,8 @@ const (
 
 	defaultPostgresServerName = "database"
 
-	// YugabyteReadinessOutput is the output indicating that a Yugabyte node is ready.
-	YugabyteReadinessOutput = "Data placement constraint successfully verified"
+	// YugabytedReadinessOutput is the output indicating that a Yugabyte node is ready.
+	YugabytedReadinessOutput = "Data placement constraint successfully verified"
 	// PostgresReadinessOutput is the output indicating that a Postgres node is ready.
 	PostgresReadinessOutput = "database system is ready to accept connections"
 )
@@ -116,7 +116,7 @@ type DatabaseContainer struct {
 
 type containerCreds struct {
 	CredsPath  string
-	CACertPath string
+	CACertPath []string
 	ServerName string
 }
 
@@ -231,8 +231,7 @@ func (dc *DatabaseContainer) setTLSPropertiesForDatabase(t *testing.T) {
 	}
 
 	dc.Creds = containerCreds{
-		CredsPath:  credsPathDir,
-		CACertPath: tlsConfig.CACertPaths[0],
+		CACertPath: tlsConfig.CACertPaths,
 		ServerName: serverName,
 	}
 	dc.Binds = append(dc.Binds, credsPathDir+":/creds")
@@ -259,7 +258,12 @@ func (dc *DatabaseContainer) configureYugabyteTLS(
 	tlsManager *test.CredentialsFactory,
 ) (connection.TLSConfig, string) {
 	t.Helper()
-	dc.Network = CreateDockerNetworkWithSubnet(t, defaultNetworkName, defaultSubnet, defaultGateway).Name
+	dc.Network = CreateDockerNetwork(t, defaultNetworkName,
+		&docker.IPAMOptions{
+			Config: []docker.IPAMConfig{
+				{Subnet: defaultSubnet, Gateway: defaultGateway},
+			},
+		}).Name
 	t.Cleanup(func() {
 		RemoveDockerNetwork(t, defaultNetworkName)
 	})
@@ -528,8 +532,7 @@ func (dc *DatabaseContainer) EnsureNodeReadiness(t *testing.T, requiredOutput st
 // fixCertificatePermissions fixes the ownership of the TLS certificates inside the container.
 func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T,
 	user,
-	containerPublicKeyPath,
-	containerPrivateKeyPath string,
+	containerPublicKeyPath, containerPrivateKeyPath string,
 ) {
 	t.Helper()
 
@@ -542,38 +545,14 @@ func (dc *DatabaseContainer) fixCertificatePermissions(t *testing.T,
 	require.NoError(t, dc.client.StartExec(exec.ID, docker.StartExecOptions{}))
 }
 
-// CreateDockerNetworkWithSubnet creates a network if it doesn't exist.
-func CreateDockerNetworkWithSubnet(t *testing.T, name, subnet, gateway string) *docker.Network {
-	t.Helper()
-	client := GetDockerClient(t)
-	network, err := client.NetworkInfo(name)
-	if err == nil {
-		t.Logf("network %s already exists", name)
-		return network
-	}
-
-	network, err = client.CreateNetwork(docker.CreateNetworkOptions{
-		Name:   name,
-		Driver: "bridge",
-		IPAM: &docker.IPAMOptions{
-			Config: []docker.IPAMConfig{
-				{Subnet: subnet, Gateway: gateway},
-			},
-		},
-	})
-	require.NoError(t, err, "failed to create network")
-
-	t.Logf("network %s created", network.Name)
-	return network
-}
-
 // CreateDockerNetwork creates a network if it doesn't exist.
-func CreateDockerNetwork(t *testing.T, name string) *docker.Network {
+func CreateDockerNetwork(t *testing.T, name string, opts *docker.IPAMOptions) *docker.Network {
 	t.Helper()
 	client := GetDockerClient(t)
 	network, err := client.CreateNetwork(docker.CreateNetworkOptions{
 		Name:   name,
 		Driver: "bridge",
+		IPAM:   opts,
 	})
 	if errors.Is(err, docker.ErrNetworkAlreadyExists) {
 		t.Logf("network %s already exists", name)

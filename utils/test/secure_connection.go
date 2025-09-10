@@ -254,20 +254,18 @@ func createTLSConfig(
 func selectFileNames(style CertStyle, serverName string) func(string) string {
 	switch style {
 	case CertStyleYugabyte:
-		suffix := fmt.Sprintf(".%s", serverName)
 		return func(key string) string {
 			switch key {
 			case KeyPrivate:
-				return "node" + suffix + ".key"
+				return fmt.Sprintf("node.%s.key", serverName)
 			case KeyPublic:
-				return "node" + suffix + ".crt"
+				return fmt.Sprintf("node.%s.crt", serverName)
 			case KeyCACert:
 				return caCertFileName
 			default:
 				return ""
 			}
 		}
-
 	case CertStylePostgres:
 		return func(key string) string {
 			switch key {
@@ -281,7 +279,6 @@ func selectFileNames(style CertStyle, serverName string) func(string) string {
 				return ""
 			}
 		}
-
 	default:
 		return func(key string) string {
 			switch key {

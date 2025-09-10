@@ -13,6 +13,7 @@ import (
 	"encoding/base32"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,10 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType string) *Connection {
 	t.Helper()
 
+	if runtime.GOOS != "linux" {
+		t.Skip("Container IP access not supported on non-linux Docker")
+	}
+
 	node := &DatabaseContainer{
 		DatabaseType: dbType,
 		UseTLS:       true,
@@ -147,7 +152,7 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 	conn := node.getConnectionOptions(ctx, t)
 
 	conn.Creds = connection.DatabaseCreds{
-		CAPaths:    []string{node.Creds.CACertPath},
+		CAPaths:    node.Creds.CACertPath,
 		ServerName: node.Creds.ServerName,
 	}
 
@@ -158,8 +163,8 @@ func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType
 			fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP),
 			fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP),
 		)
-		node.EnsureNodeReadiness(t, YugabyteReadinessOutput)
-		conn.Password = node.readPasswordFromContainer(t, ContainerPathForYugabytePassword)
+		node.EnsureNodeReadiness(t, YugabytedReadinessOutput)
+		conn.Password = node.readPasswordFromContainer(t, containerPathForYugabytePassword)
 	case PostgresDBType:
 		node.fixCertificatePermissions(t,
 			"postgres:postgres",
