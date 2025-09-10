@@ -73,7 +73,7 @@ func TestLoadGenForVCService(t *testing.T) {
 		clientConf.Limit = limit
 		t.Run(limitToString(limit), func(t *testing.T) {
 			t.Parallel()
-			env := vc.NewValidatorAndCommitServiceTestEnvWithTLS(t, 2, test.DefaultTLSConfig)
+			env := vc.NewValidatorAndCommitServiceTestEnvWithTLS(t, 2, test.InsecureTLSConfig)
 			clientConf.Adapter.VCClient = test.NewInsecureMultiClientConfig(env.Endpoints...)
 			testLoadGenerator(t, clientConf)
 		})
@@ -99,7 +99,7 @@ func startVerifiers(t *testing.T) *connection.MultiClientConfig {
 	endpoints := make([]*connection.Endpoint, 2)
 	for i := range endpoints {
 		sConf := &verifier.Config{
-			Server: connection.NewLocalHostServerWithTLS(test.DefaultTLSConfig),
+			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 			ParallelExecutor: verifier.ExecutorConfig{
 				BatchSizeCutoff:   50,
 				BatchTimeCutoff:   10 * time.Millisecond,
@@ -130,7 +130,7 @@ func TestLoadGenForCoordinator(t *testing.T) {
 			_, vcServer := mock.StartMockVCService(t, 1)
 
 			cConf := &coordinator.Config{
-				Server:             connection.NewLocalHostServerWithTLS(test.DefaultTLSConfig),
+				Server:             connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 				Monitoring:         defaultMonitoring(),
 				Verifier:           *test.ServerToMultiClientConfig(sigVerServer.Configs...),
 				ValidatorCommitter: *test.ServerToMultiClientConfig(vcServer.Configs...),
@@ -225,7 +225,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 			endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 			sidecarConf := &sidecar.Config{
-				Server: connection.NewLocalHostServerWithTLS(test.DefaultTLSConfig),
+				Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 				Orderer: ordererconn.Config{
 					Connection: ordererconn.ConnectionConfig{
 						Endpoints: endpoints,
@@ -313,7 +313,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 
 func preAllocatePorts(t *testing.T) *connection.ServerConfig {
 	t.Helper()
-	server := connection.NewLocalHostServerWithTLS(test.DefaultTLSConfig)
+	server := connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig)
 	listener, err := server.PreAllocateListener()
 	require.NoError(t, err)
 	t.Cleanup(func() {

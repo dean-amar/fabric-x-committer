@@ -35,7 +35,7 @@ const (
 	loadgenReleaseImage   = "icr.io/cbdc/loadgen:0.0.2"
 
 	// To support parallel run of the two container images, we need to use different port for the Loadgen
-	// These ports are used in the test-image test.
+	// The port is being used in the test-image test.
 	loadGenMetricsReleaseImagePort = "2119"
 
 	networkPrefix = "sc_network"
@@ -48,8 +48,9 @@ const (
 	binPath = "../../bin"
 )
 
-// TestCommitterNodesWithTLS runs each committer component in Docker and verifies
+// TestCommitterNodesWithTLS runs each committer component in Docker container and verifies
 // it starts with TLS enabled and connects successfully.
+// This test uses the release images for all the components but 'db' and 'orderer'.
 func TestCommitterNodesWithTLS(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -163,7 +164,7 @@ func startLoadgenNodeWithReleaseImage(
 		},
 	}
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, serverName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, serverName)
 	require.NotEmpty(t, serverCredsPath)
 
 	hostCfg := &container.HostConfig{
@@ -198,7 +199,7 @@ func startNodeWithTestImage(
 ) {
 	t.Helper()
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.nodeName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, params.nodeName)
 	require.NotEmpty(t, serverCredsPath)
 
 	containerCfg := &container.Config{

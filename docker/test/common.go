@@ -49,7 +49,7 @@ func createContainerAndItsLogs(
 
 	//nolint:contextcheck // We want to ensure cleanup when the test is done.
 	t.Cleanup(func() {
-		stopAndRemoveID(context.Background(), t, dockerClient, resp.ID)
+		stopAndRemoveID(t.Context(), t, dockerClient, resp.ID)
 	})
 
 	require.NoError(t, dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}))
