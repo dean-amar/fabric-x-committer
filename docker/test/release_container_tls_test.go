@@ -19,7 +19,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
@@ -28,6 +27,7 @@ type startNodeParameters struct {
 	nodeName        string
 	clientCredsPath string
 	networkName     string
+	tlsMode         string
 }
 
 const (
@@ -52,6 +52,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	ctx := t.Context()
 	dockerClient := createDockerClient(t)
 
+	// creates a problem - we cant make this test in parallel because of the names if mess to use, we will need to change them in the
 	serviceNames := []string{"db", "verifier", "vc", "query", "coordinator", "sidecar", "orderer", "loadgen"}
 	stopAndRemoveContainersByName(ctx, t, dockerClient, serviceNames...)
 
@@ -62,29 +63,34 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 		testutils.RemoveDockerNetwork(t, networkName)
 	})
 
-	// one factory per test and client credentials for mutual TLS.
-	credsFactory := testutils.NewCredentialsFactory(t)
-	_, clientCredsPath := credsFactory.CreateClientCredentials(t, connection.MutualTLSMode)
+	for _, mode := range testutils.ServerModes {
+		mode := mode
+		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
+			// one factory per test and client credentials for mutual TLS.
+			credsFactory := testutils.NewCredentialsFactory(t)
+			_, clientCredsPath := credsFactory.CreateClientCredentials(t, mode)
 
-	for _, name := range serviceNames {
-		params := startNodeParameters{
-			credsFactory:    credsFactory,
-			nodeName:        name,
-			clientCredsPath: clientCredsPath,
-			networkName:     networkName,
-		}
+			for _, name := range serviceNames {
+				params := startNodeParameters{
+					credsFactory:    credsFactory,
+					nodeName:        name,
+					clientCredsPath: clientCredsPath,
+					networkName:     networkName,
+					tlsMode:         mode,
+				}
 
-		switch name {
-		case "db", "orderer":
-			startNodeWithTestImage(ctx, t, dockerClient, params)
-		case "loadgen":
-			startLoadgenNodeWithReleaseImage(ctx, t, dockerClient, params)
-		default:
-			startCommitterNodeWithReleaseImage(ctx, t, dockerClient, params)
-		}
+				switch name {
+				case "db", "orderer":
+					startNodeWithTestImage(ctx, t, dockerClient, params)
+				case "loadgen":
+					startLoadgenNodeWithReleaseImage(ctx, t, dockerClient, params)
+				default:
+					startCommitterNodeWithReleaseImage(ctx, t, dockerClient, params)
+				}
+			}
+			monitorMetrics(t, retrieveLocalMappedPortDockerContainer(t, "loadgen", loadGenMetricsPort))
+		})
 	}
-
-	monitorMetrics(t, retrieveLocalMappedPortDockerContainer(t, "loadgen", loadGenMetricsPort))
 }
 
 // startCommitterNodeWithReleaseImage starts a committer node using the release image.
@@ -107,10 +113,20 @@ func startCommitterNodeWithReleaseImage(
 			"--config",
 			fmt.Sprintf("%s/%s.yaml", containerConfigPath, serverName),
 		},
+		Env: []string{
+			"SC_COORDINATOR_SERVER_TLS_MODE=" + params.tlsMode,
+			"SC_COORDINATOR_VERIFIER_TLS_MODE=" + params.tlsMode,
+			"SC_COORDINATOR_VALIDATOR_COMMITTER_TLS_MODE=" + params.tlsMode,
+			"SC_QUERY_SERVER_TLS_MODE=" + params.tlsMode,
+			"SC_SIDECAR_SERVER_TLS_MODE=" + params.tlsMode,
+			"SC_SIDECAR_COMMITTER_TLS_MODE=" + params.tlsMode,
+			"SC_VC_SERVER_TLS_MODE=" + params.tlsMode,
+			"SC_VERIFIER_SERVER_TLS_MODE=" + params.tlsMode,
+		},
 		Tty: true,
 	}
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, serverName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, serverName)
 	require.NotEmpty(t, serverCredsPath)
 
 	hostCfg := &container.HostConfig{
@@ -154,9 +170,13 @@ func startLoadgenNodeWithReleaseImage(
 			nat.Port(loadGenMetricsPort + "/tcp"): {},
 		},
 		Tty: true,
+		Env: []string{
+			"SC_LOADGEN_SERVER_TLS_MODE=" + params.tlsMode,
+			"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
+		},
 	}
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, serverName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, serverName)
 	require.NotEmpty(t, serverCredsPath)
 
 	hostCfg := &container.HostConfig{
@@ -191,13 +211,16 @@ func startNodeWithTestImage(
 ) {
 	t.Helper()
 
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, params.nodeName)
+	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.nodeName)
 	require.NotEmpty(t, serverCredsPath)
 
 	containerCfg := &container.Config{
 		Image: testNodeImage,
 		Cmd:   []string{"run", params.nodeName},
 		Tty:   true,
+		Env: []string{
+			"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
+		},
 	}
 
 	hostCfg := &container.HostConfig{
