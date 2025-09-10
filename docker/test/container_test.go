@@ -39,7 +39,9 @@ func TestStartTestNode(t *testing.T) {
 	startCommitter(ctx, t, dockerClient, "committer")
 
 	t.Log("Try to fetch the first block")
-	sidecarEndpoint, err := connection.NewEndpoint("localhost:" + sidecarPort)
+	sidecarEndpoint, err := connection.NewEndpoint(
+		"localhost:" + retrieveLocalMappedPortDockerContainer(t, "committer", sidecarPort),
+	)
 	require.NoError(t, err)
 	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
 		ChannelID: channelName,
@@ -49,7 +51,7 @@ func TestStartTestNode(t *testing.T) {
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
 
-	monitorMetrics(t, loadGenMetricsPort)
+	monitorMetrics(t, retrieveLocalMappedPortDockerContainer(t, "committer", loadGenMetricsPort))
 }
 
 func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Client, name string) {
@@ -70,12 +72,12 @@ func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Clie
 			// sidecar port binding
 			nat.Port(sidecarPort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: sidecarPort,
+				HostPort: "0",
 			}},
 			// loadgen service port bindings
 			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: loadGenMetricsPort,
+				HostPort: "0", // auto port catch
 			}},
 		},
 	}

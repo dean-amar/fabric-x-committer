@@ -485,6 +485,7 @@ func newMonitoringConfig(host string, port int) monitoring.Config {
 	}
 }
 
+//nolint:unparam // currently, we use this function only with host:""
 func newServerConfigWithDefaultTLSConfig(host string, port int) *connection.ServerConfig {
 	serverConfig := newServerConfig(host, port)
 	serverConfig.TLS = defaultServerTLSConfig

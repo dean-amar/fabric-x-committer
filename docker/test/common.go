@@ -8,6 +8,7 @@ package test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -49,7 +51,7 @@ func createContainerAndItsLogs(
 
 	//nolint:contextcheck // We want to ensure cleanup when the test is done.
 	t.Cleanup(func() {
-		stopAndRemoveID(t.Context(), t, dockerClient, resp.ID)
+		stopAndRemoveID(context.Background(), t, dockerClient, resp.ID)
 	})
 
 	require.NoError(t, dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}))
@@ -107,14 +109,6 @@ func stopAndRemoveID(ctx context.Context, t *testing.T, dockerClient *client.Cli
 	}
 }
 
-func createDockerClient(t *testing.T) *client.Client {
-	t.Helper()
-	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	require.NoError(t, err)
-	defer connection.CloseConnectionsLog(dockerClient)
-	return dockerClient
-}
-
 func monitorMetrics(t *testing.T, metricsPort string) {
 	t.Helper()
 	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + metricsPort)
@@ -132,4 +126,24 @@ func monitorMetrics(t *testing.T, metricsPort string) {
 		prevCount = count
 		return count > 1_000
 	}, 15*time.Minute, 100*time.Millisecond)
+}
+
+func retrieveLocalMappedPortDockerContainer(t *testing.T, containerName, mappedPort string) string {
+	t.Helper()
+	info, err := createDockerClient(t).ContainerInspect(t.Context(), containerName)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	portKey := nat.Port(fmt.Sprintf("%s/%s", mappedPort, "tcp"))
+	value, ok := info.NetworkSettings.Ports[portKey]
+	require.True(t, ok)
+	require.NotEmpty(t, value)
+	return value[0].HostPort
+}
+
+func createDockerClient(t *testing.T) *client.Client {
+	t.Helper()
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	require.NoError(t, err)
+	defer connection.CloseConnectionsLog(dockerClient)
+	return dockerClient
 }

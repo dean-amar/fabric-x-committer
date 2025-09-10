@@ -34,10 +34,6 @@ const (
 	committerReleaseImage = "icr.io/cbdc/committer:0.0.2"
 	loadgenReleaseImage   = "icr.io/cbdc/loadgen:0.0.2"
 
-	// To support parallel run of the two container images, we need to use different port for the Loadgen
-	// The port is being used in the test-image test.
-	loadGenMetricsReleaseImagePort = "2119"
-
 	networkPrefix = "sc_network"
 	genBlock      = "sc-genesis-block"
 	// containerConfigPath is the path to the config directory inside the container.
@@ -88,7 +84,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 		}
 	}
 
-	monitorMetrics(t, loadGenMetricsReleaseImagePort)
+	monitorMetrics(t, retrieveLocalMappedPortDockerContainer(t, "loadgen", loadGenMetricsPort))
 }
 
 // startCommitterNodeWithReleaseImage starts a committer node using the release image.
@@ -155,13 +151,9 @@ func startLoadgenNodeWithReleaseImage(
 			fmt.Sprintf("%s/%s.yaml", containerConfigPath, serverName),
 		},
 		ExposedPorts: nat.PortSet{
-			nat.Port(loadGenMetricsReleaseImagePort + "/tcp"): {},
+			nat.Port(loadGenMetricsPort + "/tcp"): {},
 		},
 		Tty: true,
-		// Set the monitoring server endpoint to match the exposed port.
-		Env: []string{
-			fmt.Sprintf("SC_LOADGEN_MONITORING_SERVER_ENDPOINT=:%s", loadGenMetricsReleaseImagePort),
-		},
 	}
 
 	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, connection.MutualTLSMode, serverName)
@@ -170,9 +162,9 @@ func startLoadgenNodeWithReleaseImage(
 	hostCfg := &container.HostConfig{
 		NetworkMode: container.NetworkMode(params.networkName),
 		PortBindings: nat.PortMap{
-			nat.Port(loadGenMetricsReleaseImagePort + "/tcp"): []nat.PortBinding{{
+			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
 				HostIP:   "localhost",
-				HostPort: loadGenMetricsReleaseImagePort,
+				HostPort: "0", // auto port catch
 			}},
 		},
 		Binds: assembleBinds(t,
