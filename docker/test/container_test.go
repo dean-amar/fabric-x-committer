@@ -56,36 +56,33 @@ func TestStartTestNode(t *testing.T) {
 
 func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Client, name string) {
 	t.Helper()
-	containerCfg := &container.Config{
-		Image: testNodeImage,
-		Cmd:   []string{"run", "db", "committer", "orderer", "loadgen"},
-		ExposedPorts: nat.PortSet{
-			nat.Port(sidecarPort + "/tcp"):        struct{}{},
-			nat.Port(loadGenMetricsPort + "/tcp"): struct{}{},
-		},
-		Tty: true,
-	}
-
-	hostCfg := &container.HostConfig{
-		NetworkMode: network.NetworkDefault,
-		PortBindings: nat.PortMap{
-			// sidecar port binding
-			nat.Port(sidecarPort + "/tcp"): []nat.PortBinding{{
-				HostIP:   "localhost",
-				HostPort: "0", // auto port assign
-			}},
-			// loadgen service port bindings
-			nat.Port(loadGenMetricsPort + "/tcp"): []nat.PortBinding{{
-				HostIP:   "localhost",
-				HostPort: "0", // auto port assign
-			}},
-		},
-	}
 
 	createContainerAndItsLogs(ctx, t, createContainerParameters{
-		dockerClient:    dockerClient,
-		containerConfig: containerCfg,
-		hostConfig:      hostCfg,
-		name:            name,
+		dockerClient: dockerClient,
+		containerConfig: &container.Config{
+			Image: testNodeImage,
+			Cmd:   []string{"run", "db", "committer", "orderer", "loadgen"},
+			ExposedPorts: nat.PortSet{
+				sidecarPort + "/tcp":        struct{}{},
+				loadGenMetricsPort + "/tcp": struct{}{},
+			},
+			Tty: true,
+		},
+		hostConfig: &container.HostConfig{
+			NetworkMode: network.NetworkDefault,
+			PortBindings: nat.PortMap{
+				// sidecar port binding
+				sidecarPort + "/tcp": []nat.PortBinding{{
+					HostIP:   "localhost",
+					HostPort: "0", // auto port assign
+				}},
+				// loadgen service port bindings
+				loadGenMetricsPort + "/tcp": []nat.PortBinding{{
+					HostIP:   "localhost",
+					HostPort: "0", // auto port assign
+				}},
+			},
+		},
+		name: name,
 	})
 }
