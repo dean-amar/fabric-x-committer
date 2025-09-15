@@ -239,7 +239,7 @@ build-test-node-image: build-arch build-test-genesis-block
 		--build-arg ARCHBIN_PATH=${arch_output_dir_rel} \
 		. $(docker_push_arg)
 
-build-release-image: build-arch build-release-genesis-block
+build-release-image: build-arch
 	./scripts/build-release-image.sh \
 		$(docker_cmd) $(version) $(image_namespace) $(dockerfile_release_dir) $(multiplatform) $(arch_output_dir_rel)
 
@@ -249,13 +249,6 @@ build-test-genesis-block: $(output_dir) build-cli-loadgen
 		bin/loadgen make-genesis-block \
 		-c "$(project_dir)/cmd/config/samples/loadgen.yaml" \
 		>"$(output_dir)/sc-genesis-block.proto.bin"
-
-build-release-genesis-block: $(output_dir) build-cli-loadgen
-	@# We load the env from the Dockerfile to use them to generate the config block.
-	env -v $(shell grep '^ENV' $(dockerfile_release_dir)/Dockerfile | cut -d' ' -f2- | xargs) \
-		bin/loadgen make-genesis-block \
-		-c "$(project_dir)/cmd/config/samples/loadgen.yaml" \
-		>"$(output_dir)/sc-genesis-block-release.proto.bin"
 
 #########################
 # Linter

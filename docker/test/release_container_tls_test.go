@@ -19,7 +19,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hyperledger/fabric-x-committer/cmd/config"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 )
 
 type startNodeParameters struct {
@@ -29,6 +32,7 @@ type startNodeParameters struct {
 	clientCredsPath string
 	networkName     string
 	tlsMode         string
+	containerName   string
 }
 
 const (
@@ -42,7 +46,8 @@ const (
 	// localConfigPath is the path for the sample YAML configurations per service.
 	localConfigPath = "../../cmd/config/samples"
 	// binPath is the path to the binary files.
-	binPath = "../../bin"
+	binPath             = "../../bin"
+	containerPrefixName = "sc_test"
 )
 
 // TestCommitterNodesWithTLS runs each committer component in Docker container and verifies
@@ -56,23 +61,29 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	serviceNames := []string{"db", "verifier", "vc", "query", "coordinator", "sidecar", "orderer", "loadgen"}
 	stopAndRemoveContainersByName(ctx, t, dockerClient, serviceNames...)
 
-	// Create an isolated network for the test run.
-	networkName := fmt.Sprintf("%s_%s", networkPrefix, uuid.NewString())
-	testutils.CreateDockerNetwork(t, networkName)
-	t.Cleanup(func() {
-		testutils.RemoveDockerNetwork(t, networkName)
-	})
+	// create genesis-block for testing.
+	v := config.NewViperWithLoadGenDefaults()
+	c, err := config.ReadLoadGenYamlAndSetupLogging(v, fmt.Sprintf("%s/loadgen.yaml", localConfigPath))
+	require.NoError(t, err)
+	t.Log("Creating config block")
+	configBlock, err := workload.CreateConfigBlock(c.LoadProfile.Transaction.Policy)
+	require.NoError(t, err)
+	err = configtxgen.WriteOutputBlock(configBlock, fmt.Sprintf("%s/%s-release.proto.bin", filepath.Join(mustGetWD(t), binPath), genBlock))
+	require.NoError(t, err)
+
 	credsFactory := testutils.NewCredentialsFactory(t)
-	//nolint:paralleltest // This test is hard to parallelize for several reasons.
-	// We start the sidecar using a genesis block that is precompiled ahead of time.
-	// To run this test in parallel, we would need multiple instances of the same
-	// services with unique names, which would require regenerating the genesis block
-	// for each instance.
-	// We would also need to adjust the YAML configuration to support distinct
-	// hostnames, which would add unnecessary complexity.
+
 	for _, mode := range testutils.ServerModes {
 		mode := mode
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
+			t.Parallel()
+			// Create an isolated network for the test run.
+			networkName := fmt.Sprintf("%s_%s", networkPrefix, uuid.NewString())
+			testutils.CreateDockerNetwork(t, networkName)
+			t.Cleanup(func() {
+				testutils.RemoveDockerNetwork(t, networkName)
+			})
+
 			_, clientCredsPath := credsFactory.CreateClientCredentials(t, mode)
 			for _, name := range serviceNames {
 				params := startNodeParameters{
@@ -82,6 +93,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 					clientCredsPath: clientCredsPath,
 					networkName:     networkName,
 					tlsMode:         mode,
+					containerName:   fmt.Sprintf("%s_%s_%s", containerPrefixName, name, mode),
 				}
 
 				switch name {
@@ -93,7 +105,7 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 					startCommitterNodeWithReleaseImage(ctx, t, params)
 				}
 			}
-			monitorMetric(t, containerMappedHostPort(ctx, t, "loadgen", loadGenMetricsPort))
+			monitorMetric(t, containerMappedHostPort(ctx, t, fmt.Sprintf("%s_%s_%s", containerPrefixName, "loadgen", mode), loadGenMetricsPort))
 		})
 	}
 }
@@ -113,6 +125,7 @@ func startCommitterNodeWithReleaseImage(
 			"--config",
 			fmt.Sprintf("%s/%s.yaml", containerConfigPath, params.node),
 		},
+		Hostname: params.node,
 		Env: []string{
 			"SC_COORDINATOR_SERVER_TLS_MODE=" + params.tlsMode,
 			"SC_COORDINATOR_VERIFIER_TLS_MODE=" + params.tlsMode,
@@ -145,7 +158,7 @@ func startCommitterNodeWithReleaseImage(
 		dockerClient:    params.client,
 		containerConfig: containerCfg,
 		hostConfig:      hostCfg,
-		name:            params.node,
+		name:            params.containerName,
 	})
 }
 
@@ -164,6 +177,7 @@ func startLoadgenNodeWithReleaseImage(
 			"--config",
 			fmt.Sprintf("%s/%s.yaml", containerConfigPath, params.node),
 		},
+		Hostname: params.node,
 		ExposedPorts: nat.PortSet{
 			nat.Port(loadGenMetricsPort + "/tcp"): {},
 		},
@@ -199,7 +213,7 @@ func startLoadgenNodeWithReleaseImage(
 		dockerClient:    params.client,
 		containerConfig: containerCfg,
 		hostConfig:      hostCfg,
-		name:            params.node,
+		name:            params.containerName,
 	})
 }
 
@@ -215,9 +229,10 @@ func startNodeWithTestImage(
 	require.NotEmpty(t, serverCredsPath)
 
 	containerCfg := &container.Config{
-		Image: testNodeImage,
-		Cmd:   []string{"run", params.node},
-		Tty:   true,
+		Image:    testNodeImage,
+		Cmd:      []string{"run", params.node},
+		Tty:      true,
+		Hostname: params.node,
 		Env: []string{
 			"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
 		},
@@ -239,7 +254,7 @@ func startNodeWithTestImage(
 		dockerClient:    params.client,
 		containerConfig: containerCfg,
 		hostConfig:      hostCfg,
-		name:            params.node,
+		name:            params.containerName,
 	})
 }
 
