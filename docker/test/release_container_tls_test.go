@@ -17,12 +17,12 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 )
 
 type startNodeParameters struct {
@@ -68,7 +68,8 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 	t.Log("Creating config block")
 	configBlock, err := workload.CreateConfigBlock(c.LoadProfile.Transaction.Policy)
 	require.NoError(t, err)
-	err = configtxgen.WriteOutputBlock(configBlock, fmt.Sprintf("%s/%s-release.proto.bin", filepath.Join(mustGetWD(t), binPath), genBlock))
+	err = configtxgen.WriteOutputBlock(
+		configBlock, fmt.Sprintf("%s/%s-release.proto.bin", filepath.Join(mustGetWD(t), binPath), genBlock))
 	require.NoError(t, err)
 
 	credsFactory := testutils.NewCredentialsFactory(t)
@@ -105,7 +106,8 @@ func TestCommitterNodesWithTLS(t *testing.T) {
 					startCommitterNodeWithReleaseImage(ctx, t, params)
 				}
 			}
-			monitorMetric(t, containerMappedHostPort(ctx, t, fmt.Sprintf("%s_%s_%s", containerPrefixName, "loadgen", mode), loadGenMetricsPort))
+			monitorMetric(t, containerMappedHostPort(ctx, t,
+				fmt.Sprintf("%s_%s_%s", containerPrefixName, "loadgen", mode), loadGenMetricsPort))
 		})
 	}
 }
