@@ -52,8 +52,8 @@ func FailHandler(t *testing.T) {
 }
 
 var (
-	// DefaultTLSConfig defines an empty tls config.
-	DefaultTLSConfig connection.TLSConfig
+	// InsecureTLSConfig defines an empty tls config.
+	InsecureTLSConfig connection.TLSConfig
 	// defaultGrpcRetryProfile defines the retry policy for a gRPC client connection.
 	defaultGrpcRetryProfile connection.RetryProfile
 )
@@ -116,7 +116,7 @@ func StartGrpcServersForTest(
 	t.Helper()
 	sc := make([]*connection.ServerConfig, numService)
 	for i := range sc {
-		sc[i] = connection.NewLocalHostServerWithTLS(DefaultTLSConfig)
+		sc[i] = connection.NewLocalHostServerWithTLS(InsecureTLSConfig)
 	}
 	return StartGrpcServersWithConfigForTest(ctx, t, sc, register)
 }
@@ -214,10 +214,29 @@ func WaitUntilGrpcServerIsReady(
 		return
 	}
 	healthClient := healthgrpc.NewHealthClient(conn)
-	res, err := healthClient.Check(ctx, &healthgrpc.HealthCheckRequest{}, grpc.WaitForReady(true))
+	res, err := healthClient.Check(ctx, nil, grpc.WaitForReady(true))
 	assert.NotEqual(t, codes.Canceled, status.Code(err))
 	require.NoError(t, err)
 	require.Equal(t, healthgrpc.HealthCheckResponse_SERVING, res.Status)
+}
+
+// WaitUntilGrpcServerIsDown uses the health check API to check a service is down.
+func WaitUntilGrpcServerIsDown(
+	ctx context.Context,
+	t *testing.T,
+	conn grpc.ClientConnInterface,
+) {
+	t.Helper()
+	if conn == nil {
+		return
+	}
+	healthClient := healthgrpc.NewHealthClient(conn)
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		_, err := healthClient.Check(checkCtx, nil)
+		require.Error(ct, err)
+	}, time.Minute, 50*time.Millisecond)
 }
 
 // StatusRetriever provides implementation retrieve status of given transaction identifiers.
@@ -327,7 +346,7 @@ func NewTLSMultiClientConfig(
 
 // NewInsecureClientConfig creates a client configuration for test purposes given an endpoint.
 func NewInsecureClientConfig(ep *connection.Endpoint) *connection.ClientConfig {
-	return NewTLSClientConfig(DefaultTLSConfig, ep)
+	return NewTLSClientConfig(InsecureTLSConfig, ep)
 }
 
 // NewTLSClientConfig creates a client configuration for test purposes given a single endpoint and creds.

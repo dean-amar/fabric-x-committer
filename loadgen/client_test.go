@@ -59,7 +59,9 @@ func TestLoadGenForLoadGen(t *testing.T) {
 				clientConf.LoadProfile.Workers = 0
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
-					clientConf.Adapter.VerifierClient = startVerifiers(t, test.DefaultTLSConfig, test.DefaultTLSConfig)
+					clientConf.Adapter.VerifierClient = startVerifiers(t,
+						test.InsecureTLSConfig, test.InsecureTLSConfig,
+					)
 					_, err := clientConf.Server.PreAllocateListener()
 					require.NoError(t, err)
 
@@ -215,9 +217,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 					for i := range ordererServers {
 						ordererServers[i] = preAllocatePorts(t)
 					}
-
 					sidecarServerConf.TLS = serverCreds
-
 					// Start server under test
 					sidecarConf := &sidecar.Config{
 						Server: sidecarServerConf,
@@ -270,7 +270,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 			endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 			sidecarConf := &sidecar.Config{
-				Server: connection.NewLocalHostServerWithTLS(test.DefaultTLSConfig),
+				Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
 				Orderer: ordererconn.Config{
 					Connection: ordererconn.ConnectionConfig{
 						Endpoints: endpoints,
@@ -358,7 +358,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 
 func preAllocatePorts(t *testing.T) *connection.ServerConfig {
 	t.Helper()
-	server := connection.NewLocalHostServerWithTLS(test.DefaultTLSConfig)
+	server := connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig)
 	listener, err := server.PreAllocateListener()
 	require.NoError(t, err)
 	t.Cleanup(func() {
