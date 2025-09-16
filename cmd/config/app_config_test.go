@@ -68,7 +68,9 @@ func TestReadConfigSidecar(t *testing.T) {
 				},
 				ChannelID: "mychannel",
 			},
-			Committer: newClientConfig("localhost", 9001),
+			Committer: &connection.ClientConfig{
+				Endpoint: newEndpoint("localhost", 9001),
+			},
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
 			},
@@ -106,7 +108,7 @@ func TestReadConfigSidecar(t *testing.T) {
 				},
 				ChannelID: "mychannel",
 			},
-			Committer: newClientConfigWithDefaultTLSConfig("coordinator", 9001),
+			Committer: newClientConfigWithDefaultTLS("coordinator", 9001),
 			Ledger: sidecar.LedgerConfig{
 				Path: "/root/sc/ledger",
 			},
@@ -152,10 +154,10 @@ func TestReadConfigCoordinator(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/coordinator.yaml",
 		expectedConfig: &coordinator.Config{
-			Server:             newServerConfigWithDefaultTLSConfig("", 9001),
+			Server:             newServerConfigWithDefaultTLS("", 9001),
 			Monitoring:         newMonitoringConfig("", 2119),
-			Verifier:           newMultiClientConfigWithDefaultTLSConfig("verifier", 5001),
-			ValidatorCommitter: newMultiClientConfigWithDefaultTLSConfig("vc", 6001),
+			Verifier:           newMultiClientConfigWithDefaultTLS("verifier", 5001),
+			ValidatorCommitter: newMultiClientConfigWithDefaultTLS("vc", 6001),
 			DependencyGraph: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors: 1,
 				WaitingTxsLimit:           100_000,
@@ -201,7 +203,7 @@ func TestReadConfigVC(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/vc.yaml",
 		expectedConfig: &vc.Config{
-			Server:     newServerConfigWithDefaultTLSConfig("", 6001),
+			Server:     newServerConfigWithDefaultTLS("", 6001),
 			Monitoring: newMonitoringConfig("", 2116),
 			Database:   defaultSampleDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
@@ -249,7 +251,7 @@ func TestReadConfigVerifier(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/verifier.yaml",
 		expectedConfig: &verifier.Config{
-			Server:     newServerConfigWithDefaultTLSConfig("", 5001),
+			Server:     newServerConfigWithDefaultTLS("", 5001),
 			Monitoring: newMonitoringConfig("", 2115),
 			ParallelExecutor: verifier.ExecutorConfig{
 				BatchSizeCutoff:   50,
@@ -295,7 +297,7 @@ func TestReadConfigQuery(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/query.yaml",
 		expectedConfig: &query.Config{
-			Server:                newServerConfigWithDefaultTLSConfig("", 7001),
+			Server:                newServerConfigWithDefaultTLS("", 7001),
 			Monitoring:            newMonitoringConfig("", 2117),
 			Database:              defaultSampleDBConfig(),
 			MinBatchKeys:          1024,
@@ -337,7 +339,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
 		expectedConfig: &loadgen.ClientConfig{
-			Server: newServerConfigWithDefaultTLSConfig("", 8001),
+			Server: newServerConfigWithDefaultTLS("", 8001),
 			Monitoring: metrics.Config{
 				Config: newMonitoringConfig("", 2118),
 				Latency: metrics.LatencyConfig{
@@ -353,7 +355,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			},
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarClient: newClientConfigWithDefaultTLSConfig("sidecar", 4001),
+					SidecarClient: newClientConfigWithDefaultTLS("sidecar", 4001),
 					Orderer: ordererconn.Config{
 						Connection: ordererconn.ConnectionConfig{
 							Endpoints: ordererconn.NewEndpoints(
@@ -458,19 +460,14 @@ func defaultSampleDBConfig() *vc.DatabaseConfig {
 	}
 }
 
-func newClientConfigWithDefaultTLSConfig(host string, port int) *connection.ClientConfig {
-	clientConfig := newClientConfig(host, port)
-	clientConfig.TLS = defaultClientTLSConfig
-	return clientConfig
-}
-
-func newClientConfig(host string, port int) *connection.ClientConfig {
+func newClientConfigWithDefaultTLS(host string, port int) *connection.ClientConfig {
 	return &connection.ClientConfig{
 		Endpoint: newEndpoint(host, port),
+		TLS:      defaultClientTLSConfig,
 	}
 }
 
-func newMultiClientConfigWithDefaultTLSConfig(host string, port int) connection.MultiClientConfig {
+func newMultiClientConfigWithDefaultTLS(host string, port int) connection.MultiClientConfig {
 	return connection.MultiClientConfig{
 		Endpoints: []*connection.Endpoint{
 			newEndpoint(host, port),
@@ -486,10 +483,11 @@ func newMonitoringConfig(host string, port int) monitoring.Config {
 }
 
 //nolint:unparam // currently, we use this function only with host:""
-func newServerConfigWithDefaultTLSConfig(host string, port int) *connection.ServerConfig {
-	serverConfig := newServerConfig(host, port)
-	serverConfig.TLS = defaultServerTLSConfig
-	return serverConfig
+func newServerConfigWithDefaultTLS(host string, port int) *connection.ServerConfig {
+	return &connection.ServerConfig{
+		Endpoint: *newEndpoint(host, port),
+		TLS:      defaultServerTLSConfig,
+	}
 }
 
 func newServerConfig(host string, port int) *connection.ServerConfig {

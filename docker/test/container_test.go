@@ -9,11 +9,11 @@ package test
 import (
 	"context"
 	_ "embed"
+	"net"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 
@@ -34,13 +34,12 @@ func TestStartTestNode(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	dockerClient := createDockerClient(t)
-	stopAndRemoveContainersByName(ctx, t, dockerClient, "committer")
-	startCommitter(ctx, t, dockerClient, "committer")
+	stopAndRemoveContainersByName(ctx, t, createDockerClient(t), "committer")
+	startCommitter(ctx, t, "committer")
 
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint, err := connection.NewEndpoint(
-		"localhost:" + containerMappedHostPort(ctx, t, "committer", sidecarPort),
+		net.JoinHostPort("localhost", containerMappedHostPort(ctx, t, "committer", sidecarPort)),
 	)
 	require.NoError(t, err)
 	committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
@@ -54,12 +53,10 @@ func TestStartTestNode(t *testing.T) {
 	monitorMetric(t, containerMappedHostPort(ctx, t, "committer", loadGenMetricsPort))
 }
 
-func startCommitter(ctx context.Context, t *testing.T, dockerClient *client.Client, name string) {
+func startCommitter(ctx context.Context, t *testing.T, name string) {
 	t.Helper()
-
-	createContainerAndItsLogs(ctx, t, createContainerParameters{
-		dockerClient: dockerClient,
-		containerConfig: &container.Config{
+	createAndStartContainerAndItsLogs(ctx, t, createAndStartContainerParameters{
+		config: &container.Config{
 			Image: testNodeImage,
 			Cmd:   []string{"run", "db", "committer", "orderer", "loadgen"},
 			ExposedPorts: nat.PortSet{

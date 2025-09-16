@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -24,11 +25,10 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
-type createContainerParameters struct {
-	dockerClient    *client.Client
-	containerConfig *container.Config
-	hostConfig      *container.HostConfig
-	name            string
+type createAndStartContainerParameters struct {
+	config     *container.Config
+	hostConfig *container.HostConfig
+	name       string
 }
 
 const (
@@ -37,24 +37,23 @@ const (
 	monitoredMetric = "loadgen_transaction_committed_total"
 )
 
-func createContainerAndItsLogs(
+func createAndStartContainerAndItsLogs(
 	ctx context.Context,
 	t *testing.T,
-	params createContainerParameters,
+	params createAndStartContainerParameters,
 ) {
 	t.Helper()
-	dockerClient := params.dockerClient
+	dockerClient := createDockerClient(t)
 	resp, err := dockerClient.ContainerCreate(
-		ctx, params.containerConfig, params.hostConfig, nil, nil, params.name,
+		ctx, params.config, params.hostConfig, nil, nil, params.name,
 	)
 	require.NoError(t, err)
+	require.NoError(t, dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}))
 
 	//nolint:contextcheck // We want to ensure cleanup when the test is done.
 	t.Cleanup(func() {
-		stopAndRemoveID(context.Background(), t, dockerClient, resp.ID)
+		stopAndRemoveContainerByID(context.Background(), t, dockerClient, resp.ID)
 	})
-
-	require.NoError(t, dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}))
 
 	logs, err := dockerClient.ContainerLogs(ctx, resp.ID, container.LogsOptions{
 		ShowStdout: true,
@@ -72,7 +71,7 @@ func createContainerAndItsLogs(
 
 func monitorMetric(t *testing.T, metricsPort string) {
 	t.Helper()
-	metricsURL, err := monitoring.MakeMetricsURL("localhost:" + metricsPort)
+	metricsURL, err := monitoring.MakeMetricsURL(net.JoinHostPort("localhost", metricsPort))
 	require.NoError(t, err)
 
 	t.Logf("Check the load generator metrics from: %s", metricsURL)
@@ -109,11 +108,11 @@ func stopAndRemoveContainersByName(ctx context.Context, t *testing.T, dockerClie
 			continue
 		}
 		t.Logf("stopping container '%s' (%s)", containerName, id)
-		stopAndRemoveID(ctx, t, dockerClient, id)
+		stopAndRemoveContainerByID(ctx, t, dockerClient, id)
 	}
 }
 
-func stopAndRemoveID(ctx context.Context, t *testing.T, dockerClient *client.Client, id string) {
+func stopAndRemoveContainerByID(ctx context.Context, t *testing.T, dockerClient *client.Client, id string) {
 	t.Helper()
 	err := dockerClient.ContainerStop(ctx, id, container.StopOptions{})
 	if err != nil {
