@@ -48,17 +48,19 @@ func TestLoadGenForLoadGen(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
+			serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 			for _, limit := range defaultLimits {
-				clientConf := DefaultClientConf()
-				clientConf.Server.TLS = serverCreds
-				clientConf.Limit = limit
-				// Ensure the client doesn't generate load, but only receives it from the sub client.
-				clientConf.LoadProfile.Workers = 0
+				limit := limit
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
+					clientConf := DefaultClientConf()
+					clientConf.Server.TLS = serverCreds
+					clientConf.Limit = limit
+					// Ensure the client doesn't generate load, but only receives it from the sub client.
+					clientConf.LoadProfile.Workers = 0
+
 					clientConf.Adapter.VerifierClient = startVerifiers(t,
 						test.InsecureTLSConfig, test.InsecureTLSConfig,
 					)
@@ -85,14 +87,15 @@ func TestLoadGenForVCService(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
+			serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 			for _, limit := range defaultLimits {
-				clientConf := DefaultClientConf()
-				clientConf.Limit = limit
+				limit := limit
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
+					clientConf := DefaultClientConf()
+					clientConf.Limit = limit
 					env := vc.NewValidatorAndCommitServiceTestEnvWithTLS(t, 2, serverCreds)
 					clientConf.Adapter.VCClient = test.NewTLSMultiClientConfig(clientCreds, env.Endpoints...)
 					testLoadGenerator(t, clientConf)
@@ -106,14 +109,15 @@ func TestLoadGenForSigVerifier(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
+			serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 			for _, limit := range defaultLimits {
-				clientConf := DefaultClientConf()
-				clientConf.Limit = limit
+				limit := limit
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
+					clientConf := DefaultClientConf()
+					clientConf.Limit = limit
 					clientConf.Adapter.VerifierClient = startVerifiers(t, serverCreds, clientCreds)
 					// Start client
 					testLoadGenerator(t, clientConf)
@@ -148,9 +152,9 @@ func TestLoadGenForCoordinator(t *testing.T) {
 	t.Parallel()
 	for _, mode := range test.ServerModes {
 		mode := mode
-		serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
+			serverCreds, clientCreds := createServerAndClientTLSCerts(t, mode)
 			for _, limit := range append(
 				defaultLimits,
 				&adapters.GenerateLimit{Blocks: 5},
@@ -158,10 +162,11 @@ func TestLoadGenForCoordinator(t *testing.T) {
 					Transactions: 5*defaultBlockSize + 2, // +2 for the config and meta namespace TXs.
 				},
 			) {
-				clientConf := DefaultClientConf()
-				clientConf.Limit = limit
+				limit := limit
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
+					clientConf := DefaultClientConf()
+					clientConf.Limit = limit
 					_, sigVerServer := mock.StartMockSVService(t, 1)
 					_, vcServer := mock.StartMockVCService(t, 1)
 
@@ -201,10 +206,11 @@ func TestLoadGenForSidecar(t *testing.T) {
 				&adapters.GenerateLimit{Blocks: 5},
 				&adapters.GenerateLimit{Transactions: 5*defaultBlockSize + 1}, // +1 for the meta namespace TX.
 			) {
-				clientConf := DefaultClientConf()
-				clientConf.Limit = limit
+				limit := limit
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
+					clientConf := DefaultClientConf()
+					clientConf.Limit = limit
 					_, coordinatorServer := mock.StartMockCoordinatorService(t)
 
 					// When using the sidecar adapter, the load generator and the sidecar
@@ -258,10 +264,11 @@ func TestLoadGenForSidecar(t *testing.T) {
 func TestLoadGenForOrderer(t *testing.T) {
 	t.Parallel()
 	for _, limit := range defaultLimits {
-		clientConf := DefaultClientConf()
-		clientConf.Limit = limit
+		limit := limit
 		t.Run(limitToString(limit), func(t *testing.T) {
 			t.Parallel()
+			clientConf := DefaultClientConf()
+			clientConf.Limit = limit
 			// Start dependencies
 			orderer, ordererServer := mock.StartMockOrderingServices(
 				t, &mock.OrdererConfig{NumService: 3, BlockSize: 100},
