@@ -50,6 +50,7 @@ func (d *DatabaseConfig) DataSourceName() string {
 	if d.LoadBalance {
 		ret += "&load_balance=true"
 	}
+	ret += fmt.Sprintf("&sslrootcert=%s", d.Creds.CACertPath)
 	return ret
 }
 

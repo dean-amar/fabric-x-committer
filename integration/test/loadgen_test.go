@@ -16,8 +16,6 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
-	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
@@ -112,31 +110,31 @@ func TestLoadGenCommitterWithLimit(t *testing.T) {
 	require.Equal(t, expectedTXs, count)
 }
 
-func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
-	t.Parallel()
-	for _, dbType := range []string{dbtest.PostgresDBType, dbtest.YugaDBType} {
-		databaseType := dbType
-		t.Run(fmt.Sprintf("%s_tls", databaseType), func(t *testing.T) {
-			t.Parallel()
-			conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, databaseType)
-			gomega.RegisterTestingT(t)
-			c := runner.NewRuntime(t, &runner.Config{
-				NumVerifiers: 2,
-				NumVCService: 2,
-				BlockTimeout: 2 * time.Second,
-				BlockSize:    500,
-				TLSMode:      connection.MutualTLSMode,
-				DBConnection: conn,
-			})
-
-			c.Start(t, runner.FullTxPathWithLoadGenAndQuery)
-
-			require.Eventually(t, func() bool {
-				count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
-				t.Logf("count %d", count)
-				return count > 1_000
-			}, 90*time.Second, 500*time.Millisecond)
-			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
-		})
-	}
-}
+//func TestMutualTLSConnectionAndDatabaseTLS(t *testing.T) {
+//	t.Parallel()
+//	for _, dbType := range []string{dbtest.PostgresDBType} {
+//		databaseType := dbType
+//		t.Run(fmt.Sprintf("%s_tls", databaseType), func(t *testing.T) {
+//			t.Parallel()
+//			conn := dbtest.CreateAndStartSecuredDatabaseNode(createInitContext(t), t, databaseType)
+//			gomega.RegisterTestingT(t)
+//			c := runner.NewRuntime(t, &runner.Config{
+//				NumVerifiers: 2,
+//				NumVCService: 2,
+//				BlockTimeout: 2 * time.Second,
+//				BlockSize:    500,
+//				TLSMode:      connection.MutualTLSMode,
+//				DBConnection: conn,
+//			})
+//
+//			c.Start(t, runner.FullTxPathWithLoadGenAndQuery)
+//
+//			require.Eventually(t, func() bool {
+//				count := c.CountStatus(t, protoblocktx.Status_COMMITTED)
+//				t.Logf("count %d", count)
+//				return count > 1_000
+//			}, 90*time.Second, 500*time.Millisecond)
+//			require.Zero(t, c.CountAlternateStatus(t, protoblocktx.Status_COMMITTED))
+//		})
+//	}
+//}

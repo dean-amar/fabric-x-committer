@@ -10,12 +10,10 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
-
 	"github.com/cockroachdb/errors"
-	"github.com/yugabyte/pgx/v4/pgxpool"
-
 	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/yugabyte/pgx/v4/pgxpool"
+	"strings"
 )
 
 const (
@@ -47,10 +45,6 @@ func NewDatabasePool(ctx context.Context, config *DatabaseConfig) (*pgxpool.Pool
 	poolConfig, err := pgxpool.ParseConfig(config.DataSourceName())
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed parsing datasource")
-	}
-	poolConfig.ConnConfig.TLSConfig, err = config.Creds.BuildDatabaseCreds()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed creating database creds")
 	}
 
 	poolConfig.MaxConns = config.MaxConnections

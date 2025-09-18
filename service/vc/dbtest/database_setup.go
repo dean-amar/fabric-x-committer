@@ -13,7 +13,6 @@ import (
 	"encoding/base32"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 const (
@@ -136,32 +136,29 @@ func StartAndConnect(ctx context.Context, t *testing.T) *Connection {
 // CreateAndStartSecuredDatabaseNode creates a containerized Yugabyte or PostgreSQL database instance in a secure mode.
 // This function shouldn't be called number of times in parallel
 // due to the need of Yugabyte's secure node credentials path convention.
-func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType string) *Connection {
+func CreateAndStartSecuredDatabaseNode(ctx context.Context, t *testing.T, dbType, network, hostname string, credsFactory *test.CredentialsFactory) *Connection {
 	t.Helper()
-
-	if runtime.GOOS != "linux" {
-		t.Skip("Container IP access not supported on non-linux Docker")
-	}
 
 	node := &DatabaseContainer{
 		DatabaseType: dbType,
 		UseTLS:       true,
+		Network:      network,
+		Hostname:     hostname,
 	}
 
-	node.StartContainer(ctx, t)
-	conn := node.getConnectionOptions(ctx, t)
+	node.CustomStartContainer(ctx, t, credsFactory)
+	conn := NewConnection(node.GetContainerConnectionDetails(t))
 
 	conn.Creds = connection.DatabaseCreds{
-		CAPaths:    node.Creds.CACertPath,
-		ServerName: node.Creds.ServerName,
+		CACertPath: node.Creds.CACertPath,
 	}
 
 	switch node.DatabaseType {
 	case YugaDBType:
 		node.fixCertificatePermissions(t,
 			"root:root",
-			fmt.Sprintf("/creds/node.%s.crt", defaultYugabyteTLSContainerIP),
-			fmt.Sprintf("/creds/node.%s.key", defaultYugabyteTLSContainerIP),
+			fmt.Sprintf("/creds/node.%s.crt", node.Hostname),
+			fmt.Sprintf("/creds/node.%s.key", node.Hostname),
 		)
 		node.EnsureNodeReadiness(t, YugabytedReadinessOutput)
 		conn.Password = node.readPasswordFromContainer(t, containerPathForYugabytePassword)

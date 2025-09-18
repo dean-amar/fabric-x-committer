@@ -101,8 +101,8 @@ func (scm *CredentialsFactory) CreateServerCredentials(
 	return scm.createTLSConfig(t, createTLSConfigParameters{
 		connectionMode: tlsMode,
 		keyPair:        serverKeypair,
-		namingStyle:    namingStyle,
 		san:            san,
+		namingStyle:    namingStyle,
 	})
 }
 
@@ -273,7 +273,7 @@ func selectFileNames(style CertStyle, serverName string) func(string) string {
 			case KeyPublic:
 				return "server.crt"
 			case KeyCACert:
-				return caCertFileName
+				return "ca-certificate"
 			default:
 				return ""
 			}
@@ -282,11 +282,11 @@ func selectFileNames(style CertStyle, serverName string) func(string) string {
 		return func(key string) string {
 			switch key {
 			case KeyPrivate:
-				return "private-key.key"
+				return "private-key"
 			case KeyPublic:
-				return "public-key.crt"
+				return "public-key"
 			case KeyCACert:
-				return caCertFileName
+				return "ca-certificate"
 			default:
 				return ""
 			}

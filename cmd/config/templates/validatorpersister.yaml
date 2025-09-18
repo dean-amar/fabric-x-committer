@@ -30,7 +30,6 @@ database:
     {{- range .DB.Creds.CAPaths }}
     - {{ . }}
     {{- end }}
-  server-name: {{ .DB.Creds.ServerName }}
   max-connections: 10
   min-connections: 5
   retry:

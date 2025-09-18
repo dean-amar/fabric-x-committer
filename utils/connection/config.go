@@ -80,8 +80,7 @@ type (
 
 	// DatabaseCreds holds the database connection credentials.
 	DatabaseCreds struct {
-		CAPaths    []string `mapstructure:"ca-cert-paths"`
-		ServerName string   `mapstructure:"server-name"`
+		CACertPath string `mapstructure:"ca-cert-paths"`
 	}
 )
 
@@ -98,7 +97,7 @@ const (
 
 // UseCreds sets the option of using TLS configuration for database connection.
 func (dc *DatabaseCreds) UseCreds() bool {
-	return len(dc.CAPaths) > 0
+	return dc.CACertPath != ""
 }
 
 // BuildDatabaseCreds creates the database's TLS configuration for client connection.
@@ -106,7 +105,7 @@ func (dc *DatabaseCreds) BuildDatabaseCreds() (*tls.Config, error) {
 	if !dc.UseCreds() {
 		return nil, nil
 	}
-	certPool, err := buildCertPool(dc.CAPaths)
+	certPool, err := buildCertPool([]string{dc.CACertPath})
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +113,6 @@ func (dc *DatabaseCreds) BuildDatabaseCreds() (*tls.Config, error) {
 	return &tls.Config{
 		RootCAs:    certPool,
 		MinVersion: DefaultTLSMinVersion,
-		ServerName: dc.ServerName,
 	}, nil
 }
 
