@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	defaultYugabyteImage            = "yugabytedb/yugabyte:2.20.7.0-b58"
+	defaultYugabyteImage            = "yugabytedb/yugabyte:2024.1.6.1-b2"
 	defaultPostgresImage            = "postgres:16.9-alpine3.21"
 	defaultDBDeploymentTemplateName = "sc_%s_unit_tests"
 
@@ -71,6 +71,9 @@ var (
 			"yb_num_shards_per_tserver=1," +
 			"minloglevel=3," +
 			"yb_enable_read_committed_isolation=true," +
+			"certs_for_client_dir=/creds," +
+			"use_client_to_server_encryption=true," +
+			"ysql_enable_client_certificate_auth=true," +
 			"ysql_hba_conf_csv={hostssl all all all md5 clientcert=verify-full}",
 	}
 	// {hostssl all all all cert clientcert=verify-full}
