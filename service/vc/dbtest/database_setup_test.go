@@ -41,7 +41,7 @@ func StartAndQuery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 
-	conn, err := connSettings.open(ctx)
+	conn, err := connSettings.Open(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 	require.NoError(t, conn.Ping(ctx))

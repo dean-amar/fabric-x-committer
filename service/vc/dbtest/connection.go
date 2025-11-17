@@ -57,8 +57,8 @@ func NewConnection(endpoints ...*connection.Endpoint) *Connection {
 	}
 }
 
-// dataSourceName returns the dataSourceName to be used by the database/sql package.
-func (c *Connection) dataSourceName() (string, error) {
+// DataSourceName returns the DataSourceName to be used by the database/sql package.
+func (c *Connection) DataSourceName() (string, error) {
 	return dbconn.DataSourceName(dbconn.DataSourceNameParams{
 		Username:        c.User,
 		Password:        c.Password,
@@ -74,9 +74,9 @@ func (c *Connection) endpointsString() string {
 	return connection.AddressString(c.Endpoints...)
 }
 
-// open opens a connection pool to the database.
-func (c *Connection) open(ctx context.Context) (*pgxpool.Pool, error) {
-	connString, err := c.dataSourceName()
+// Open opens a connection pool to the database.
+func (c *Connection) Open(ctx context.Context) (*pgxpool.Pool, error) {
+	connString, err := c.DataSourceName()
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not build database connection string")
 	}
@@ -103,7 +103,7 @@ func (c *Connection) waitForReady(ctx context.Context) bool {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for !c.isEndpointReady(ctx) {
+	for !c.IsEndpointReady(ctx) {
 		select {
 		case <-ctx.Done():
 			// Stop trying if the context cancelled
@@ -115,9 +115,9 @@ func (c *Connection) waitForReady(ctx context.Context) bool {
 	return true
 }
 
-// isEndpointReady attempts to ping the database and returns true if successful.
-func (c *Connection) isEndpointReady(ctx context.Context) bool {
-	conn, err := c.open(ctx)
+// IsEndpointReady attempts to ping the database and returns true if successful.
+func (c *Connection) IsEndpointReady(ctx context.Context) bool {
+	conn, err := c.Open(ctx)
 	if err != nil {
 		logger.Debugf("[%s] error opening connection: %s", c.endpointsString(), err)
 		return false
@@ -133,7 +133,7 @@ func (c *Connection) isEndpointReady(ctx context.Context) bool {
 }
 
 func (c *Connection) execute(ctx context.Context, stmt string) error {
-	pool, err := c.open(ctx)
+	pool, err := c.Open(ctx)
 	if err != nil {
 		return err
 	}

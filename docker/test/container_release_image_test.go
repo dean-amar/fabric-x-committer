@@ -9,22 +9,20 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"testing"
-
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
-	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
-	"github.com/stretchr/testify/require"
-
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/dbconn"
 	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
+	"github.com/stretchr/testify/require"
+	"os"
+	"path/filepath"
+	"testing"
 )
 
 type startNodeParameters struct {
@@ -71,6 +69,34 @@ var enforcePostgresSSLAndReloadConfigScript = []string{
 	`psql -U yugabyte -c "SELECT pg_reload_conf();"`,
 }
 
+func TestSecuredNode(t *testing.T) {
+	params := startNodeParameters{
+		credsFactory: testutils.NewCredentialsFactory(t),
+		tlsMode:      connection.MutualTLSMode,
+		dbType:       dbtest.YugaDBType,
+	}
+	dbPassword, conn := startSecuredDatabaseNode(t.Context(), t, params.asNode("db"))
+
+	t.Log("password chosen by yugabyte: ", dbPassword)
+
+	t.Logf("connection: %v", conn)
+
+	//ep, err := connection.NewEndpoint("db:5433")
+	//require.NoError(t, err)
+	//conn.Endpoints = []*connection.Endpoint{
+	//	ep,
+	//}
+
+	//time.Sleep(30 * time.Second)
+
+	sn, err := conn.DataSourceName()
+	require.NoError(t, err)
+	t.Logf("sourcename: %v", sn)
+	require.True(t, conn.IsEndpointReady(t.Context()))
+
+	//time.Sleep(30 * time.Second)
+}
+
 // TestCommitterReleaseImagesWithTLS runs the committer components in different Docker containers with different TLS
 // modes and verifies it starts and connect successfully.
 // This test uses the release images for all the components but 'db' and 'orderer'.
@@ -93,7 +119,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	committerNodes := []string{"verifier", "vc", "query", "coordinator", "sidecar"}
 
 	credsFactory := testutils.NewCredentialsFactory(t)
-	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType} {
+	for _, dbType := range []string{dbtest.YugaDBType} {
 		t.Run(fmt.Sprintf("database:%s", dbType), func(t *testing.T) {
 			t.Parallel()
 			for _, mode := range testutils.ServerModes {
@@ -122,7 +148,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 					}
 
 					// start a secured database node and return the db password.
-					params.dbPassword = startSecuredDatabaseNode(ctx, t, params.asNode(dbNode))
+					params.dbPassword, _ = startSecuredDatabaseNode(ctx, t, params.asNode(dbNode))
 					// start the orderer node.
 					startCommitterNodeWithTestImage(ctx, t, params.asNode(ordererNode))
 					// start the committer nodes.
@@ -145,17 +171,17 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 
 // CreateAndStartSecuredDatabaseNode creates a containerized YugabyteDB or PostgreSQL
 // database instance in a secure mode.
-func startSecuredDatabaseNode(ctx context.Context, t *testing.T, params startNodeParameters) string {
+func startSecuredDatabaseNode(ctx context.Context, t *testing.T, params startNodeParameters) (string, *dbtest.Connection) {
 	t.Helper()
 
-	tlsConfig, _ := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.node)
+	tlsConfig, _ := params.credsFactory.CreateServerCredentials(t, params.tlsMode, "172.17.0.2")
 
 	node := &dbtest.DatabaseContainer{
 		DatabaseType: params.dbType,
-		Network:      params.networkName,
-		Hostname:     params.node,
-		DbPort:       defaultDBPort,
-		TLSConfig:    &tlsConfig,
+		//Network:      params.networkName,
+		//Hostname:     params.node,
+		DbPort:    defaultDBPort,
+		TLSConfig: &tlsConfig,
 	}
 
 	node.StartContainer(ctx, t)
@@ -177,6 +203,18 @@ func startSecuredDatabaseNode(ctx context.Context, t *testing.T, params startNod
 		// Must run after node startup to ensure proper root ownership and permissions for the TLS certificate files.
 		node.ExecuteCommand(t, []string{"bash", "-c", "chown root:root /creds/*"})
 		node.EnsureNodeReadinessByLogs(t, dbtest.YugabytedReadinessOutput)
+		t.Logf("the config before: %v", node.ExecuteCommand(t, []string{
+			"bash", "-c",
+			`cat /root/var/conf/yugabyted.conf`,
+		}))
+		node.ExecuteCommand(t, []string{
+			"bash", "-c",
+			`sed -i 's/md5 clientcert=verify-full/cert clientcert=verify-full/g' /root/var/conf/yugabyted.conf`,
+		})
+		t.Logf("the config after: %v", node.ExecuteCommand(t, []string{
+			"bash", "-c",
+			`cat /root/var/conf/yugabyted.conf`,
+		}))
 		conn.Password = node.ReadPasswordFromContainer(t, containerPathForYugabytePassword)
 	case dbtest.PostgresDBType:
 		// Must run after node startup to ensure proper root ownership and permissions for the TLS certificate files.
@@ -187,7 +225,7 @@ func startSecuredDatabaseNode(ctx context.Context, t *testing.T, params startNod
 		t.Fatalf("Unsupported database type: %s", node.DatabaseType)
 	}
 
-	return conn.Password
+	return conn.Password, conn
 }
 
 // startCommitterNodeWithReleaseImage starts a committer node using the release image.

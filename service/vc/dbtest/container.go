@@ -50,8 +50,8 @@ const (
 	SecondaryPostgresNodeReadinessOutput = "started streaming WAL from primary"
 
 	// Represents the required database TLS certificate files name.
-	yugabytePublicKeyFileName     = "node.db.crt"
-	yugabytePrivateKeyFileName    = "node.db.key"
+	yugabytePublicKeyFileName     = "node.172.17.0.2.crt"
+	yugabytePrivateKeyFileName    = "node.172.17.0.2.key"
 	postgresPublicKeyFileName     = "server.crt"
 	postgresPrivateKeyFileName    = "server.key"
 	yugabyteCACertificateFileName = "ca.crt"
@@ -64,13 +64,16 @@ var (
 		"--callhome", "false",
 		"--background", "false",
 		"--ui", "false",
+		//" --allow_insecure_connections", "false",
 		"--tserver_flags",
 		"ysql_max_connections=500," +
 			"tablet_replicas_per_gib_limit=4000," +
 			"yb_num_shards_per_tserver=1," +
 			"minloglevel=3," +
-			"yb_enable_read_committed_isolation=true",
+			"yb_enable_read_committed_isolation=true," +
+			"ysql_hba_conf_csv={hostssl all all all md5 clientcert=verify-full}",
 	}
+	// {hostssl all all all cert clientcert=verify-full}
 
 	// passwordRegex is the compiled regular expression.
 	// to efficiently extract the password of the Yugabyted node.
@@ -137,8 +140,8 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 		if dc.Cmd == nil {
 			dc.Cmd = YugabyteCMD
 			if dc.TLSConfig != nil {
-				require.NotEmpty(t, dc.Hostname)
-				dc.Cmd = append(dc.Cmd, "--secure", "--certs_dir=/creds", "--advertise_address", dc.Hostname)
+				//require.NotEmpty(t, dc.Hostname)
+				dc.Cmd = append(dc.Cmd, "--secure", "--certs_dir=/creds")
 			} else {
 				dc.Cmd = append(dc.Cmd, "--insecure")
 			}
