@@ -23,6 +23,7 @@ type (
 	}
 
 	// ConnectionConfig contains the endpoints, CAs, and retry profile.
+	// list of multiClient-> organization
 	ConnectionConfig struct {
 		Endpoints []*Endpoint              `mapstructure:"endpoints"`
 		TLS       connection.TLSConfig     `mapstructure:"tls"`
