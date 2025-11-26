@@ -16,12 +16,12 @@ monitoring:
 
 parallel-executor:
   batch-size-cutoff: 50
-  batch-time-cutoff: 10ms
+  batch-time-cutoff: 700ms
   channel-buffer-size: 50
   parallelism: 40
 
 logging:
   enabled: true
   development: false
-  level: INFO
+  level: DEBUG
   name: verifier

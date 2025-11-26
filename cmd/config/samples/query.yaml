@@ -77,5 +77,5 @@ max-view-timeout: 10s            # A view will be closed if it was opened for lo
 logging:
   enabled: true
   development: false
-  level: INFO
+  level: DEBUG
   name: query

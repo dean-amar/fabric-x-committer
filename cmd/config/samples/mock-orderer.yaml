@@ -19,5 +19,5 @@ config-block-path: /root/config/sc-genesis-block.proto.bin
 logging:
   development: true
   enabled: true
-  level: INFO
+  level: DEBUG
   name: orderer

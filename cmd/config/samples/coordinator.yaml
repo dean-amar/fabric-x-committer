@@ -36,5 +36,5 @@ dependency-graph:
 logging:
   enabled: true
   development: false
-  level: INFO
+  level: DEBUG
   name: coordinator
