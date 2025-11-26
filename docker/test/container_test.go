@@ -14,21 +14,17 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
-	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
 	"github.com/hyperledger/fabric-x-committer/api/protonotify"
 	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar/sidecarclient"
 	"github.com/hyperledger/fabric-x-committer/service/vc/dbtest"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
 	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"math/rand"
 	"net"
 	"path/filepath"
@@ -50,103 +46,101 @@ type ExpectedStatusInBlock struct {
 	Statuses []protoblocktx.Status
 }
 
+var defaultRetryProfile connection.RetryProfile
+
 // TestStartTestNodeWithoutLoadgen spawns an all-in-one instance of the committer using docker
 // to verify that the committer container starts as expected.
 func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 	t.Parallel()
-	credsFactory := testutils.NewCredentialsFactory(t)
 
-	//Policy := workload.PolicyProfile{
-	//	ChannelID:         channelName,
-	//	NamespacePolicies: make(map[string]*workload.Policy),
-	//}
-	//
-	//ordererEndpoint, err := connection.NewEndpoint(
-	//	net.JoinHostPort("localhost", mockOrdererPort),
-	//)
-	//
-	//Policy.OrdererEndpoints = make([]*ordererconn.Endpoint, 1)
-	//Policy.OrdererEndpoints[0] = &ordererconn.Endpoint{ID: 0, MspID: "org", Endpoint: *ordererEndpoint}
-	//
-	//t.Log("creating config-block")
-	//configBlockPath := filepath.Join(t.TempDir(), genBlockFile)
-	//configBlock, err := workload.CreateConfigBlock(&Policy)
-	//require.NoError(t, err)
-	//err = configtxgen.WriteOutputBlock(configBlock, configBlockPath)
-	//require.NoError(t, err)
-
-	configBlockPath := filepath.Join(t.TempDir(), genBlockFile)
+	// reading the transaction policy from the config block
 	v := config.NewViperWithLoadGenDefaults()
 	c, err := config.ReadLoadGenYamlAndSetupLogging(v, filepath.Join(localConfigPath, "loadgen.yaml"))
 	require.NoError(t, err)
-	configBlock, err := workload.CreateConfigBlock(c.LoadProfile.Transaction.Policy)
-	require.NoError(t, err)
-	require.NoError(t, configtxgen.WriteOutputBlock(configBlock, configBlockPath))
 
-	txBuilder := AddOrUpdateNamespaces(t, c.LoadProfile.Transaction.Policy, "1", "2")
+	//t.Log(runtime)
 
-	for _, mode := range []string{connection.NoneTLSMode} {
+	for _, mode := range []string{connection.NoneTLSMode, connection.OneSideTLSMode, connection.MutualTLSMode} {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			containerName := assembleContainerName("committer", mode, dbtest.PostgresDBType)
-			clientTLSConfig, _ := credsFactory.CreateClientCredentials(t, mode)
+
+			runtime := runner.CommitterRuntime{
+				CredFactory:      testutils.NewCredentialsFactory(t),
+				SeedForCryptoGen: rand.New(rand.NewSource(10)),
+				Config: &runner.Config{
+					CrashTest: false,
+				},
+			}
 
 			ctx := t.Context()
 			stopAndRemoveContainersByName(ctx, t, createDockerClient(t), containerName)
 			startCommitter(ctx, t, startNodeParameters{
 				node:         containerName,
-				credsFactory: credsFactory,
+				credsFactory: runtime.CredFactory,
 				tlsMode:      mode,
-				//configBlockPath: configBlockPath,
 			})
+
+			runtime.SystemConfig.Policy = c.LoadProfile.Transaction.Policy
+			runtime.AddOrUpdateNamespaces(t, "1")
+
+			clientTLSConfig, _ := runtime.CredFactory.CreateClientCredentials(t, mode)
+
+			// creating notification service client
+			sidecarEndpoint, err := connection.NewEndpoint(
+				net.JoinHostPort("localhost", getContainerMappedHostPort(ctx, t, containerName, sidecarPort)),
+			)
+
+			runtime.CommittedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
+				ChannelID: channelName,
+				Client:    testutils.NewTLSClientConfig(clientTLSConfig, sidecarEndpoint),
+			}, 0)
 
 			ordererEndpoint, err := connection.NewEndpoint(
 				net.JoinHostPort("localhost", getContainerMappedHostPort(ctx, t, containerName, mockOrdererPort)),
 			)
-			//ordererEndpoint, err := connection.NewEndpoint(
-			//	net.JoinHostPort("172.17.0.2", mockOrdererPort),
-			//)
-			//Policy.OrdererEndpoints[0] =
-			//	require.NoError(t, err)
-			t.Logf("orederer-endpoint: %v", ordererEndpoint)
-			ep := &ordererconn.Endpoint{ID: 0, MspID: "org", Endpoint: *ordererEndpoint}
-			ordererStream, err := testutils.NewBroadcastStream(t.Context(), &ordererconn.Config{
+
+			runtime.OrdererStream, err = testutils.NewBroadcastStream(t.Context(), &ordererconn.Config{
 				Connection: ordererconn.ConnectionConfig{
 					Endpoints: []*ordererconn.Endpoint{
-						ep,
+						{
+							ID:       0,
+							MspID:    "org",
+							Endpoint: *ordererEndpoint,
+						},
 					},
+					TLS: clientTLSConfig,
 				},
 				ChannelID:     c.LoadProfile.Transaction.Policy.ChannelID,
 				Identity:      c.LoadProfile.Transaction.Policy.Identity,
 				ConsensusType: ordererconn.Bft,
 			})
-			t.Log(ordererStream)
+
+			// creating query service client
 			queryEndpoint, err := connection.NewEndpoint(
 				net.JoinHostPort("localhost", getContainerMappedHostPort(ctx, t, containerName, queryServicePort)),
 			)
 			require.NoError(t, err)
-			QueryServiceClient := protoqueryservice.NewQueryServiceClient(
+			runtime.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
 				testutils.NewSecuredConnection(t, queryEndpoint, clientTLSConfig),
 			)
-			t.Log(QueryServiceClient)
-			sidecarEndpoint, err := connection.NewEndpoint(
-				net.JoinHostPort("localhost", getContainerMappedHostPort(ctx, t, containerName, sidecarPort)),
-			)
-			require.NoError(t, err)
 
-			notifyClient := protonotify.NewNotifierClient(
+			require.NoError(t, err)
+			runtime.NotifyClient = protonotify.NewNotifierClient(
 				testutils.NewSecuredConnection(t, sidecarEndpoint, clientTLSConfig),
 			)
-
-			notifyStream, err := notifyClient.OpenNotificationStream(ctx)
+			// creating notification service stream
+			runtime.NotifyStream, err = runtime.NotifyClient.OpenNotificationStream(ctx)
 			require.NoError(t, err)
-			t.Log(notifyStream)
-			CreateNamespacesAndCommit(t, &notifyStream, ordererStream, txBuilder, c.LoadProfile.Transaction.Policy, "1", "2")
 
-			time.Sleep(20 * time.Second)
+			runtime.CreateNamespacesAndCommit(t, "1")
+
+			//// create namespaces and commit
+			//CreateNamespacesAndCommit(t, &notifyStream, ordererStream, runtime.TxBuilder, c.LoadProfile.Transaction.Policy, "1")
 
 			t.Log("Insert TXs")
-			txIDs := MakeAndSendTransactionsToOrderer(t, &notifyStream, ordererStream, txBuilder, [][]*protoblocktx.TxNamespace{
+
+			txIDs := runtime.MakeAndSendTransactionsToOrderer(t, [][]*protoblocktx.TxNamespace{
 				{{
 					NsId:      "1",
 					NsVersion: 0,
@@ -161,40 +155,59 @@ func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 						},
 					},
 				}},
-			}, []protoblocktx.Status{protoblocktx.Status_COMMITTED, protoblocktx.Status_COMMITTED})
+			}, nil)
+			//txIDs := MakeAndSendTransactionsToOrderer(t, &notifyStream, ordererStream, runtime.TxBuilder, [][]*protoblocktx.TxNamespace{
+			//	{{
+			//		NsId:      "1",
+			//		NsVersion: 0,
+			//		BlindWrites: []*protoblocktx.Write{
+			//			{
+			//				Key:   []byte("k1"),
+			//				Value: []byte("v1"),
+			//			},
+			//			{
+			//				Key:   []byte("k2"),
+			//				Value: []byte("v2"),
+			//			},
+			//		},
+			//	}},
+			//}, []protoblocktx.Status{protoblocktx.Status_COMMITTED, protoblocktx.Status_COMMITTED})
 			require.Len(t, txIDs, 1)
 
-			time.Sleep(10 * time.Second)
-
 			t.Log("Query Rows")
-			ret, err := QueryServiceClient.GetRows(
-				ctx,
-				&protoqueryservice.Query{
-					Namespaces: []*protoqueryservice.QueryNamespace{
-						{
-							NsId: "1",
-							Keys: [][]byte{
-								[]byte("k1"), []byte("k2"),
+			timeoutContext, cancel := context.WithTimeout(ctx, time.Minute)
+			t.Cleanup(cancel)
+			require.NoError(t, defaultRetryProfile.Execute(timeoutContext, func() error {
+				ret, err := runtime.QueryServiceClient.GetRows(
+					timeoutContext,
+					&protoqueryservice.Query{
+						Namespaces: []*protoqueryservice.QueryNamespace{
+							{
+								NsId: "1",
+								Keys: [][]byte{
+									[]byte("k1"),
+									[]byte("k2"),
+								},
 							},
 						},
 					},
-				},
-			)
-			require.NoError(t, err)
-			t.Logf("return namespace ID: %v", ret)
+				)
+				if err == nil {
+					t.Logf("read rows from namespace: %v", ret)
+				}
+				return err
+			}))
 
 			t.Log("Try to fetch the first block")
-			committedBlock := sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
-				ChannelID: channelName,
-				Client:    testutils.NewTLSClientConfig(clientTLSConfig, sidecarEndpoint),
-			}, 0)
-			b, ok := channel.NewReader(ctx, committedBlock).Read()
+			//runtime.CommittedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
+			//	ChannelID: channelName,
+			//	Client:    testutils.NewTLSClientConfig(clientTLSConfig, sidecarEndpoint),
+			//}, 0)
+			b, ok := channel.NewReader(ctx, runtime.CommittedBlock).Read()
 			require.True(t, ok)
 
 			t.Logf("the block: %v", b.String())
 			t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
-
-			//time.Sleep(20 * time.Second)
 		})
 	}
 }
@@ -256,131 +269,3 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 		name: params.node,
 	})
 }
-
-// AddOrUpdateNamespaces adds policies for namespaces. If already exists, the policy will be updated.
-func AddOrUpdateNamespaces(t *testing.T, policy *workload.PolicyProfile, namespaces ...string) *workload.TxBuilder {
-	t.Helper()
-	for _, ns := range namespaces {
-		policy.NamespacePolicies[ns] = &workload.Policy{
-			Scheme: signature.Ecdsa,
-			Seed:   rand.New(rand.NewSource(10)).Int63(),
-		}
-	}
-	var err error
-	TxBuilder, err := workload.NewTxBuilderFromPolicy(policy, nil)
-	require.NoError(t, err)
-
-	return TxBuilder
-}
-
-func CreateNamespacesAndCommit(t *testing.T, notifyStream *protonotify.Notifier_OpenNotificationStreamClient, ordererStream *testutils.BroadcastStream, txBuilder *workload.TxBuilder, policy *workload.PolicyProfile, namespaces ...string) {
-	t.Helper()
-	if len(namespaces) == 0 {
-		return
-	}
-
-	t.Logf("Creating namespaces: %v", namespaces)
-	metaTX, err := workload.CreateNamespacesTX(policy, 0, namespaces...)
-	require.NoError(t, err)
-	MakeAndSendTransactionsToOrderer(
-		t,
-		notifyStream,
-		ordererStream,
-		txBuilder,
-		[][]*protoblocktx.TxNamespace{metaTX.Namespaces},
-		[]protoblocktx.Status{protoblocktx.Status_COMMITTED},
-	)
-}
-
-// MakeAndSendTransactionsToOrderer creates a block with given transactions, send it to the committer,
-// and verify the result.
-func MakeAndSendTransactionsToOrderer(
-	t *testing.T, notifyStream *protonotify.Notifier_OpenNotificationStreamClient, ordererStream *testutils.BroadcastStream, txBuilder *workload.TxBuilder, txsNs [][]*protoblocktx.TxNamespace, expectedStatus []protoblocktx.Status,
-) []string {
-	t.Helper()
-	txs := make([]*protoloadgen.TX, len(txsNs))
-
-	for i, namespaces := range txsNs {
-		tx := &protoblocktx.Tx{
-			Namespaces: namespaces,
-		}
-		if expectedStatus != nil && expectedStatus[i] == protoblocktx.Status_ABORTED_SIGNATURE_INVALID {
-			tx.Signatures = make([][]byte, len(namespaces))
-			for nsIdx := range namespaces {
-				tx.Signatures[nsIdx] = []byte("dummy")
-			}
-		}
-		txs[i] = txBuilder.MakeTx(tx)
-	}
-
-	return SendTransactionsToOrderer(t, *notifyStream, ordererStream, txs, expectedStatus)
-}
-
-// SendTransactionsToOrderer creates a block with given transactions, send it to the committer, and verify the result.
-func SendTransactionsToOrderer(
-	t *testing.T, notifyStream protonotify.Notifier_OpenNotificationStreamClient, ordererStream *testutils.BroadcastStream, txs []*protoloadgen.TX, expectedStatus []protoblocktx.Status,
-) []string {
-	t.Helper()
-	expected := &ExpectedStatusInBlock{
-		Statuses: expectedStatus,
-		TxIDs:    make([]string, len(txs)),
-	}
-	for i, tx := range txs {
-		expected.TxIDs[i] = tx.Id
-	}
-
-	err := notifyStream.Send(&protonotify.NotificationRequest{
-		TxStatusRequest: &protonotify.TxStatusRequest{
-			TxIds: expected.TxIDs,
-		},
-		Timeout: durationpb.New(3 * time.Minute),
-	})
-	require.NoError(t, err)
-	// Allows processing the request before submitting the payload.
-	time.Sleep(1 * time.Second)
-
-	t.Logf("sending batch with txs!")
-	err = ordererStream.SendBatch(workload.MapToEnvelopeBatch(0, txs))
-	require.NoError(t, err)
-	t.Log("no issues")
-
-	return expected.TxIDs
-}
-
-//// mapToStatusBatch creates a status batch from a given block.
-//func mapToStatusBatch(block *common.Block) []metrics.TxStatus {
-//	if block.Data == nil || len(block.Data.Data) == 0 {
-//		return nil
-//	}
-//	blockSize := len(block.Data.Data)
-//
-//	var statusCodes []byte
-//	if block.Metadata != nil && len(block.Metadata.Metadata) > statusIdx {
-//		statusCodes = block.Metadata.Metadata[statusIdx]
-//	}
-//	logger.Infof("Received block #%d with %d TXs and %d statuses [%s]",
-//		block.Header.Number, len(block.Data.Data), len(statusCodes), recapStatusCodes(statusCodes),
-//	)
-//
-//	statusBatch := make([]metrics.TxStatus, 0, blockSize)
-//	for i, data := range block.Data.Data {
-//		_, channelHeader, err := serialization.UnwrapEnvelope(data)
-//		if err != nil {
-//			logger.Warnf("Failed to unmarshal envelope: %v", err)
-//			continue
-//		}
-//		if common.HeaderType(channelHeader.Type) == common.HeaderType_CONFIG {
-//			// We can ignore config transactions as we only count data transactions.
-//			continue
-//		}
-//		status := protoblocktx.Status_COMMITTED
-//		if len(statusCodes) > i {
-//			status = protoblocktx.Status(statusCodes[i])
-//		}
-//		statusBatch = append(statusBatch, metrics.TxStatus{
-//			TxID:   channelHeader.TxId,
-//			Status: status,
-//		})
-//	}
-//	return statusBatch
-//}

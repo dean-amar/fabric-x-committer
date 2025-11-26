@@ -56,20 +56,20 @@ type (
 
 		dbEnv *vc.DatabaseTestEnv
 
-		ordererStream      *test.BroadcastStream
+		OrdererStream      *test.BroadcastStream
 		CoordinatorClient  protocoordinatorservice.CoordinatorClient
 		QueryServiceClient protoqueryservice.QueryServiceClient
-		sidecarClient      *sidecarclient.Client
-		notifyClient       protonotify.NotifierClient
-		notifyStream       protonotify.Notifier_OpenNotificationStreamClient
+		SidecarClient      *sidecarclient.Client
+		NotifyClient       protonotify.NotifierClient
+		NotifyStream       protonotify.Notifier_OpenNotificationStreamClient
 
 		CommittedBlock chan *common.Block
 
 		TxBuilder *workload.TxBuilder
 
-		config *Config
+		Config *Config
 
-		seedForCryptoGen *rand.Rand
+		SeedForCryptoGen *rand.Rand
 
 		LastReceivedBlockNumber uint64
 
@@ -140,7 +140,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	t.Helper()
 
 	c := &CommitterRuntime{
-		config: conf,
+		Config: conf,
 		SystemConfig: config.SystemConfig{
 			BlockSize:         conf.BlockSize,
 			BlockTimeout:      conf.BlockTimeout,
@@ -153,7 +153,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			Logging: &logging.DefaultConfig,
 		},
 		CommittedBlock:   make(chan *common.Block, 100),
-		seedForCryptoGen: rand.New(rand.NewSource(10)),
+		SeedForCryptoGen: rand.New(rand.NewSource(10)),
 	}
 	c.AddOrUpdateNamespaces(t, types.MetaNamespaceID, workload.GeneratedNamespaceID, "1", "2", "3")
 
@@ -198,7 +198,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	t.Log("create TLS manager and clients certificate")
 	c.CredFactory = test.NewCredentialsFactory(t)
-	s.ClientTLS, _ = c.CredFactory.CreateClientCredentials(t, c.config.TLSMode)
+	s.ClientTLS, _ = c.CredFactory.CreateClientCredentials(t, c.Config.TLSMode)
 
 	t.Log("Create processes")
 	c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
@@ -231,11 +231,11 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		test.NewSecuredConnection(t, s.Endpoints.Query.Server, c.SystemConfig.ClientTLS),
 	)
 
-	c.notifyClient = protonotify.NewNotifierClient(
+	c.NotifyClient = protonotify.NewNotifierClient(
 		test.NewSecuredConnection(t, s.Endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
 	)
 
-	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
+	c.OrdererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
 		Connection: ordererconn.ConnectionConfig{
 			Endpoints: s.Policy.OrdererEndpoints,
 		},
@@ -244,14 +244,14 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		ConsensusType: ordererconn.Bft,
 	})
 	require.NoError(t, err)
-	t.Cleanup(c.ordererStream.CloseConnections)
+	t.Cleanup(c.OrdererStream.CloseConnections)
 
-	c.sidecarClient, err = sidecarclient.New(&sidecarclient.Parameters{
+	c.SidecarClient, err = sidecarclient.New(&sidecarclient.Parameters{
 		ChannelID: s.Policy.ChannelID,
 		Client:    test.NewTLSClientConfig(s.ClientTLS, s.Endpoints.Sidecar.Server),
 	})
 	require.NoError(t, err)
-	t.Cleanup(c.sidecarClient.CloseConnections)
+	t.Cleanup(c.SidecarClient.CloseConnections)
 	return c
 }
 
@@ -285,7 +285,7 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
 		var err error
-		c.notifyStream, err = c.notifyClient.OpenNotificationStream(t.Context())
+		c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(t.Context())
 		require.NoError(t, err)
 	}
 	if QueryService&serviceFlags != 0 {
@@ -343,7 +343,7 @@ func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
 	t.Helper()
 	t.Log("Running delivery client")
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(c.sidecarClient.Deliver(ctx, &sidecarclient.DeliverParameters{
+		return connection.FilterStreamRPCError(c.SidecarClient.Deliver(ctx, &sidecarclient.DeliverParameters{
 			EndBlkNum:   deliver.MaxBlockNum,
 			OutputBlock: c.CommittedBlock,
 		}))
@@ -364,7 +364,7 @@ func (c *CommitterRuntime) AddOrUpdateNamespaces(t *testing.T, namespaces ...str
 	for _, ns := range namespaces {
 		c.SystemConfig.Policy.NamespacePolicies[ns] = &workload.Policy{
 			Scheme: signature.Ecdsa,
-			Seed:   c.seedForCryptoGen.Int63(),
+			Seed:   c.SeedForCryptoGen.Int63(),
 		}
 	}
 	var err error
@@ -385,7 +385,7 @@ func (c *CommitterRuntime) CreateNamespacesAndCommit(t *testing.T, namespaces ..
 	c.MakeAndSendTransactionsToOrderer(
 		t,
 		[][]*protoblocktx.TxNamespace{metaTX.Namespaces},
-		[]protoblocktx.Status{protoblocktx.Status_COMMITTED},
+		nil,
 	)
 }
 
@@ -426,8 +426,8 @@ func (c *CommitterRuntime) SendTransactionsToOrderer(
 		expected.TxIDs[i] = tx.Id
 	}
 
-	if !c.config.CrashTest {
-		err := c.notifyStream.Send(&protonotify.NotificationRequest{
+	if !c.Config.CrashTest {
+		err := c.NotifyStream.Send(&protonotify.NotificationRequest{
 			TxStatusRequest: &protonotify.TxStatusRequest{
 				TxIds: expected.TxIDs,
 			},
@@ -438,7 +438,7 @@ func (c *CommitterRuntime) SendTransactionsToOrderer(
 		time.Sleep(1 * time.Second)
 	}
 
-	err := c.ordererStream.SendBatch(workload.MapToEnvelopeBatch(0, txs))
+	err := c.OrdererStream.SendBatch(workload.MapToEnvelopeBatch(0, txs))
 	require.NoError(t, err)
 
 	if expectedStatus != nil {
@@ -525,11 +525,11 @@ func (c *CommitterRuntime) ValidateExpectedResultsInCommittedBlock(t *testing.T,
 	defer cancel()
 	test.EnsurePersistedTxStatus(ctx, t, c.CoordinatorClient, persistedTxIDs, persistedTxIDsStatus)
 
-	if len(expected.TxIDs) == 0 || c.config.CrashTest {
+	if len(expected.TxIDs) == 0 || c.Config.CrashTest {
 		return
 	}
 
-	sidecar.RequireNotifications(t, c.notifyStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
+	sidecar.RequireNotifications(t, c.NotifyStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
 }
 
 // CountStatus returns the number of transactions with a given tx status.
@@ -574,7 +574,7 @@ func (c *CommitterRuntime) createSystemConfigWithServerTLS(
 ) *config.SystemConfig {
 	t.Helper()
 	serviceCfg := c.SystemConfig
-	serviceCfg.ServiceTLS, _ = c.CredFactory.CreateServerCredentials(t, c.config.TLSMode, endpoints.Server.Host)
+	serviceCfg.ServiceTLS, _ = c.CredFactory.CreateServerCredentials(t, c.Config.TLSMode, endpoints.Server.Host)
 	serviceCfg.ServiceEndpoints = endpoints
 	return &serviceCfg
 }

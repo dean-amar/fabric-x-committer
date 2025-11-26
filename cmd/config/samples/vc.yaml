@@ -72,10 +72,10 @@ resource-limits:
   max-workers-for-validator: 1 # Maximum number of workers for the validator
   max-workers-for-committer: 20 # Maximum number of workers for the committer
   min-transaction-batch-size: 1
-  timeout-for-min-transaction-batch-size: 5s
+  timeout-for-min-transaction-batch-size: 2s
 
 logging:
   development: false
   enabled: true
-  level: DEBUG
+  level: INFO
   name: VC
