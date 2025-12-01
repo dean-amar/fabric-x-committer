@@ -135,9 +135,12 @@ func NewDatabaseTestEnv(t *testing.T) *DatabaseTestEnv {
 func NewDatabaseTestEnvWithCustomConnection(t *testing.T, dbConnections *dbtest.Connection) *DatabaseTestEnv {
 	t.Helper()
 	require.NotNil(t, dbConnections)
-	return NewDatabaseTestEnvFromConnection(t, dbtest.PrepareTestEnvWithConnection(t, dbConnections), dbConnections.LoadBalance)
+	return NewDatabaseTestEnvFromConnection(
+		t, dbtest.PrepareTestEnvWithConnection(t, dbConnections), dbConnections.LoadBalance,
+	)
 }
 
+// NewDatabaseTestEnvFromConnection creates a new db test environment given a db connection without creating a database.
 func NewDatabaseTestEnvFromConnection(t *testing.T, cs *dbtest.Connection, loadBalance bool) *DatabaseTestEnv {
 	t.Helper()
 	config := &DatabaseConfig{

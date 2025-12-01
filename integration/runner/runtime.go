@@ -223,61 +223,15 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	t.Logf("sidecar-server-ep: %v", s.Endpoints.Sidecar)
 	c.Sidecar = newProcess(t, cmdSidecar, c.createSystemConfigWithServerTLS(t, s.Endpoints.Sidecar))
 
-	//c.SystemConfig = *s
-
 	t.Log("Create clients")
-	c.CreateRuntimeClients(t.Context(), t, s)
+	c.CreateRuntimeClients(t.Context(), t)
 	return c
 }
 
-func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.T, s *config.SystemConfig) {
+// CreateRuntimeClients create and set the necessary service's clients.
+func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.T) {
 	t.Helper()
-
-	if s != nil {
-		endpoints := s.Endpoints
-
-		t.Logf("system-config-endpoints-sidecar: %v", endpoints.Sidecar)
-
-		c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
-			test.NewSecuredConnection(t, endpoints.Coordinator.Server, s.ClientTLS),
-		)
-
-		c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
-			test.NewSecuredConnection(t, endpoints.Query.Server, s.ClientTLS),
-		)
-
-		c.NotifyClient = protonotify.NewNotifierClient(
-			test.NewSecuredConnection(t, endpoints.Sidecar.Server, s.ClientTLS),
-		)
-
-		var err error
-		c.OrdererStream, err = test.NewBroadcastStream(ctx, &ordererconn.Config{
-			Connection: ordererconn.ConnectionConfig{
-				Endpoints: s.Policy.OrdererEndpoints,
-			},
-			ChannelID:     s.Policy.ChannelID,
-			Identity:      s.Policy.Identity,
-			ConsensusType: ordererconn.Bft,
-		})
-		require.NoError(t, err)
-		t.Cleanup(c.OrdererStream.CloseConnections)
-
-		//c.Sidecar.Restart(t)
-		//c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
-		//require.NoError(t, err)
-
-		c.SidecarClient, err = sidecarclient.New(&sidecarclient.Parameters{
-			ChannelID: s.Policy.ChannelID,
-			Client:    test.NewTLSClientConfig(s.ClientTLS, endpoints.Sidecar.Server),
-		})
-		require.NoError(t, err)
-		t.Cleanup(c.SidecarClient.CloseConnections)
-
-		return
-	}
 	endpoints := c.SystemConfig.Endpoints
-
-	t.Logf("system-config-endpoints-sidecar: %v", endpoints.Sidecar)
 
 	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
 		test.NewSecuredConnection(t, endpoints.Coordinator.Server, c.SystemConfig.ClientTLS),
@@ -295,6 +249,7 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	c.OrdererStream, err = test.NewBroadcastStream(ctx, &ordererconn.Config{
 		Connection: ordererconn.ConnectionConfig{
 			Endpoints: c.SystemConfig.Policy.OrdererEndpoints,
+			TLS:       c.SystemConfig.ClientTLS,
 		},
 		ChannelID:     c.SystemConfig.Policy.ChannelID,
 		Identity:      c.SystemConfig.Policy.Identity,
@@ -303,15 +258,20 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	require.NoError(t, err)
 	t.Cleanup(c.OrdererStream.CloseConnections)
 
-	c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
-	require.NoError(t, err)
-
 	c.SidecarClient, err = sidecarclient.New(&sidecarclient.Parameters{
 		ChannelID: c.SystemConfig.Policy.ChannelID,
 		Client:    test.NewTLSClientConfig(c.SystemConfig.ClientTLS, endpoints.Sidecar.Server),
 	})
 	require.NoError(t, err)
 	t.Cleanup(c.SidecarClient.CloseConnections)
+}
+
+// OpenNotificationStream starts a notification stream.
+func (c *CommitterRuntime) OpenNotificationStream(ctx context.Context, t *testing.T) {
+	t.Helper()
+	var err error
+	c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
+	require.NoError(t, err)
 }
 
 // Start runs all services and load generator as configured by the serviceFlags.
@@ -343,9 +303,7 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	}
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
-		var err error
-		c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(t.Context())
-		require.NoError(t, err)
+		c.OpenNotificationStream(t.Context(), t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)

@@ -22,7 +22,6 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
 	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
@@ -98,7 +97,7 @@ func monitorMetric(t *testing.T, metricsPort string) {
 	// We log only if there are changes to avoid spamming the log.
 	prevCount := -1
 	require.Eventually(t, func() bool {
-		count := test.GetMetricValueFromURL(t, metricsURL, monitoredMetric)
+		count := testutils.GetMetricValueFromURL(t, metricsURL, monitoredMetric)
 		if prevCount != count {
 			t.Logf("%s: %d", monitoredMetric, count)
 		}

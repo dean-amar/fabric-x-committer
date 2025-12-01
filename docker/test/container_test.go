@@ -19,7 +19,9 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
 	"github.com/hyperledger/fabric-x-committer/api/protoqueryservice"
@@ -50,15 +52,17 @@ func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 
 	// reading the transaction policy from the config block
 	v := config.NewViperWithLoadGenDefaults()
-	c, err := config.ReadLoadGenYamlAndSetupLogging(v, filepath.Join(localConfigPath, "loadgen.yaml"))
+	conf, err := config.ReadLoadGenYamlAndSetupLogging(v, filepath.Join(localConfigPath, "loadgen.yaml"))
 	require.NoError(t, err)
+	// creating credential factory
+	credsFactory := testutils.NewCredentialsFactory(t)
 
-	for _, mode := range []string{connection.NoneTLSMode} {
+	for _, mode := range testutils.ServerModes {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
-			containerName := assembleContainerName("committer", mode, dbtest.PostgresDBType)
 			ctx := t.Context()
-			credsFactory := testutils.NewCredentialsFactory(t)
+
+			containerName := assembleContainerName("committer", mode, dbtest.PostgresDBType)
 			stopAndRemoveContainersByName(ctx, t, createDockerClient(t), containerName)
 			startCommitter(ctx, t, startNodeParameters{
 				node:         containerName,
@@ -73,9 +77,7 @@ func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 				false,
 			)
 
-			t.Logf("database-config: %v", dbEnv.DBConf)
-
-			c := c
+			c := conf
 			c.LoadProfile.Transaction.Policy.OrdererEndpoints = []*ordererconn.Endpoint{
 				{
 					ID:       0,
@@ -103,19 +105,20 @@ func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 					},
 					Policy: c.LoadProfile.Transaction.Policy,
 				},
-				// must be set export DB_DEPLOYMENT=local
 				DBEnv: dbEnv,
 			}
+			runtime.SystemConfig.ClientTLS, _ = runtime.CredFactory.CreateClientCredentials(t, mode)
 
-			runtime.CreateRuntimeClients(ctx, t, nil)
+			runtime.CreateRuntimeClients(ctx, t)
+			runtime.OpenNotificationStream(ctx, t)
 
 			runtime.AddOrUpdateNamespaces(t, "1")
 
-			runtime.SystemConfig.ClientTLS, _ = runtime.CredFactory.CreateClientCredentials(t, mode)
-
 			runtime.CommittedBlock = sidecarclient.StartSidecarClient(ctx, t, &sidecarclient.Parameters{
 				ChannelID: channelName,
-				Client:    testutils.NewTLSClientConfig(runtime.SystemConfig.ClientTLS, runtime.SystemConfig.Endpoints.Sidecar.Server),
+				Client: testutils.NewTLSClientConfig(
+					runtime.SystemConfig.ClientTLS, runtime.SystemConfig.Endpoints.Sidecar.Server,
+				),
 			}, 0)
 
 			t.Log("Try to fetch the first block")
@@ -155,8 +158,7 @@ func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 						{
 							NsId: "1",
 							Keys: [][]byte{
-								[]byte("k1"),
-								[]byte("k2"),
+								[]byte("k1"), []byte("k2"),
 							},
 						},
 					},
@@ -165,7 +167,24 @@ func TestStartTestNodeWithoutLoadgen(t *testing.T) {
 			require.NoError(t, err)
 			t.Logf("read rows from namespace: %v", ret)
 
-			// add expected returned value
+			requiredItems := []*protoqueryservice.RowsNamespace{
+				{
+					NsId: "1",
+					Rows: []*protoqueryservice.Row{
+						{
+							Key:     []byte("k1"),
+							Value:   []byte("v1"),
+							Version: 0,
+						},
+						{
+							Key:     []byte("k2"),
+							Value:   []byte("v2"),
+							Version: 0,
+						},
+					},
+				},
+			}
+			requireQueryResults(t, requiredItems, ret.Namespaces)
 		})
 	}
 }
@@ -178,7 +197,6 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 			Cmd:   []string{"run", "db", "committer", "orderer"},
 			ExposedPorts: nat.PortSet{
 				sidecarPort + "/tcp":            struct{}{},
-				loadGenMetricsPort + "/tcp":     struct{}{},
 				mockOrdererPort + "/tcp":        struct{}{},
 				queryServicePort + "/tcp":       struct{}{},
 				coordinatorServicePort + "/tcp": struct{}{},
@@ -230,9 +248,34 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 }
 
 func mustGetEndpoint(ctx context.Context, t *testing.T, containerName, servicePort string) *connection.Endpoint {
+	t.Helper()
 	ep, err := connection.NewEndpoint(
 		net.JoinHostPort("localhost", getContainerMappedHostPort(ctx, t, containerName, servicePort)),
 	)
 	require.NoError(t, err)
 	return ep
+}
+
+// requireQueryResults requires that the items retrieved by the Query service
+// equals to the test items that added to the DB.
+// We can’t use ElementsMatch to compare protobuf messages.
+// In the in-process tests, the QueryService returns Row objects created directly
+// in Go, so their internal protobuf fields stay zeroed.
+// But in the Docker tests, the response comes through real gRPC
+// (Marshal → send bytes → Unmarshal), which fills internal protobuf fields.
+// These hidden fields differ even when Key/Value/Version are identical,
+// so DeepEqual sees them as “not equal”. Use a protobuf-aware comparison instead.
+func requireQueryResults(
+	t *testing.T,
+	requiredItems []*protoqueryservice.RowsNamespace,
+	retNamespaces []*protoqueryservice.RowsNamespace,
+) {
+	t.Helper()
+	require.Len(t, retNamespaces, len(requiredItems))
+	for idx := range retNamespaces {
+		require.True(t,
+			cmp.Equal(requiredItems[idx].Rows, retNamespaces[idx].Rows, protocmp.Transform()),
+			cmp.Diff(requiredItems[idx].Rows, retNamespaces[idx].Rows, protocmp.Transform()),
+		)
+	}
 }
