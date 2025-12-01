@@ -54,7 +54,7 @@ type (
 		Verifier     []*ProcessWithConfig
 		VcService    []*ProcessWithConfig
 
-		dbEnv *vc.DatabaseTestEnv
+		DBEnv *vc.DatabaseTestEnv
 
 		OrdererStream      *test.BroadcastStream
 		CoordinatorClient  protocoordinatorservice.CoordinatorClient
@@ -159,17 +159,17 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	t.Log("Making DB env")
 	if conf.DBConnection == nil {
-		c.dbEnv = vc.NewDatabaseTestEnv(t)
+		c.DBEnv = vc.NewDatabaseTestEnv(t)
 	} else {
-		c.dbEnv = vc.NewDatabaseTestEnvWithCustomConnection(t, conf.DBConnection)
+		c.DBEnv = vc.NewDatabaseTestEnvWithCustomConnection(t, conf.DBConnection)
 	}
 
 	s := &c.SystemConfig
-	s.DB.Name = c.dbEnv.DBConf.Database
-	s.DB.Password = c.dbEnv.DBConf.Password
-	s.DB.LoadBalance = c.dbEnv.DBConf.LoadBalance
-	s.DB.Endpoints = c.dbEnv.DBConf.Endpoints
-	s.DB.TLS = c.dbEnv.DBConf.TLS
+	s.DB.Name = c.DBEnv.DBConf.Database
+	s.DB.Password = c.DBEnv.DBConf.Password
+	s.DB.LoadBalance = c.DBEnv.DBConf.LoadBalance
+	s.DB.Endpoints = c.DBEnv.DBConf.Endpoints
+	s.DB.TLS = c.DBEnv.DBConf.TLS
 	s.LedgerPath = t.TempDir()
 	s.ConfigBlockPath = filepath.Join(t.TempDir(), "config-block.pb.bin")
 
@@ -220,39 +220,98 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	c.QueryService = newProcess(t, cmdQuery, c.createSystemConfigWithServerTLS(t, s.Endpoints.Query))
 
+	t.Logf("sidecar-server-ep: %v", s.Endpoints.Sidecar)
 	c.Sidecar = newProcess(t, cmdSidecar, c.createSystemConfigWithServerTLS(t, s.Endpoints.Sidecar))
 
+	//c.SystemConfig = *s
+
 	t.Log("Create clients")
+	c.CreateRuntimeClients(t.Context(), t, s)
+	return c
+}
+
+func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.T, s *config.SystemConfig) {
+	t.Helper()
+
+	if s != nil {
+		endpoints := s.Endpoints
+
+		t.Logf("system-config-endpoints-sidecar: %v", endpoints.Sidecar)
+
+		c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
+			test.NewSecuredConnection(t, endpoints.Coordinator.Server, s.ClientTLS),
+		)
+
+		c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
+			test.NewSecuredConnection(t, endpoints.Query.Server, s.ClientTLS),
+		)
+
+		c.NotifyClient = protonotify.NewNotifierClient(
+			test.NewSecuredConnection(t, endpoints.Sidecar.Server, s.ClientTLS),
+		)
+
+		var err error
+		c.OrdererStream, err = test.NewBroadcastStream(ctx, &ordererconn.Config{
+			Connection: ordererconn.ConnectionConfig{
+				Endpoints: s.Policy.OrdererEndpoints,
+			},
+			ChannelID:     s.Policy.ChannelID,
+			Identity:      s.Policy.Identity,
+			ConsensusType: ordererconn.Bft,
+		})
+		require.NoError(t, err)
+		t.Cleanup(c.OrdererStream.CloseConnections)
+
+		//c.Sidecar.Restart(t)
+		//c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
+		//require.NoError(t, err)
+
+		c.SidecarClient, err = sidecarclient.New(&sidecarclient.Parameters{
+			ChannelID: s.Policy.ChannelID,
+			Client:    test.NewTLSClientConfig(s.ClientTLS, endpoints.Sidecar.Server),
+		})
+		require.NoError(t, err)
+		t.Cleanup(c.SidecarClient.CloseConnections)
+
+		return
+	}
+	endpoints := c.SystemConfig.Endpoints
+
+	t.Logf("system-config-endpoints-sidecar: %v", endpoints.Sidecar)
+
 	c.CoordinatorClient = protocoordinatorservice.NewCoordinatorClient(
-		test.NewSecuredConnection(t, s.Endpoints.Coordinator.Server, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnection(t, endpoints.Coordinator.Server, c.SystemConfig.ClientTLS),
 	)
 
 	c.QueryServiceClient = protoqueryservice.NewQueryServiceClient(
-		test.NewSecuredConnection(t, s.Endpoints.Query.Server, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnection(t, endpoints.Query.Server, c.SystemConfig.ClientTLS),
 	)
 
 	c.NotifyClient = protonotify.NewNotifierClient(
-		test.NewSecuredConnection(t, s.Endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnection(t, endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
 	)
 
-	c.OrdererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
+	var err error
+	c.OrdererStream, err = test.NewBroadcastStream(ctx, &ordererconn.Config{
 		Connection: ordererconn.ConnectionConfig{
-			Endpoints: s.Policy.OrdererEndpoints,
+			Endpoints: c.SystemConfig.Policy.OrdererEndpoints,
 		},
-		ChannelID:     s.Policy.ChannelID,
-		Identity:      s.Policy.Identity,
+		ChannelID:     c.SystemConfig.Policy.ChannelID,
+		Identity:      c.SystemConfig.Policy.Identity,
 		ConsensusType: ordererconn.Bft,
 	})
 	require.NoError(t, err)
 	t.Cleanup(c.OrdererStream.CloseConnections)
 
+	c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
+	require.NoError(t, err)
+
 	c.SidecarClient, err = sidecarclient.New(&sidecarclient.Parameters{
-		ChannelID: s.Policy.ChannelID,
-		Client:    test.NewTLSClientConfig(s.ClientTLS, s.Endpoints.Sidecar.Server),
+		ChannelID: c.SystemConfig.Policy.ChannelID,
+		Client:    test.NewTLSClientConfig(c.SystemConfig.ClientTLS, endpoints.Sidecar.Server),
 	})
 	require.NoError(t, err)
 	t.Cleanup(c.SidecarClient.CloseConnections)
-	return c
 }
 
 // Start runs all services and load generator as configured by the serviceFlags.
@@ -385,7 +444,7 @@ func (c *CommitterRuntime) CreateNamespacesAndCommit(t *testing.T, namespaces ..
 	c.MakeAndSendTransactionsToOrderer(
 		t,
 		[][]*protoblocktx.TxNamespace{metaTX.Namespaces},
-		nil,
+		[]protoblocktx.Status{protoblocktx.Status_COMMITTED},
 	)
 }
 
@@ -516,10 +575,10 @@ func (c *CommitterRuntime) ValidateExpectedResultsInCommittedBlock(t *testing.T,
 		}
 	}
 
-	c.dbEnv.StatusExistsForNonDuplicateTxID(t, persistedTxIDsStatus)
+	c.DBEnv.StatusExistsForNonDuplicateTxID(t, persistedTxIDsStatus)
 	// For the duplicate txID, neither the status nor the height would match the entry in the
 	// transaction status table.
-	c.dbEnv.StatusExistsWithDifferentHeightForDuplicateTxID(t, duplicateTxIDsStatus)
+	c.DBEnv.StatusExistsWithDifferentHeightForDuplicateTxID(t, duplicateTxIDsStatus)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
@@ -535,13 +594,13 @@ func (c *CommitterRuntime) ValidateExpectedResultsInCommittedBlock(t *testing.T,
 // CountStatus returns the number of transactions with a given tx status.
 func (c *CommitterRuntime) CountStatus(t *testing.T, status protoblocktx.Status) int {
 	t.Helper()
-	return c.dbEnv.CountStatus(t, status)
+	return c.DBEnv.CountStatus(t, status)
 }
 
 // CountAlternateStatus returns the number of transactions not with a given tx status.
 func (c *CommitterRuntime) CountAlternateStatus(t *testing.T, status protoblocktx.Status) int {
 	t.Helper()
-	return c.dbEnv.CountAlternateStatus(t, status)
+	return c.DBEnv.CountAlternateStatus(t, status)
 }
 
 func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum uint64) {
