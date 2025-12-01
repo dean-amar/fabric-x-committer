@@ -206,7 +206,7 @@ func (dc *DatabaseContainer) initDefaults(t *testing.T) { //nolint:gocognit
 	}
 
 	if strconv.Itoa(dc.HostPort) == "0" {
-		dc.HostPort = 7000
+		dc.HostPort = 0
 	}
 
 	if dc.PortBinds == nil {
