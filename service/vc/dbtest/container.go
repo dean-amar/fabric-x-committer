@@ -34,7 +34,7 @@ const (
 	defaultDBDeploymentTemplateName = "sc_%s_unit_tests"
 
 	defaultHostIP  = "127.0.0.1"
-	defaultPortMap = "9555/tcp"
+	defaultPortMap = "7000/tcp"
 
 	// container's Memory and CPU management.
 	gb         = 1 << 30 // gb is the number of bytes needed to represent 1 GB.
