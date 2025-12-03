@@ -112,7 +112,6 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*commontype
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
-
 	var endpoints []*commontypes.OrdererEndpoint
 	for orgID, org := range oc.Organizations() {
 		endpointsStr := org.Endpoints()

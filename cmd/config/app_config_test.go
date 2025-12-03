@@ -65,7 +65,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			Server:     newServerConfig("localhost", 4001),
 			Monitoring: newMonitoringConfig("localhost", 2114),
 			Orderer: ordererconn.Config{
-				Connection: ordererconn.ConnectionConfig{
+				Connection: ordererconn.OrganizationConfig{
 					Endpoints: []*commontypes.OrdererEndpoint{
 						newOrdererEndpoint("", "localhost"),
 					},
@@ -105,7 +105,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			},
 			Monitoring: newMonitoringConfig("", 2114),
 			Orderer: ordererconn.Config{
-				Connection: ordererconn.ConnectionConfig{
+				Connection: ordererconn.OrganizationConfig{
 					Endpoints: []*commontypes.OrdererEndpoint{
 						newOrdererEndpoint("", "orderer"),
 					},
@@ -362,7 +362,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", 4001),
 					Orderer: ordererconn.Config{
-						Connection: ordererconn.ConnectionConfig{
+						Connection: ordererconn.OrganizationConfig{
 							Endpoints: []*commontypes.OrdererEndpoint{
 								newOrdererEndpoint("", "orderer"),
 							},

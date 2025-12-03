@@ -16,18 +16,22 @@ import (
 
 type (
 	// Config for the orderer-client.
+	// It supports multi-organization connectivity with the same ledger and consensus type.
 	Config struct {
-		Connection    ConnectionConfig `mapstructure:"connection"`
-		ConsensusType string           `mapstructure:"consensus-type"`
-		ChannelID     string           `mapstructure:"channel-id"`
-		Identity      *IdentityConfig  `mapstructure:"identity"`
+		ConsensusType string `mapstructure:"consensus-type"`
+		ChannelID     string `mapstructure:"channel-id"`
+		// rename Connection to Organizations.
+		Connection []*OrganizationConfig    `mapstructure:"connection"`
+		Identity   *IdentityConfig          `mapstructure:"identity"`
+		Retry      *connection.RetryProfile `mapstructure:"reconnect"`
 	}
 
-	// ConnectionConfig contains the endpoints, CAs, and retry profile.
-	ConnectionConfig struct {
+	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationConfig struct {
+		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
-		TLS       connection.TLSConfig           `mapstructure:"tls"`
-		Retry     *connection.RetryProfile       `mapstructure:"reconnect"`
+		// maybe we can use the same client keys but use the different CAs.
+		TLS connection.TLSConfig `mapstructure:"tls"`
 	}
 
 	// IdentityConfig defines the orderer's MSP.
@@ -72,7 +76,7 @@ func ValidateConfig(c *Config) error {
 }
 
 // ValidateConnectionConfig validate the configuration.
-func ValidateConnectionConfig(c *ConnectionConfig) error {
+func ValidateConnectionConfig(c *OrganizationConfig) error {
 	if c == nil {
 		return ErrEmptyConnectionConfig
 	}

@@ -227,7 +227,7 @@ func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (*mock.Orderer, [
 	conf := ordererconn.Config{
 		ChannelID:     channelForTest,
 		ConsensusType: ordererconn.Bft,
-		Connection:    ordererconn.ConnectionConfig{Retry: &testGrpcRetryProfile},
+		Connection:    ordererconn.OrganizationConfig{Retry: &testGrpcRetryProfile},
 	}
 	servers := make([]test.GrpcServers, idCount)
 	for i, c := range ordererServer.Configs {

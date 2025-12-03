@@ -147,7 +147,7 @@ func newSidecarTestEnvWithTLS(
 		Server: connection.NewLocalHostServerWithTLS(serverCreds),
 		Orderer: ordererconn.Config{
 			ChannelID: ordererEnv.TestConfig.ChanID,
-			Connection: ordererconn.ConnectionConfig{
+			Connection: ordererconn.OrganizationConfig{
 				Endpoints: initOrdererEndpoints,
 			},
 		},

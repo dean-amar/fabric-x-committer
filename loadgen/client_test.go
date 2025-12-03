@@ -215,7 +215,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 					sidecarConf := &sidecar.Config{
 						Server: sidecarServerConf,
 						Orderer: ordererconn.Config{
-							Connection: ordererconn.ConnectionConfig{
+							Connection: ordererconn.OrganizationConfig{
 								Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
 								TLS:       clientTLSConfig,
 							},
@@ -275,7 +275,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					sidecarConf := &sidecar.Config{
 						Server: connection.NewLocalHostServerWithTLS(serverTLSConfig),
 						Orderer: ordererconn.Config{
-							Connection: ordererconn.ConnectionConfig{
+							Connection: ordererconn.OrganizationConfig{
 								Endpoints: endpoints,
 								TLS:       clientTLSConfig,
 							},
@@ -361,7 +361,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 					// Start client
 					clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
 						Orderer: ordererconn.Config{
-							Connection: ordererconn.ConnectionConfig{
+							Connection: ordererconn.OrganizationConfig{
 								Endpoints: endpoints,
 								TLS:       clientTLSConfig,
 							},

@@ -240,7 +240,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	)
 
 	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
-		Connection: ordererconn.ConnectionConfig{
+		Connection: ordererconn.OrganizationConfig{
 			Endpoints: s.Policy.OrdererEndpoints,
 		},
 		ChannelID:     s.Policy.ChannelID,

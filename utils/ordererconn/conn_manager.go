@@ -31,7 +31,7 @@ type (
 	ConnectionManager struct {
 		configVersion atomic.Uint64
 		connections   map[string]*grpc.ClientConn
-		config        *ConnectionConfig
+		config        *OrganizationConfig
 		lock          sync.Mutex
 	}
 
@@ -105,7 +105,7 @@ func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ..
 
 // Update updates the connection configs.
 // This will close all connections, forcing the clients to reload.
-func (c *ConnectionManager) Update(config *ConnectionConfig) error {
+func (c *ConnectionManager) Update(config *OrganizationConfig) error {
 	if err := ValidateConnectionConfig(config); err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func getAllIDs(endpoints []*commontypes.OrdererEndpoint) []uint32 {
 }
 
 func openConnection(
-	conf *ConnectionConfig,
+	conf *OrganizationConfig,
 	endpoints []*connection.Endpoint,
 ) (*grpc.ClientConn, error) {
 	// We shuffle the endpoints for load balancing.
