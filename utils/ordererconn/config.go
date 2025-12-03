@@ -18,23 +18,36 @@ type (
 	// Config for the orderer-client.
 	// It supports multi-organization connectivity with the same ledger and consensus type.
 	Config struct {
-		ConsensusType string `mapstructure:"consensus-type"`
-		ChannelID     string `mapstructure:"channel-id"`
-		// rename Connection to Organizations.
-		Connection []*OrganizationConfig    `mapstructure:"connection"`
-		Identity   *IdentityConfig          `mapstructure:"identity"`
-		Retry      *connection.RetryProfile `mapstructure:"reconnect"`
-	}
-
-	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their TLS config.
-	OrganizationConfig struct {
-		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
-		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
-		// maybe we can use the same client keys but use the different CAs.
+		ConsensusType string                               `mapstructure:"consensus-type"`
+		ChannelID     string                               `mapstructure:"channel-id"`
+		Connection    []*OrganizationParametersWithCAPaths `mapstructure:"connection"`
+		Identity      *IdentityConfig                      `mapstructure:"identity"`
+		Retry         *connection.RetryProfile             `mapstructure:"reconnect"`
+		// this TLS config acts as an orderer client with the same
+		// set of creds but has a list of CA certs for all orderers.
 		TLS connection.TLSConfig `mapstructure:"tls"`
 	}
 
-	// IdentityConfig defines the orderer's MSP.
+	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationParameters struct {
+		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
+		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
+	}
+
+	// OrganizationParametersWithCAPaths contains the MspID (Organization ID),
+	// orderer endpoints, and their CA certs paths.
+	OrganizationParametersWithCAPaths struct {
+		OrganizationParameters
+		CACerts []string `mapstructure:"ca-cert-paths"`
+	}
+
+	// OrganizationParametersWithRawCABytes contains the MspID (Organization ID), orderer endpoints, and their CA certs.
+	OrganizationParametersWithRawCABytes struct {
+		OrganizationParameters
+		CACerts [][]byte
+	}
+
+	// IdentityConfig defines the committer's identity.
 	IdentityConfig struct {
 		// MspID indicates to which MSP this client belongs to.
 		MspID  string               `mapstructure:"msp-id" yaml:"msp-id"`
@@ -76,7 +89,7 @@ func ValidateConfig(c *Config) error {
 }
 
 // ValidateConnectionConfig validate the configuration.
-func ValidateConnectionConfig(c *OrganizationConfig) error {
+func ValidateConnectionConfig(c *OrganizationParameters) error {
 	if c == nil {
 		return ErrEmptyConnectionConfig
 	}

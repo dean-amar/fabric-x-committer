@@ -58,7 +58,7 @@ func (s *Client) CloseConnections() {
 }
 
 // UpdateConnections updates the connection config.
-func (s *Client) UpdateConnections(config *ordererconn.OrganizationConfig) error {
+func (s *Client) UpdateConnections(config *ordererconn.OrganizationParameters) error {
 	return s.connectionManager.Update(config)
 }
 
