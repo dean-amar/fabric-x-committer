@@ -215,10 +215,12 @@ func TestLoadGenForSidecar(t *testing.T) {
 					sidecarConf := &sidecar.Config{
 						Server: sidecarServerConf,
 						Orderer: ordererconn.Config{
-							Connection: ordererconn.OrganizationParameters{
-								Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
-								TLS:       clientTLSConfig,
+							Connection: []*ordererconn.OrganizationParameters{
+								{
+									Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
+								},
 							},
+							TLS:           clientTLSConfig,
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
@@ -275,13 +277,15 @@ func TestLoadGenForOrderer(t *testing.T) {
 					sidecarConf := &sidecar.Config{
 						Server: connection.NewLocalHostServerWithTLS(serverTLSConfig),
 						Orderer: ordererconn.Config{
-							Connection: ordererconn.OrganizationParameters{
-								Endpoints: endpoints,
-								TLS:       clientTLSConfig,
+							Connection: []*ordererconn.OrganizationParameters{
+								{
+									Endpoints: endpoints,
+								},
 							},
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
+							TLS:           clientTLSConfig,
 						},
 						LastCommittedBlockSetInterval: 100 * time.Millisecond,
 						WaitingTxsLimit:               5000,
@@ -361,13 +365,15 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 					// Start client
 					clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
 						Orderer: ordererconn.Config{
-							Connection: ordererconn.OrganizationParameters{
-								Endpoints: endpoints,
-								TLS:       clientTLSConfig,
+							Connection: []*ordererconn.OrganizationParameters{
+								{
+									Endpoints: endpoints,
+								},
 							},
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
+							TLS:           clientTLSConfig,
 						},
 						BroadcastParallelism: 5,
 					}

@@ -52,12 +52,12 @@ func TestBroadcastDeliver(t *testing.T) {
 			ordererService, servers, conf := makeConfig(t, &serverTLSConfig)
 
 			// Set the orderer client credentials.
-			conf.Connection.TLS = clientTLSConfig
-			allEndpoints := conf.Connection.Endpoints
+			conf.TLS = clientTLSConfig
+			allEndpoints := conf.Connection[0].Endpoints
 
 			// We only take the bottom endpoints for now.
 			// Later we take the other endpoints and update the client.
-			conf.Connection.Endpoints = allEndpoints[:6]
+			conf.Connection[0].Endpoints = allEndpoints[:6]
 			client, err := New(&conf)
 			require.NoError(t, err)
 			t.Cleanup(client.CloseConnections)
@@ -138,8 +138,12 @@ func TestBroadcastDeliver(t *testing.T) {
 			})
 
 			t.Log("Update endpoints")
-			conf.Connection.Endpoints = allEndpoints[6:]
-			require.NoError(t, client.UpdateConnections(&conf.Connection))
+			conf.Connection = []*ordererconn.OrganizationParameters{
+				{
+					Endpoints: allEndpoints[6:],
+				},
+			}
+			require.NoError(t, client.UpdateConnections(&conf))
 			submit(t, &conf, outputBlocks, expectedSubmit{
 				success: 3,
 			})
@@ -227,12 +231,14 @@ func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (*mock.Orderer, [
 	conf := ordererconn.Config{
 		ChannelID:     channelForTest,
 		ConsensusType: ordererconn.Bft,
-		Connection:    ordererconn.OrganizationParameters{Retry: &testGrpcRetryProfile},
+		Connection:    make([]*ordererconn.OrganizationParameters, 1),
+		Retry:         &testGrpcRetryProfile,
 	}
+	conf.Connection[0] = &ordererconn.OrganizationParameters{}
 	servers := make([]test.GrpcServers, idCount)
 	for i, c := range ordererServer.Configs {
 		id := uint32(i % idCount) //nolint:gosec // integer overflow conversion int -> uint32
-		conf.Connection.Endpoints = append(conf.Connection.Endpoints, &commontypes.OrdererEndpoint{
+		conf.Connection[0].Endpoints = append(conf.Connection[0].Endpoints, &commontypes.OrdererEndpoint{
 			ID:   id,
 			Host: c.Endpoint.Host,
 			Port: c.Endpoint.Port,
@@ -245,7 +251,7 @@ func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (*mock.Orderer, [
 		require.Lenf(t, s.Configs, serverPerID, "id: %d", i)
 		require.Lenf(t, s.Servers, serverPerID, "id: %d", i)
 	}
-	for i, e := range conf.Connection.Endpoints {
+	for i, e := range conf.Connection[0].Endpoints {
 		t.Logf("ENDPOINT [%02d] %s", i, e.String())
 	}
 	return ordererService, servers, conf

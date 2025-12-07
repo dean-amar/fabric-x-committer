@@ -147,8 +147,10 @@ func newSidecarTestEnvWithTLS(
 		Server: connection.NewLocalHostServerWithTLS(serverCreds),
 		Orderer: ordererconn.Config{
 			ChannelID: ordererEnv.TestConfig.ChanID,
-			Connection: ordererconn.OrganizationParameters{
-				Endpoints: initOrdererEndpoints,
+			Connection: []*ordererconn.OrganizationParameters{
+				{
+					Endpoints: initOrdererEndpoints,
+				},
 			},
 		},
 		Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
@@ -334,8 +336,12 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Log("Modify the Sidecar config, use illegal host endpoint")
 	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
 	// as the sidecar expects the Endpoints to be non-empty.
-	env.config.Orderer.Connection.Endpoints = []*commontypes.OrdererEndpoint{
-		{Host: "localhost", Port: 9999},
+	env.config.Orderer.Connection = []*ordererconn.OrganizationParameters{
+		{
+			Endpoints: []*commontypes.OrdererEndpoint{
+				{Host: "localhost", Port: 9999},
+			},
+		},
 	}
 
 	var err error

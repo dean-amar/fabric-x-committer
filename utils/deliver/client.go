@@ -41,7 +41,7 @@ func New(config *ordererconn.Config) (*Client, error) {
 	}
 
 	cm := &ordererconn.ConnectionManager{}
-	if err = cm.Update(&config.Connection); err != nil {
+	if err = cm.Update(*config); err != nil {
 		return nil, errors.Wrap(err, "error creating connections")
 	}
 
@@ -58,8 +58,8 @@ func (s *Client) CloseConnections() {
 }
 
 // UpdateConnections updates the connection config.
-func (s *Client) UpdateConnections(config *ordererconn.OrganizationParameters) error {
-	return s.connectionManager.Update(config)
+func (s *Client) UpdateConnections(config *ordererconn.Config) error {
+	return s.connectionManager.Update(*config)
 }
 
 // Deliver starts the block receiver. The call to Deliver blocks until an error occurs or the context is canceled.

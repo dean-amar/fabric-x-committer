@@ -31,7 +31,7 @@ type (
 	ConnectionManager struct {
 		configVersion atomic.Uint64
 		connections   map[string]*grpc.ClientConn
-		config        []*OrganizationParameters
+		config        []*GateConfig
 		lock          sync.Mutex
 	}
 
@@ -105,9 +105,11 @@ func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ..
 
 // Update updates the connection configs.
 // This will close all connections, forcing the clients to reload.
-func (c *ConnectionManager) Update(config *OrganizationParameters) error {
-	if err := ValidateConnectionConfig(config); err != nil {
-		return err
+func (c *ConnectionManager) Update(config Config) error {
+	for _, c := range config.Connection {
+		if err := ValidateConnectionConfig(c); err != nil {
+			return err
+		}
 	}
 
 	// We pre create all the connections to ensure correct form.
@@ -115,26 +117,32 @@ func (c *ConnectionManager) Update(config *OrganizationParameters) error {
 	// We use a connection cache to avoid opening the same connection multiple times.
 	connCache := make(map[string]*grpc.ClientConn)
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
-	for _, id := range append(getAllIDs(config.Endpoints), anyID) {
-		for _, api := range allAPIs {
-			filter := aggregateFilter(WithAPI(api), WithID(id))
-			endpoints := filterOrdererEndpoints(config.Endpoints, filter)
-			if len(endpoints) == 0 {
-				continue
-			}
-			endpointsKey := makeEndpointsKey(endpoints)
-			conn, connInCache := connCache[endpointsKey]
-			if !connInCache {
-				var err error
-				conn, err = openConnection(config, endpoints)
-				if err != nil {
-					closeConnection(connections)
-					return err
+	configs := make([]*GateConfig, len(config.Connection))
+	for _, ogParams := range config.Connection {
+		gateConfig := config.CreateConfigWithRequiredParams(ogParams)
+		for _, id := range append(getAllIDs(ogParams.Endpoints), anyID) {
+			for _, api := range allAPIs {
+				filter := aggregateFilter(WithAPI(api), WithID(id))
+				endpoints := filterOrdererEndpoints(ogParams.Endpoints, filter)
+				if len(endpoints) == 0 {
+					continue
 				}
-				connCache[endpointsKey] = conn
+				endpointsKey := makeEndpointsKey(endpoints)
+				conn, connInCache := connCache[endpointsKey]
+				if !connInCache {
+					var err error
+
+					conn, err = openConnection(gateConfig, endpoints)
+					if err != nil {
+						closeConnection(connections)
+						return err
+					}
+					connCache[endpointsKey] = conn
+				}
+				connections[filterKey(filter)] = conn
 			}
-			connections[filterKey(filter)] = conn
 		}
+		configs = append(configs, gateConfig)
 	}
 
 	// We lock once we read internal members.
@@ -146,7 +154,7 @@ func (c *ConnectionManager) Update(config *OrganizationParameters) error {
 	c.configVersion.Add(1)
 	closeConnection(c.connections)
 	c.connections = connections
-	c.config = config
+	c.config = configs
 	return nil
 }
 
@@ -171,12 +179,17 @@ func (c *ConnectionManager) GetConnectionPerID(filters ...ConnFilter) (map[uint3
 		return ret, v
 	}
 	filter := aggregateFilter(filters...)
-	for _, id := range getAllIDs(c.config.Endpoints) {
-		conn := c.connections[filterKey(filter, WithID(id))]
-		if conn != nil {
-			ret[id] = conn
+	for _, gateConf := range c.config {
+		if gateConf != nil {
+			for _, id := range getAllIDs(gateConf.Endpoints) {
+				conn := c.connections[filterKey(filter, WithID(id))]
+				if conn != nil {
+					ret[id] = conn
+				}
+			}
 		}
 	}
+
 	return ret, v
 }
 
@@ -189,7 +202,7 @@ func getAllIDs(endpoints []*commontypes.OrdererEndpoint) []uint32 {
 }
 
 func openConnection(
-	conf *OrganizationParameters,
+	conf *GateConfig,
 	endpoints []*connection.Endpoint,
 ) (*grpc.ClientConn, error) {
 	// We shuffle the endpoints for load balancing.

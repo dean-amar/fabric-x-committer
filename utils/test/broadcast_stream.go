@@ -63,7 +63,7 @@ func NewBroadcastStream(ctx context.Context, config *ordererconn.Config) (*Broad
 	}
 
 	cm := &ordererconn.ConnectionManager{}
-	if err := cm.Update(&config.Connection); err != nil {
+	if err := cm.Update(*config); err != nil {
 		return nil, errors.Wrap(err, "error creating connections")
 	}
 

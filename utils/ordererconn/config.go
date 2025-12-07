@@ -9,20 +9,19 @@ package ordererconn
 import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	commontypes "github.com/hyperledger/fabric-x-common/api/types"
-
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 )
 
 type (
 	// Config for the orderer-client.
 	// It supports multi-organization connectivity with the same ledger and consensus type.
 	Config struct {
-		ConsensusType string                               `mapstructure:"consensus-type"`
-		ChannelID     string                               `mapstructure:"channel-id"`
-		Connection    []*OrganizationParametersWithCAPaths `mapstructure:"connection"`
-		Identity      *IdentityConfig                      `mapstructure:"identity"`
-		Retry         *connection.RetryProfile             `mapstructure:"reconnect"`
+		ConsensusType string                    `mapstructure:"consensus-type"`
+		ChannelID     string                    `mapstructure:"channel-id"`
+		Connection    []*OrganizationParameters `mapstructure:"connection"`
+		Identity      *IdentityConfig           `mapstructure:"identity"`
+		Retry         *connection.RetryProfile  `mapstructure:"reconnect"`
 		// this TLS config acts as an orderer client with the same
 		// set of creds but has a list of CA certs for all orderers.
 		TLS connection.TLSConfig `mapstructure:"tls"`
@@ -32,19 +31,13 @@ type (
 	OrganizationParameters struct {
 		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
+		CACerts   []string                       `mapstructure:"ca-cert-paths"`
 	}
 
-	// OrganizationParametersWithCAPaths contains the MspID (Organization ID),
-	// orderer endpoints, and their CA certs paths.
-	OrganizationParametersWithCAPaths struct {
+	GateConfig struct {
 		OrganizationParameters
-		CACerts []string `mapstructure:"ca-cert-paths"`
-	}
-
-	// OrganizationParametersWithRawCABytes contains the MspID (Organization ID), orderer endpoints, and their CA certs.
-	OrganizationParametersWithRawCABytes struct {
-		OrganizationParameters
-		CACerts [][]byte
+		TLS   connection.TLSConfig
+		Retry *connection.RetryProfile
 	}
 
 	// IdentityConfig defines the committer's identity.
@@ -77,6 +70,19 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
+func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) *GateConfig {
+	tlsConfig := c.TLS
+	tlsConfig.CACertPaths = ogp.CACerts
+	return &GateConfig{
+		OrganizationParameters: OrganizationParameters{
+			MspID:     ogp.MspID,
+			Endpoints: ogp.Endpoints,
+		},
+		TLS:   c.TLS,
+		Retry: c.Retry,
+	}
+}
+
 // ValidateConfig validate the configuration.
 func ValidateConfig(c *Config) error {
 	if c.ConsensusType == "" {
@@ -85,7 +91,12 @@ func ValidateConfig(c *Config) error {
 	if c.ConsensusType != Bft && c.ConsensusType != Cft {
 		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
 	}
-	return ValidateConnectionConfig(&c.Connection)
+	for _, c := range c.Connection {
+		if err := ValidateConnectionConfig(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ValidateConnectionConfig validate the configuration.

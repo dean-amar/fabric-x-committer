@@ -65,9 +65,11 @@ func TestReadConfigSidecar(t *testing.T) {
 			Server:     newServerConfig("localhost", 4001),
 			Monitoring: newMonitoringConfig("localhost", 2114),
 			Orderer: ordererconn.Config{
-				Connection: ordererconn.OrganizationParameters{
-					Endpoints: []*commontypes.OrdererEndpoint{
-						newOrdererEndpoint("", "localhost"),
+				Connection: []*ordererconn.OrganizationParameters{
+					{
+						Endpoints: []*commontypes.OrdererEndpoint{
+							newOrdererEndpoint("", "localhost"),
+						},
 					},
 				},
 				ChannelID: "mychannel",
@@ -105,13 +107,19 @@ func TestReadConfigSidecar(t *testing.T) {
 			},
 			Monitoring: newMonitoringConfig("", 2114),
 			Orderer: ordererconn.Config{
-				Connection: ordererconn.OrganizationParameters{
-					Endpoints: []*commontypes.OrdererEndpoint{
-						newOrdererEndpoint("", "orderer"),
+				Connection: []*ordererconn.OrganizationParameters{
+					{
+						MspID: "org0",
+						Endpoints: []*commontypes.OrdererEndpoint{
+							newOrdererEndpoint("", "orderer"),
+						},
+						CACerts: []string{
+							defaultClientTLSConfig.CACertPaths[0],
+						},
 					},
-					TLS: defaultClientTLSConfig,
 				},
 				ChannelID: "mychannel",
+				TLS:       defaultClientTLSConfig,
 			},
 			Committer: newClientConfigWithDefaultTLS("coordinator", 9001),
 			Ledger: sidecar.LedgerConfig{
@@ -362,14 +370,20 @@ func TestReadConfigLoadGen(t *testing.T) {
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", 4001),
 					Orderer: ordererconn.Config{
-						Connection: ordererconn.OrganizationParameters{
-							Endpoints: []*commontypes.OrdererEndpoint{
-								newOrdererEndpoint("", "orderer"),
+						Connection: []*ordererconn.OrganizationParameters{
+							{
+								MspID: "org0",
+								Endpoints: []*commontypes.OrdererEndpoint{
+									newOrdererEndpoint("", "orderer"),
+								},
+								CACerts: []string{
+									defaultClientTLSConfig.CACertPaths[0],
+								},
 							},
-							TLS: defaultClientTLSConfig,
 						},
 						ChannelID:     "mychannel",
 						ConsensusType: ordererconn.Bft,
+						TLS:           defaultClientTLSConfig,
 					},
 					BroadcastParallelism: 1,
 				},

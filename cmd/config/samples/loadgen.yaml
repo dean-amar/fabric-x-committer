@@ -32,9 +32,12 @@ orderer-client:
         - /client-certs/ca-certificate.pem
   orderer:
     connection:
-      endpoints:
-        - id=0,broadcast,deliver,orderer:7050
-      tls: *clientTLS
+      - msp-id: "org0"
+        endpoints:
+          - id=0,broadcast,deliver,orderer:7050
+        ca-cert-paths:
+          - /client-certs/ca-certificate.pem
+    tls: *clientTLS
     consensus-type: BFT
     channel-id: mychannel
   # We set low values to reduce the CPU load during tests.

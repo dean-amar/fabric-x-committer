@@ -215,7 +215,7 @@ func (s *Service) configUpdater(block *common.Block) {
 		logger.Warnf("failed to load config from block %d: %v", block.Header.Number, err)
 		return
 	}
-	err = s.ordererClient.UpdateConnections(&s.config.Orderer.Connection)
+	err = s.ordererClient.UpdateConnections(&s.config.Orderer)
 	if err != nil {
 		logger.Warnf("failed to update config for block %d: %v", block.Header.Number, err)
 	}
@@ -281,7 +281,7 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 	if err != nil {
 		return err
 	}
-	err = s.ordererClient.UpdateConnections(&s.config.Orderer.Connection)
+	err = s.ordererClient.UpdateConnections(&s.config.Orderer)
 	return errors.Wrapf(err, "failed to update connections")
 }
 

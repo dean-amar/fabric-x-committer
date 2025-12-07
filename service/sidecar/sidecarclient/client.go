@@ -49,11 +49,15 @@ type (
 // New instantiate a new sidecar client.
 func New(config *Parameters) (*Client, error) {
 	cm := &ordererconn.ConnectionManager{}
-	connConfig := &ordererconn.OrganizationParameters{
-		Endpoints: []*commontypes.OrdererEndpoint{{
-			Host: config.Client.Endpoint.Host,
-			Port: config.Client.Endpoint.Port,
-		}},
+	connConfig := ordererconn.Config{
+		Connection: []*ordererconn.OrganizationParameters{
+			{
+				Endpoints: []*commontypes.OrdererEndpoint{{
+					Host: config.Client.Endpoint.Host,
+					Port: config.Client.Endpoint.Port,
+				}},
+			},
+		},
 		Retry: config.Client.Retry,
 		TLS:   config.Client.TLS,
 	}

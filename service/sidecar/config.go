@@ -100,20 +100,22 @@ func OverwriteConfigFromEnvelope(conf *Config, envelope *common.Envelope) error 
 	if err != nil {
 		return errors.Wrap(err, "failed to create config bundle")
 	}
-	conf.Orderer.Connection.Endpoints, err = getDeliveryEndpointsFromConfig(bundle)
+	conf.Orderer.Connection, err = getDeliveryEndpointsFromConfig(bundle)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*commontypes.OrdererEndpoint, error) {
+func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*ordererconn.OrganizationParameters, error) {
 	oc, ok := bundle.OrdererConfig()
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
-	var endpoints []*commontypes.OrdererEndpoint
+
+	var orgParams []*ordererconn.OrganizationParameters
 	for orgID, org := range oc.Organizations() {
+		var endpoints []*commontypes.OrdererEndpoint
 		endpointsStr := org.Endpoints()
 		for _, eStr := range endpointsStr {
 			e, err := commontypes.ParseOrdererEndpoint(eStr)
@@ -123,6 +125,10 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*commontype
 			e.MspID = orgID
 			endpoints = append(endpoints, e)
 		}
+		orgParams = append(orgParams, &ordererconn.OrganizationParameters{
+			Endpoints: endpoints,
+			MspID:     orgID,
+		})
 	}
-	return endpoints, nil
+	return orgParams, nil
 }
