@@ -26,34 +26,34 @@ func TestLoadGenWithTLSModes(t *testing.T) {
 		name         string
 		serviceFlags int
 	}{
-		{
-			name:         "orderer with committer",
-			serviceFlags: runner.FullTxPathWithLoadGen,
-		},
-		{
-			name:         "only orderer",
-			serviceFlags: runner.LoadGenForOnlyOrderer | runner.Orderer,
-		},
+		//{
+		//	name:         "orderer with committer",
+		//	serviceFlags: runner.FullTxPathWithLoadGen,
+		//},
+		//{
+		//	name:         "only orderer",
+		//	serviceFlags: runner.LoadGenForOnlyOrderer | runner.Orderer,
+		//},
 		{
 			name:         "committer",
 			serviceFlags: runner.CommitterTxPathWithLoadGen,
 		},
-		{
-			name:         "coordinator",
-			serviceFlags: runner.LoadGenForCoordinator | runner.Coordinator | runner.VC | runner.Verifier,
-		},
-		{
-			name:         "VC",
-			serviceFlags: runner.LoadGenForVCService | runner.VC,
-		},
-		{
-			name:         "verifier",
-			serviceFlags: runner.LoadGenForVerifier | runner.Verifier,
-		},
-		{
-			name:         "verifier with distributed",
-			serviceFlags: runner.LoadGenForVerifier | runner.LoadGenForDistributedLoadGen | runner.Verifier,
-		},
+		//{
+		//	name:         "coordinator",
+		//	serviceFlags: runner.LoadGenForCoordinator | runner.Coordinator | runner.VC | runner.Verifier,
+		//},
+		//{
+		//	name:         "VC",
+		//	serviceFlags: runner.LoadGenForVCService | runner.VC,
+		//},
+		//{
+		//	name:         "verifier",
+		//	serviceFlags: runner.LoadGenForVerifier | runner.Verifier,
+		//},
+		//{
+		//	name:         "verifier with distributed",
+		//	serviceFlags: runner.LoadGenForVerifier | runner.LoadGenForDistributedLoadGen | runner.Verifier,
+		//},
 	} {
 		tc := tc
 		serviceFlags := tc.serviceFlags

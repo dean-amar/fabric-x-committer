@@ -34,7 +34,7 @@ orderer-client:
     connection:
       - msp-id: "org0"
         endpoints:
-          - id=0,broadcast,deliver,orderer:7050
+          - id=0,broadcast,deliver,localhost:7050
         ca-cert-paths:
           - /client-certs/ca-certificate.pem
     tls: *clientTLS

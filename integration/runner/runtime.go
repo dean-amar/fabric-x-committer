@@ -205,7 +205,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	s.ClientTLS, _ = c.CredFactory.CreateClientCredentials(t, c.config.TLSMode)
 
 	t.Log("Create processes")
-	c.MockOrderer = newProcess(t, cmdOrderer, s.WithEndpoint(s.Endpoints.Orderer[0]))
+	c.MockOrderer = newProcess(t, cmdOrderer, c.createSystemConfigWithServerTLS(t, s.Endpoints.Orderer[0]))
 	for i, e := range s.Endpoints.Verifier {
 		p := cmdVerifier
 		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
