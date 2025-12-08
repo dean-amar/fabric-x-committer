@@ -33,6 +33,8 @@ type (
 		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
 		CACerts   []string                       `mapstructure:"ca-cert-paths"`
+		// do it differently?
+		CACertsBytes [][]byte
 	}
 
 	// GateConfig acts as the full configuration after reading information from the config block.
@@ -76,10 +78,12 @@ var (
 func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) *GateConfig {
 	tlsConfig := c.TLS
 	tlsConfig.CACertPaths = ogp.CACerts
+	tlsConfig.CACertPathsBytes = ogp.CACertsBytes
 	return &GateConfig{
 		OrganizationParameters: OrganizationParameters{
-			MspID:     ogp.MspID,
-			Endpoints: ogp.Endpoints,
+			MspID:        ogp.MspID,
+			Endpoints:    ogp.Endpoints,
+			CACertsBytes: ogp.CACertsBytes,
 		},
 		TLS:   tlsConfig,
 		Retry: c.Retry,

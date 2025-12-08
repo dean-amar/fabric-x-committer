@@ -125,9 +125,11 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*orderercon
 			e.MspID = orgID
 			endpoints = append(endpoints, e)
 		}
+		RootCAs := org.MSP().GetTLSRootCerts()
 		orgParams = append(orgParams, &ordererconn.OrganizationParameters{
-			Endpoints: endpoints,
-			MspID:     orgID,
+			Endpoints:    endpoints,
+			MspID:        orgID,
+			CACertsBytes: RootCAs,
 		})
 	}
 	return orgParams, nil

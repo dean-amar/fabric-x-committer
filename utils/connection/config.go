@@ -76,6 +76,8 @@ type (
 		// KeyPath is the path to the key file (private key).
 		KeyPath     string   `mapstructure:"key-path"`
 		CACertPaths []string `mapstructure:"ca-cert-paths"`
+
+		CACertPathsBytes [][]byte
 	}
 )
 
@@ -152,6 +154,13 @@ func (c TLSConfig) ClientCredentials() (credentials.TransportCredentials, error)
 		tlsCfg.RootCAs, err = buildCertPool(c.CACertPaths)
 		if err != nil {
 			return nil, err
+		}
+
+		// if there are any byte root CAs, we add them as well.
+		for _, caCert := range c.CACertPathsBytes {
+			if ok := tlsCfg.RootCAs.AppendCertsFromPEM(caCert); !ok {
+				return nil, errors.Errorf("unable to parse CA cert %v", caCert)
+			}
 		}
 
 		return credentials.NewTLS(tlsCfg), nil
