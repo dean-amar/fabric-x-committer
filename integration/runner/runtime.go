@@ -245,6 +245,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 				Endpoints: s.Policy.OrdererEndpoints,
 			},
 		},
+		TLS:           c.SystemConfig.ClientTLS,
 		ChannelID:     s.Policy.ChannelID,
 		Identity:      s.Policy.Identity,
 		ConsensusType: ordererconn.Bft,

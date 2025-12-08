@@ -20,4 +20,13 @@ sidecar-client:
     {{- range .Endpoints.Orderer }}
     - endpoint: {{ .Server }}
     {{- end }}
+      tls:
+        mode: {{ .ServiceTLS.Mode }}
+        cert-path: {{ .ServiceTLS.CertPath }}
+        key-path: {{ .ServiceTLS.KeyPath }}
+        ca-cert-paths:
+          {{- range .ServiceTLS.CACertPaths }}
+          - {{ . }}
+          {{- end }}
+
   channel-id: {{ .Policy.ChannelID }}
