@@ -8,18 +8,18 @@ package config
 
 import (
 	"fmt"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
-	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/common/viperutil"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 )
 
 // decoderHook contains custom unmarshalling for types not supported by default by mapstructure.
@@ -65,18 +65,16 @@ func serverDecoder(dataType, targetType reflect.Type, rawData any) (result any, 
 // OrganizationParameters structs or slices of them.
 // Supports ENV override formats like:
 //
-//	"msp-id=org0;id=0,broadcast,deliver,127.0.0.1:7050;ca=/client.pem"
+//	"msp-id=org0;id=0,broadcast,deliver,127.0.0.1:7050;ca=/client_certs/ca-certificate.pem"
 //
 // If applied to a slice type ([]OrganizationParameters), a single item
 // override becomes a slice with one element.
 func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (any, error) {
-	// Convert input to string if possible
 	stringData, ok := viperutil.GetStringData(dataType, raw)
 	if !ok {
 		return raw, nil
 	}
 
-	// SINGLE STRUCT TARGET
 	if targetType == reflect.TypeOf(ordererconn.OrganizationParameters{}) {
 		org, err := parseOrganizationParameters(stringData)
 		if err != nil {
@@ -85,7 +83,6 @@ func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (
 		return *org, nil
 	}
 
-	// SLICE TARGET: []OrganizationParameters or []*OrganizationParameters
 	if targetType.Kind() == reflect.Slice &&
 		(targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationParameters{}) ||
 			targetType.Elem() == reflect.TypeOf(&ordererconn.OrganizationParameters{})) {
@@ -105,7 +102,6 @@ func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (
 		return sliceValue.Interface(), nil
 	}
 
-	// Not applicable
 	return raw, nil
 }
 

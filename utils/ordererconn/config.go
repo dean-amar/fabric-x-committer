@@ -9,8 +9,9 @@ package ordererconn
 import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
+
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 type (
@@ -34,6 +35,7 @@ type (
 		CACerts   []string                       `mapstructure:"ca-cert-paths"`
 	}
 
+	// GateConfig acts as the full configuration after reading information from the config block.
 	GateConfig struct {
 		OrganizationParameters
 		TLS   connection.TLSConfig
@@ -70,6 +72,7 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
+// CreateConfigWithRequiredParams comment will be added.
 func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) *GateConfig {
 	tlsConfig := c.TLS
 	tlsConfig.CACertPaths = ogp.CACerts
@@ -78,7 +81,7 @@ func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) *Ga
 			MspID:     ogp.MspID,
 			Endpoints: ogp.Endpoints,
 		},
-		TLS:   c.TLS,
+		TLS:   tlsConfig,
 		Retry: c.Retry,
 	}
 }

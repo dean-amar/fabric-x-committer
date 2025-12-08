@@ -113,7 +113,7 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*orderercon
 		return nil, errors.New("could not find orderer config")
 	}
 
-	var orgParams []*ordererconn.OrganizationParameters
+	orgParams := make([]*ordererconn.OrganizationParameters, len(oc.Organizations()))
 	for orgID, org := range oc.Organizations() {
 		var endpoints []*commontypes.OrdererEndpoint
 		endpointsStr := org.Endpoints()
