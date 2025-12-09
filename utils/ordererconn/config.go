@@ -85,7 +85,7 @@ func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) *Ga
 			Endpoints:    ogp.Endpoints,
 			CACertsBytes: ogp.CACertsBytes,
 		},
-		TLS:   tlsConfig,
+		TLS:   c.TLS,
 		Retry: c.Retry,
 	}
 }

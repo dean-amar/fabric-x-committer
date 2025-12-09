@@ -106,8 +106,8 @@ func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ..
 // Update updates the connection configs.
 // This will close all connections, forcing the clients to reload.
 func (c *ConnectionManager) Update(config Config) error {
-	for _, c := range config.Connection {
-		if err := ValidateConnectionConfig(c); err != nil {
+	for _, orgParams := range config.Connection {
+		if err := ValidateConnectionConfig(orgParams); err != nil {
 			return err
 		}
 	}
