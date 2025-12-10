@@ -25,7 +25,7 @@ type (
 		Retry         *connection.RetryProfile  `mapstructure:"reconnect"`
 		// this TLS config acts as an orderer client with the same
 		// set of creds but has a list of CA certs for all orderers.
-		TLS connection.TLSConfig `mapstructure:"tls"`
+		TLS connection.OrdererTLSConfig `mapstructure:"tls"`
 	}
 
 	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
@@ -37,10 +37,19 @@ type (
 		CACertsBytes [][]byte
 	}
 
+	// OrganizationParametersWithCaCertBytes contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationParametersWithCaCertBytes struct {
+		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
+		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
+		CACerts   []string                       `mapstructure:"ca-cert-paths"`
+		// do it differently?
+		CACertsBytes [][]byte
+	}
+
 	// GateConfig acts as the full configuration after reading information from the config block.
 	GateConfig struct {
 		OrganizationParameters
-		TLS   connection.TLSConfig
+		TLS   *connection.TLSParameters
 		Retry *connection.RetryProfile
 	}
 
@@ -75,19 +84,27 @@ var (
 )
 
 // CreateConfigWithRequiredParams comment will be added.
-func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) *GateConfig {
-	tlsConfig := c.TLS
-	tlsConfig.CACertPaths = ogp.CACerts
-	tlsConfig.CACertPathsBytes = ogp.CACertsBytes
+func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) (*GateConfig, error) {
+	tlsConfig := c.TLS.ConvertToTLSConfig()
+	for _, caPath := range ogp.CACerts {
+		tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, caPath)
+	}
+	tlsParams, err := tlsConfig.ConvertToTLSParams()
+	if err != nil {
+		return nil, errors.Wrap(err, "could not convert to TLS params")
+	}
+	for _, caCertByte := range ogp.CACertsBytes {
+		tlsParams.CACerts = append(tlsParams.CACerts, caCertByte)
+	}
 	return &GateConfig{
 		OrganizationParameters: OrganizationParameters{
 			MspID:        ogp.MspID,
 			Endpoints:    ogp.Endpoints,
 			CACertsBytes: ogp.CACertsBytes,
 		},
-		TLS:   c.TLS,
+		TLS:   tlsParams,
 		Retry: c.Retry,
-	}
+	}, nil
 }
 
 // ValidateConfig validate the configuration.
@@ -98,8 +115,8 @@ func ValidateConfig(c *Config) error {
 	if c.ConsensusType != Bft && c.ConsensusType != Cft {
 		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
 	}
-	for _, c := range c.Connection {
-		if err := ValidateConnectionConfig(c); err != nil {
+	for _, og := range c.Connection {
+		if err := ValidateConnectionConfig(og); err != nil {
 			return err
 		}
 	}

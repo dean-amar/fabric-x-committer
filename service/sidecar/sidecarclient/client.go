@@ -49,6 +49,13 @@ type (
 // New instantiate a new sidecar client.
 func New(config *Parameters) (*Client, error) {
 	cm := &ordererconn.ConnectionManager{}
+	tlsConfig := connection.OrdererTLSConfig{
+		Mode:     config.Client.TLS.Mode,
+		KeyPath:  config.Client.TLS.KeyPath,
+		CertPath: config.Client.TLS.CertPath,
+	}
+	CACertsCopy := make([]string, len(config.Client.TLS.CACertPaths))
+	copy(CACertsCopy, config.Client.TLS.CACertPaths)
 	connConfig := ordererconn.Config{
 		Connection: []*ordererconn.OrganizationParameters{
 			{
@@ -56,10 +63,11 @@ func New(config *Parameters) (*Client, error) {
 					Host: config.Client.Endpoint.Host,
 					Port: config.Client.Endpoint.Port,
 				}},
+				CACerts: CACertsCopy,
 			},
 		},
 		Retry: config.Client.Retry,
-		TLS:   config.Client.TLS,
+		TLS:   tlsConfig,
 	}
 	if err := cm.Update(connConfig); err != nil {
 		return nil, err

@@ -58,6 +58,20 @@ type (
 		// If a request doesn't specify a timeout, this value will be used.
 		MaxTimeout time.Duration `mapstructure:"max-timeout"`
 	}
+
+	ConfigForOrdererUpdates struct {
+		Server                        *connection.ServerConfig
+		Monitoring                    monitoring.Config
+		Committer                     *connection.ClientConfig
+		Orderer                       ordererconn.Config
+		Ledger                        LedgerConfig
+		Notification                  NotificationServiceConfig
+		LastCommittedBlockSetInterval time.Duration
+		WaitingTxsLimit               int
+		// ChannelBufferSize is the buffer size that will be used to queue blocks, requests, and statuses.
+		ChannelBufferSize int
+		Bootstrap         Bootstrap
+	}
 )
 
 const (
@@ -112,7 +126,7 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*orderercon
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
-
+	totalCAs := 0
 	var orgParams []*ordererconn.OrganizationParameters
 	for orgID, org := range oc.Organizations() {
 		var endpoints []*commontypes.OrdererEndpoint
@@ -126,11 +140,13 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*orderercon
 			endpoints = append(endpoints, e)
 		}
 		RootCAs := org.MSP().GetTLSRootCerts()
+		totalCAs += len(RootCAs)
 		orgParams = append(orgParams, &ordererconn.OrganizationParameters{
 			Endpoints:    endpoints,
 			MspID:        orgID,
 			CACertsBytes: RootCAs,
 		})
 	}
+	logger.Infof("TOTAL_CAs: %v", totalCAs)
 	return orgParams, nil
 }

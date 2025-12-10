@@ -114,12 +114,17 @@ func newSidecarTestEnvWithTLS(
 	serverCreds connection.TLSConfig,
 ) *sidecarTestEnv {
 	t.Helper()
+	sc := make([]*connection.ServerConfig, conf.NumService)
+	for i := range sc {
+		sc[i] = connection.NewLocalHostServerWithTLS(serverCreds)
+	}
 	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t)
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
-			NumService: conf.NumService,
-			BlockSize:  blockSize,
+			NumService:    conf.NumService,
+			ServerConfigs: sc,
+			BlockSize:     blockSize,
 			// We want each block to contain exactly <blockSize> transactions.
 			// Therefore, we set a higher block timeout so that we have enough time to send all the
 			// transactions to the orderer and create a block.
@@ -252,10 +257,11 @@ func TestSidecar(t *testing.T) {
 
 func TestSidecarConfigUpdate(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3, NumHolders: 3}, test.InsecureTLSConfig)
+	sc, cc := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3, NumHolders: 3}, sc)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
-	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, cc)
 	env.requireBlock(ctx, t, 0)
 
 	t.Log("Sanity check")

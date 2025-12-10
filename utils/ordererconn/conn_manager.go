@@ -111,7 +111,6 @@ func (c *ConnectionManager) Update(config Config) error {
 			return err
 		}
 	}
-
 	// We pre create all the connections to ensure correct form.
 	connections := make(map[string]*grpc.ClientConn)
 	// We use a connection cache to avoid opening the same connection multiple times.
@@ -119,7 +118,10 @@ func (c *ConnectionManager) Update(config Config) error {
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
 	configs := make([]*GateConfig, len(config.Connection))
 	for _, ogParams := range config.Connection {
-		gateConfig := config.CreateConfigWithRequiredParams(ogParams)
+		gateConfig, err := config.CreateConfigWithRequiredParams(ogParams)
+		if err != nil {
+			return err
+		}
 		for _, id := range append(getAllIDs(ogParams.Endpoints), anyID) {
 			for _, api := range allAPIs {
 				filter := aggregateFilter(WithAPI(api), WithID(id))
@@ -208,11 +210,7 @@ func openConnection(
 	// We shuffle the endpoints for load balancing.
 	shuffle(endpoints)
 	logger.Infof("Opening connections to %d endpoints: %v.", len(endpoints), endpoints)
-	return connection.NewLoadBalancedConnection(&connection.MultiClientConfig{
-		Endpoints: endpoints,
-		Retry:     conf.Retry,
-		TLS:       conf.TLS,
-	})
+	return connection.NewLoadBalancedConnectionForOrderer(endpoints, *conf.TLS, conf.Retry)
 }
 
 func makeEndpointsKey(endpoint []*connection.Endpoint) string {

@@ -50,6 +50,11 @@ var (
 			"/client-certs/ca-certificate.pem",
 		},
 	}
+	defaultOrdererTLSConfig = connection.OrdererTLSConfig{
+		Mode:     connection.MutualTLSMode,
+		CertPath: "/client-certs/public-key.pem",
+		KeyPath:  "/client-certs/private-key.pem",
+	}
 )
 
 func TestReadConfigSidecar(t *testing.T) {
@@ -119,7 +124,7 @@ func TestReadConfigSidecar(t *testing.T) {
 					},
 				},
 				ChannelID: "mychannel",
-				TLS:       defaultClientTLSConfig,
+				TLS:       defaultOrdererTLSConfig,
 			},
 			Committer: newClientConfigWithDefaultTLS("coordinator", 9001),
 			Ledger: sidecar.LedgerConfig{
@@ -383,7 +388,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 						},
 						ChannelID:     "mychannel",
 						ConsensusType: ordererconn.Bft,
-						TLS:           defaultClientTLSConfig,
+						TLS:           defaultOrdererTLSConfig,
 					},
 					BroadcastParallelism: 1,
 				},

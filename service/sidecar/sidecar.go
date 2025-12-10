@@ -52,6 +52,8 @@ type Service struct {
 }
 
 // New creates a sidecar service.
+// We need to wrap this config just that instead of orderer with list of organizationParamereters,
+// this config needs to include an orderer config
 func New(c *Config) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 	err := LoadBootstrapConfig(c)
