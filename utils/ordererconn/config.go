@@ -28,6 +28,15 @@ type (
 		TLS connection.OrdererTLSConfig `mapstructure:"tls"`
 	}
 
+	ConfigParameters struct {
+		ConsensusType string
+		ChannelID     string
+		Connection    []*OrganizationParametersWithCaCertBytes
+		Identity      *IdentityConfig
+		Retry         *connection.RetryProfile
+		TLS           connection.OrdererTLSConfig
+	}
+
 	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
 	OrganizationParameters struct {
 		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
@@ -39,16 +48,15 @@ type (
 
 	// OrganizationParametersWithCaCertBytes contains the MspID (Organization ID), orderer endpoints, and their TLS config.
 	OrganizationParametersWithCaCertBytes struct {
-		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
-		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
-		CACerts   []string                       `mapstructure:"ca-cert-paths"`
-		// do it differently?
+		MspID        string
+		Endpoints    []*commontypes.OrdererEndpoint
+		CACerts      []string
 		CACertsBytes [][]byte
 	}
 
 	// GateConfig acts as the full configuration after reading information from the config block.
 	GateConfig struct {
-		OrganizationParameters
+		OrganizationParametersWithCaCertBytes
 		TLS   *connection.TLSParameters
 		Retry *connection.RetryProfile
 	}
@@ -83,8 +91,32 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
+func (op *OrganizationParameters) ConvertToOrgParamsWithBytes() *OrganizationParametersWithCaCertBytes {
+	return &OrganizationParametersWithCaCertBytes{
+		MspID:     op.MspID,
+		Endpoints: op.Endpoints,
+		CACerts:   op.CACerts,
+	}
+}
+
+func (c *Config) ConvertToOrdererConfigParameters() *ConfigParameters {
+	orgParams := make([]*OrganizationParametersWithCaCertBytes, 0, len(c.Connection))
+	for _, orgParam := range c.Connection {
+		orgParams = append(orgParams, orgParam.ConvertToOrgParamsWithBytes())
+	}
+	return &ConfigParameters{
+		ConsensusType: c.ConsensusType,
+		ChannelID:     c.ChannelID,
+		Connection:    orgParams,
+		Identity:      c.Identity,
+		Retry:         c.Retry,
+		TLS:           c.TLS,
+	}
+
+}
+
 // CreateConfigWithRequiredParams comment will be added.
-func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) (*GateConfig, error) {
+func (c *ConfigParameters) CreateConfigWithRequiredParams(ogp *OrganizationParametersWithCaCertBytes) (*GateConfig, error) {
 	tlsConfig := c.TLS.ConvertToTLSConfig()
 	for _, caPath := range ogp.CACerts {
 		tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, caPath)
@@ -97,18 +129,14 @@ func (c *Config) CreateConfigWithRequiredParams(ogp *OrganizationParameters) (*G
 		tlsParams.CACerts = append(tlsParams.CACerts, caCertByte)
 	}
 	return &GateConfig{
-		OrganizationParameters: OrganizationParameters{
-			MspID:        ogp.MspID,
-			Endpoints:    ogp.Endpoints,
-			CACertsBytes: ogp.CACertsBytes,
-		},
-		TLS:   tlsParams,
-		Retry: c.Retry,
+		OrganizationParametersWithCaCertBytes: *ogp,
+		TLS:                                   tlsParams,
+		Retry:                                 c.Retry,
 	}, nil
 }
 
 // ValidateConfig validate the configuration.
-func ValidateConfig(c *Config) error {
+func ValidateConfig(c *ConfigParameters) error {
 	if c.ConsensusType == "" {
 		c.ConsensusType = DefaultConsensus
 	}
@@ -124,7 +152,7 @@ func ValidateConfig(c *Config) error {
 }
 
 // ValidateConnectionConfig validate the configuration.
-func ValidateConnectionConfig(c *OrganizationParameters) error {
+func ValidateConnectionConfig(c *OrganizationParametersWithCaCertBytes) error {
 	if c == nil {
 		return ErrEmptyConnectionConfig
 	}

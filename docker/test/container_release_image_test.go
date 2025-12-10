@@ -93,10 +93,10 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	committerNodes := []string{"verifier", "vc", "query", "coordinator", "sidecar"}
 
 	credsFactory := testutils.NewCredentialsFactory(t)
-	for _, dbType := range []string{dbtest.YugaDBType} {
+	for _, dbType := range []string{dbtest.PostgresDBType, dbtest.YugaDBType} {
 		t.Run(fmt.Sprintf("database:%s", dbType), func(t *testing.T) {
 			t.Parallel()
-			for _, mode := range []string{connection.MutualTLSMode} {
+			for _, mode := range testutils.ServerModes {
 				t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 					t.Parallel()
 					// Create an isolated network for each test with different tls mode.

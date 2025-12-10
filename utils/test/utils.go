@@ -501,3 +501,11 @@ func AppendToEndorsementSetsForThresholdRule(
 ) []*protoblocktx.Endorsements {
 	return append(ss, CreateEndorsementsForThresholdRule(signatures...)...)
 }
+
+func ConvertTLSConfigToOrdererTLSConfig(tlsConfig *connection.TLSConfig) connection.OrdererTLSConfig {
+	return connection.OrdererTLSConfig{
+		Mode:     tlsConfig.Mode,
+		KeyPath:  tlsConfig.KeyPath,
+		CertPath: tlsConfig.CertPath,
+	}
+}

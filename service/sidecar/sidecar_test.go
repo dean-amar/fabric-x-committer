@@ -44,7 +44,7 @@ import (
 )
 
 type sidecarTestEnv struct {
-	config            Config
+	config            ConfigParameters
 	coordinator       *mock.Coordinator
 	coordinatorServer *test.GrpcServers
 	ordererEnv        *mock.OrdererTestEnv
@@ -122,9 +122,9 @@ func newSidecarTestEnvWithTLS(
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
-			NumService:    conf.NumService,
-			ServerConfigs: sc,
-			BlockSize:     blockSize,
+			NumService: conf.NumService,
+			//ServerConfigs: sc,
+			BlockSize: blockSize,
 			// We want each block to contain exactly <blockSize> transactions.
 			// Therefore, we set a higher block timeout so that we have enough time to send all the
 			// transactions to the orderer and create a block.
@@ -155,6 +155,7 @@ func newSidecarTestEnvWithTLS(
 			Connection: []*ordererconn.OrganizationParameters{
 				{
 					Endpoints: initOrdererEndpoints,
+					CACerts:   serverCreds.CACertPaths,
 				},
 			},
 		},
@@ -171,7 +172,7 @@ func newSidecarTestEnvWithTLS(
 			GenesisBlockFilePath: genesisBlockFilePath,
 		},
 	}
-	sidecar, err := New(sidecarConf)
+	sidecar, err := New(sidecarConf.ConvertToConfigPrameters())
 	require.NoError(t, err)
 	t.Cleanup(sidecar.Close)
 
@@ -180,7 +181,7 @@ func newSidecarTestEnvWithTLS(
 		coordinator:       coordinator,
 		coordinatorServer: coordinatorServer,
 		ordererEnv:        ordererEnv,
-		config:            *sidecarConf,
+		config:            *sidecarConf.ConvertToConfigPrameters(),
 		configBlock:       configBlock,
 	}
 }
@@ -342,7 +343,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Log("Modify the Sidecar config, use illegal host endpoint")
 	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
 	// as the sidecar expects the Endpoints to be non-empty.
-	env.config.Orderer.Connection = []*ordererconn.OrganizationParameters{
+	env.config.Orderer.Connection = []*ordererconn.OrganizationParametersWithCaCertBytes{
 		{
 			Endpoints: []*commontypes.OrdererEndpoint{
 				{Host: "localhost", Port: 9999},

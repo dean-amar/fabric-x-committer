@@ -212,15 +212,16 @@ func TestLoadGenForSidecar(t *testing.T) {
 						ordererServers[i] = preAllocatePorts(t, serverTLSConfig)
 					}
 					// Start server under test
-					sidecarConf := &sidecar.Config{
+					sidecarConf := &sidecar.ConfigParameters{
 						Server: sidecarServerConf,
-						Orderer: ordererconn.Config{
-							Connection: []*ordererconn.OrganizationParameters{
+						Orderer: ordererconn.ConfigParameters{
+							Connection: []*ordererconn.OrganizationParametersWithCaCertBytes{
 								{
 									Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
+									CACerts:   clientTLSConfig.CACertPaths,
 								},
 							},
-							TLS:           clientTLSConfig,
+							TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig),
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
@@ -280,12 +281,13 @@ func TestLoadGenForOrderer(t *testing.T) {
 							Connection: []*ordererconn.OrganizationParameters{
 								{
 									Endpoints: endpoints,
+									CACerts:   clientTLSConfig.CACertPaths,
 								},
 							},
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
-							TLS:           clientTLSConfig,
+							TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig),
 						},
 						LastCommittedBlockSetInterval: 100 * time.Millisecond,
 						WaitingTxsLimit:               5000,
@@ -299,7 +301,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					}
 
 					// Start sidecar.
-					service, err := sidecar.New(sidecarConf)
+					service, err := sidecar.New(sidecarConf.ConvertToConfigPrameters())
 					require.NoError(t, err)
 					t.Cleanup(service.Close)
 					test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)
@@ -368,12 +370,13 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 							Connection: []*ordererconn.OrganizationParameters{
 								{
 									Endpoints: endpoints,
+									CACerts:   clientTLSConfig.CACertPaths,
 								},
 							},
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
-							TLS:           clientTLSConfig,
+							TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig),
 						},
 						BroadcastParallelism: 5,
 					}

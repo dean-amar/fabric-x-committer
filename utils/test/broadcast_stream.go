@@ -57,7 +57,7 @@ type (
 )
 
 // NewBroadcastStream starts a new broadcast stream (non-production).
-func NewBroadcastStream(ctx context.Context, config *ordererconn.Config) (*BroadcastStream, error) {
+func NewBroadcastStream(ctx context.Context, config *ordererconn.ConfigParameters) (*BroadcastStream, error) {
 	if err := ordererconn.ValidateConfig(config); err != nil {
 		return nil, errors.Wrap(err, "error validating config")
 	}

@@ -239,13 +239,14 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		test.NewSecuredConnection(t, s.Endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
 	)
 
-	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
-		Connection: []*ordererconn.OrganizationParameters{
+	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.ConfigParameters{
+		Connection: []*ordererconn.OrganizationParametersWithCaCertBytes{
 			{
 				Endpoints: s.Policy.OrdererEndpoints,
+				CACerts:   c.SystemConfig.ClientTLS.CACertPaths,
 			},
 		},
-		TLS:           c.SystemConfig.ClientTLS,
+		TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&c.SystemConfig.ClientTLS),
 		ChannelID:     s.Policy.ChannelID,
 		Identity:      s.Policy.Identity,
 		ConsensusType: ordererconn.Bft,

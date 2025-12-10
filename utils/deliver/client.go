@@ -21,7 +21,7 @@ import (
 type (
 	// Client is a collection of nodes and their connections.
 	Client struct {
-		config            *ordererconn.Config
+		config            *ordererconn.ConfigParameters
 		connectionManager *ordererconn.ConnectionManager
 		signer            protoutil.Signer
 	}
@@ -30,7 +30,7 @@ type (
 var logger = logging.New("broadcast-deliver")
 
 // New creates a broadcast/deliver client. It must be closed to release all the associated connections.
-func New(config *ordererconn.Config) (*Client, error) {
+func New(config *ordererconn.ConfigParameters) (*Client, error) {
 	if err := ordererconn.ValidateConfig(config); err != nil {
 		return nil, errors.Wrap(err, "error validating config")
 	}
@@ -58,7 +58,7 @@ func (s *Client) CloseConnections() {
 }
 
 // UpdateConnections updates the connection config.
-func (s *Client) UpdateConnections(config *ordererconn.Config) error {
+func (s *Client) UpdateConnections(config *ordererconn.ConfigParameters) error {
 	return s.connectionManager.Update(*config)
 }
 

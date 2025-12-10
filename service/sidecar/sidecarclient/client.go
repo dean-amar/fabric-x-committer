@@ -56,8 +56,8 @@ func New(config *Parameters) (*Client, error) {
 	}
 	CACertsCopy := make([]string, len(config.Client.TLS.CACertPaths))
 	copy(CACertsCopy, config.Client.TLS.CACertPaths)
-	connConfig := ordererconn.Config{
-		Connection: []*ordererconn.OrganizationParameters{
+	connConfig := ordererconn.ConfigParameters{
+		Connection: []*ordererconn.OrganizationParametersWithCaCertBytes{
 			{
 				Endpoints: []*commontypes.OrdererEndpoint{{
 					Host: config.Client.Endpoint.Host,

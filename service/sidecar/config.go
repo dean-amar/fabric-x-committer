@@ -7,10 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 package sidecar
 
 import (
+	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
@@ -59,11 +59,11 @@ type (
 		MaxTimeout time.Duration `mapstructure:"max-timeout"`
 	}
 
-	ConfigForOrdererUpdates struct {
+	ConfigParameters struct {
 		Server                        *connection.ServerConfig
 		Monitoring                    monitoring.Config
 		Committer                     *connection.ClientConfig
-		Orderer                       ordererconn.Config
+		Orderer                       ordererconn.ConfigParameters
 		Ledger                        LedgerConfig
 		Notification                  NotificationServiceConfig
 		LastCommittedBlockSetInterval time.Duration
@@ -79,8 +79,23 @@ const (
 	defaultBufferSize             = 100
 )
 
+func (c *Config) ConvertToConfigPrameters() *ConfigParameters {
+	return &ConfigParameters{
+		Server:                        c.Server,
+		Monitoring:                    c.Monitoring,
+		Committer:                     c.Committer,
+		Orderer:                       *c.Orderer.ConvertToOrdererConfigParameters(),
+		Ledger:                        c.Ledger,
+		Notification:                  c.Notification,
+		LastCommittedBlockSetInterval: c.LastCommittedBlockSetInterval,
+		WaitingTxsLimit:               c.WaitingTxsLimit,
+		ChannelBufferSize:             c.ChannelBufferSize,
+		Bootstrap:                     c.Bootstrap,
+	}
+}
+
 // LoadBootstrapConfig loads the bootstrap config according to the bootstrap method.
-func LoadBootstrapConfig(conf *Config) error {
+func LoadBootstrapConfig(conf *ConfigParameters) error {
 	if conf.Bootstrap.GenesisBlockFilePath == "" {
 		return nil
 	}
@@ -88,7 +103,7 @@ func LoadBootstrapConfig(conf *Config) error {
 }
 
 // OverwriteConfigFromBlockFile overwrites the orderer connection with fields from the bootstrap config block.
-func OverwriteConfigFromBlockFile(conf *Config) error {
+func OverwriteConfigFromBlockFile(conf *ConfigParameters) error {
 	configBlock, err := configtxgen.ReadBlock(conf.Bootstrap.GenesisBlockFilePath)
 	if err != nil {
 		return errors.Wrap(err, "read config block")
@@ -97,7 +112,7 @@ func OverwriteConfigFromBlockFile(conf *Config) error {
 }
 
 // OverwriteConfigFromBlock overwrites the orderer connection with fields from a config block.
-func OverwriteConfigFromBlock(conf *Config, configBlock *common.Block) error {
+func OverwriteConfigFromBlock(conf *ConfigParameters, configBlock *common.Block) error {
 	envelope, err := protoutil.ExtractEnvelope(configBlock, 0)
 	if err != nil {
 		return errors.Wrap(err, "failed to extract envelope")
@@ -109,25 +124,34 @@ func OverwriteConfigFromBlock(conf *Config, configBlock *common.Block) error {
 // For now, it fetches the following:
 // - Orderer endpoints.
 // TODO: Fetch Root CAs.
-func OverwriteConfigFromEnvelope(conf *Config, envelope *common.Envelope) error {
+func OverwriteConfigFromEnvelope(conf *ConfigParameters, envelope *common.Envelope) error {
 	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
 	if err != nil {
 		return errors.Wrap(err, "failed to create config bundle")
 	}
-	conf.Orderer.Connection, err = getDeliveryEndpointsFromConfig(bundle)
+
+	ogparams, err := getDeliveryEndpointsFromConfig(bundle)
 	if err != nil {
 		return err
 	}
+	for i := range conf.Orderer.Connection {
+		conf.Orderer.Connection[i].Endpoints = ogparams[i].Endpoints
+	}
 	return nil
+	//conf.Orderer.Connection, err = getDeliveryEndpointsFromConfig(bundle)
+	//if err != nil {
+	//	return err
+	//}
+	//return nil
 }
 
-func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*ordererconn.OrganizationParameters, error) {
+func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*ordererconn.OrganizationParametersWithCaCertBytes, error) {
 	oc, ok := bundle.OrdererConfig()
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
 	totalCAs := 0
-	var orgParams []*ordererconn.OrganizationParameters
+	var orgParams []*ordererconn.OrganizationParametersWithCaCertBytes
 	for orgID, org := range oc.Organizations() {
 		var endpoints []*commontypes.OrdererEndpoint
 		endpointsStr := org.Endpoints()
@@ -141,7 +165,7 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*orderercon
 		}
 		RootCAs := org.MSP().GetTLSRootCerts()
 		totalCAs += len(RootCAs)
-		orgParams = append(orgParams, &ordererconn.OrganizationParameters{
+		orgParams = append(orgParams, &ordererconn.OrganizationParametersWithCaCertBytes{
 			Endpoints:    endpoints,
 			MspID:        orgID,
 			CACertsBytes: RootCAs,

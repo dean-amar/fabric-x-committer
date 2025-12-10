@@ -46,7 +46,7 @@ type Service struct {
 	blockToBeCommitted chan *common.Block
 	committedBlock     chan *common.Block
 	statusQueue        chan []*protonotify.TxStatusEvent
-	config             *Config
+	config             *ConfigParameters
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 }
@@ -54,7 +54,7 @@ type Service struct {
 // New creates a sidecar service.
 // We need to wrap this config just that instead of orderer with list of organizationParamereters,
 // this config needs to include an orderer config
-func New(c *Config) (*Service, error) {
+func New(c *ConfigParameters) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 	err := LoadBootstrapConfig(c)
 	if err != nil {

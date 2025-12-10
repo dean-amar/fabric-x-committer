@@ -31,9 +31,24 @@ type (
 		SidecarClient *connection.ClientConfig `mapstructure:"sidecar-client"`
 	}
 
+	// OrdererClientConfigParams is a struct that contains the configuration for the orderer client.
+	OrdererClientConfigParams struct {
+		Orderer              ordererconn.ConfigParameters
+		BroadcastParallelism int
+		SidecarClient        *connection.ClientConfig
+	}
+
 	// SidecarClientConfig is a struct that contains the configuration for the sidecar client.
 	SidecarClientConfig struct {
 		SidecarClient  *connection.ClientConfig   `mapstructure:"sidecar-client"`
 		OrdererServers []*connection.ServerConfig `mapstructure:"orderer-servers"`
 	}
 )
+
+func (ocp *OrdererClientConfig) ConvertToParams() *OrdererClientConfigParams {
+	return &OrdererClientConfigParams{
+		Orderer:              *ocp.Orderer.ConvertToOrdererConfigParameters(),
+		BroadcastParallelism: ocp.BroadcastParallelism,
+		SidecarClient:        ocp.SidecarClient,
+	}
+}

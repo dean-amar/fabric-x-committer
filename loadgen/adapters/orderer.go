@@ -22,7 +22,7 @@ type (
 	// OrdererAdapter applies load on the sidecar.
 	OrdererAdapter struct {
 		commonAdapter
-		config *OrdererClientConfig
+		config *OrdererClientConfigParams
 	}
 )
 
@@ -30,7 +30,7 @@ type (
 func NewOrdererAdapter(config *OrdererClientConfig, res *ClientResources) *OrdererAdapter {
 	return &OrdererAdapter{
 		commonAdapter: commonAdapter{res: res},
-		config:        config,
+		config:        config.ConvertToParams(),
 	}
 }
 
