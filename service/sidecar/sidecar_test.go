@@ -122,9 +122,9 @@ func newSidecarTestEnvWithTLS(
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
-			NumService: conf.NumService,
-			//ServerConfigs: sc,
-			BlockSize: blockSize,
+			NumService:    conf.NumService,
+			ServerConfigs: sc,
+			BlockSize:     blockSize,
 			// We want each block to contain exactly <blockSize> transactions.
 			// Therefore, we set a higher block timeout so that we have enough time to send all the
 			// transactions to the orderer and create a block.

@@ -42,8 +42,6 @@ type (
 		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
 		CACerts   []string                       `mapstructure:"ca-cert-paths"`
-		// do it differently?
-		CACertsBytes [][]byte
 	}
 
 	// OrganizationParametersWithCaCertBytes contains the MspID (Organization ID), orderer endpoints, and their TLS config.
@@ -91,14 +89,6 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
-func (op *OrganizationParameters) ConvertToOrgParamsWithBytes() *OrganizationParametersWithCaCertBytes {
-	return &OrganizationParametersWithCaCertBytes{
-		MspID:     op.MspID,
-		Endpoints: op.Endpoints,
-		CACerts:   op.CACerts,
-	}
-}
-
 func (c *Config) ConvertToOrdererConfigParameters() *ConfigParameters {
 	orgParams := make([]*OrganizationParametersWithCaCertBytes, 0, len(c.Connection))
 	for _, orgParam := range c.Connection {
@@ -112,7 +102,14 @@ func (c *Config) ConvertToOrdererConfigParameters() *ConfigParameters {
 		Retry:         c.Retry,
 		TLS:           c.TLS,
 	}
+}
 
+func (op *OrganizationParameters) ConvertToOrgParamsWithBytes() *OrganizationParametersWithCaCertBytes {
+	return &OrganizationParametersWithCaCertBytes{
+		MspID:     op.MspID,
+		Endpoints: op.Endpoints,
+		CACerts:   op.CACerts,
+	}
 }
 
 // CreateConfigWithRequiredParams comment will be added.

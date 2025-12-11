@@ -120,9 +120,10 @@ func OverwriteConfigFromBlock(conf *ConfigParameters, configBlock *common.Block)
 	return OverwriteConfigFromEnvelope(conf, envelope)
 }
 
-// OverwriteConfigFromEnvelope overwrites the orderer connection with fields from a config transaction.
+// OverwriteConfigFromEnvelope overwrites the orderer connection config with fields from a config transaction.
 // For now, it fetches the following:
 // - Orderer endpoints.
+// - RootCAs per organization.
 // TODO: Fetch Root CAs.
 func OverwriteConfigFromEnvelope(conf *ConfigParameters, envelope *common.Envelope) error {
 	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
@@ -130,12 +131,12 @@ func OverwriteConfigFromEnvelope(conf *ConfigParameters, envelope *common.Envelo
 		return errors.Wrap(err, "failed to create config bundle")
 	}
 
-	ogparams, err := getDeliveryEndpointsFromConfig(bundle)
+	orgParams, err := getDeliveryEndpointsFromConfig(bundle)
 	if err != nil {
 		return err
 	}
 	for i := range conf.Orderer.Connection {
-		conf.Orderer.Connection[i].Endpoints = ogparams[i].Endpoints
+		conf.Orderer.Connection[i].Endpoints = orgParams[i].Endpoints
 	}
 	return nil
 	//conf.Orderer.Connection, err = getDeliveryEndpointsFromConfig(bundle)

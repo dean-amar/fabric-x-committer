@@ -4,7 +4,7 @@
 #
 # middle config that includes only the bytes certs.
 # fix parser.
-# append endpoints.
+# append endpoints instead of all the gateconfigs
 server:
   endpoint: :4001
   tls:

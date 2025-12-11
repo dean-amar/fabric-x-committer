@@ -133,7 +133,6 @@ func (c *ConnectionManager) Update(config ConfigParameters) error {
 				conn, connInCache := connCache[endpointsKey]
 				if !connInCache {
 					var err error
-
 					conn, err = openConnection(gateConfig, endpoints)
 					if err != nil {
 						closeConnection(connections)

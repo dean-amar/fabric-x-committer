@@ -76,8 +76,6 @@ type (
 		// KeyPath is the path to the key file (private key).
 		KeyPath     string   `mapstructure:"key-path"`
 		CACertPaths []string `mapstructure:"ca-cert-paths"`
-
-		CACertPathsBytes [][]byte
 	}
 
 	// OrdererTLSConfig holds the TLS options and certificate paths (only private and public keys)
@@ -91,10 +89,6 @@ type (
 	}
 
 	// TLSParameters holds the TLS options and certificate in bytes
-	// used for secure communication between servers and clients.
-	// Credentials are built based on the configuration mode.
-	// For example, If only server-side TLS is required, the certificate pool (certPool) is not built (for a server),
-	// since the relevant certificates paths are defined in the YAML according to the selected mode.
 	TLSParameters struct {
 		Mode    string
 		Cert    []byte
