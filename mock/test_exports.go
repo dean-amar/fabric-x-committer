@@ -157,8 +157,8 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		OrdererServers: ordererServers,
 		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
 			holder.RegisterService(s)
-		}, &conf.Config.ServerConfigs[0].TLS),
-		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, &conf.Config.ServerConfigs[0].TLS),
+		}, nil),
+		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, nil),
 	}
 }
 
