@@ -19,8 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
-	"github.com/hyperledger/fabric-x-committer/api/protoloadgen"
+	"github.com/hyperledger/fabric-x-committer/api/applicationpb"
+	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
@@ -52,7 +52,7 @@ func TestBroadcastDeliver(t *testing.T) {
 			ordererService, servers, conf := makeConfig(t, &serverTLSConfig)
 
 			// Set the orderer client credentials.
-			conf.TLS = test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig)
+			conf.TLS = clientTLSConfig.ToOrdererTLSConfig()
 			allEndpoints := conf.Connection[0].Endpoints
 
 			// We only take the bottom endpoints for now.
@@ -138,10 +138,12 @@ func TestBroadcastDeliver(t *testing.T) {
 				unavailable: 2,
 			})
 			t.Log("Update endpoints")
-			conf.Connection = []*ordererconn.OrganizationParametersWithCaCertBytes{
+			conf.Connection = []*ordererconn.OrganizationParameters{
 				{
-					Endpoints: allEndpoints[6:],
-					CACerts:   clientTLSConfig.CACertPaths,
+					OrganizationConfig: ordererconn.OrganizationConfig{
+						Endpoints: allEndpoints[6:],
+						CACerts:   clientTLSConfig.CACertPaths,
+					},
 				},
 			}
 			require.NoError(t, client.UpdateConnections(&conf))
@@ -160,13 +162,13 @@ type expectedSubmit struct {
 
 func submit(
 	t *testing.T,
-	conf *ordererconn.ConfigParameters,
+	conf *ordererconn.Parameters,
 	outputBlocks channel.Reader[*common.Block],
 	expected expectedSubmit,
 ) {
 	t.Helper()
 	txb := workload.TxBuilder{ChannelID: channelForTest}
-	tx := txb.MakeTx(&protoblocktx.Tx{})
+	tx := txb.MakeTx(&applicationpb.Tx{})
 
 	// We create a new stream for each request to ensure GRPC does not cache the latest state.
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
@@ -175,7 +177,7 @@ func submit(
 	require.NoError(t, err)
 	defer stream.CloseConnections()
 
-	err = stream.SendBatch(workload.MapToEnvelopeBatch(0, []*protoloadgen.TX{tx}))
+	err = stream.SendBatch(workload.MapToEnvelopeBatch(0, []*servicepb.LoadGenTx{tx}))
 	if err != nil {
 		t.Logf("Response error:\n%s", err)
 	}
@@ -205,7 +207,9 @@ func submit(
 	require.Equal(t, tx.Id, hdr.TxId)
 }
 
-func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (*mock.Orderer, []test.GrpcServers, ordererconn.ConfigParameters) {
+func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (
+	*mock.Orderer, []test.GrpcServers, ordererconn.Parameters,
+) {
 	t.Helper()
 
 	idCount := 3
@@ -229,13 +233,15 @@ func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (*mock.Orderer, [
 	ordererService, ordererServer := mock.StartMockOrderingServices(t, config)
 	require.Len(t, ordererServer.Servers, instanceCount)
 
-	conf := ordererconn.ConfigParameters{
-		ChannelID:     channelForTest,
-		ConsensusType: ordererconn.Bft,
-		Connection:    make([]*ordererconn.OrganizationParametersWithCaCertBytes, 1),
-		Retry:         &testGrpcRetryProfile,
+	conf := ordererconn.Parameters{
+		SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+			ChannelID:     channelForTest,
+			ConsensusType: ordererconn.Bft,
+			Retry:         &testGrpcRetryProfile,
+		},
+		Connection: make([]*ordererconn.OrganizationParameters, 1),
 	}
-	conf.Connection[0] = &ordererconn.OrganizationParametersWithCaCertBytes{}
+	conf.Connection[0] = &ordererconn.OrganizationParameters{}
 	servers := make([]test.GrpcServers, idCount)
 	for i, c := range ordererServer.Configs {
 		id := uint32(i % idCount) //nolint:gosec // integer overflow conversion int -> uint32

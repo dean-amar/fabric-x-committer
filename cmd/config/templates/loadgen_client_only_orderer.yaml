@@ -17,12 +17,10 @@ orderer-client:
           {{- range .ClientTLS.CACertPaths }}
           - {{ . }}
           {{- end }}
-
     tls:
       mode: {{ .ClientTLS.Mode }}
       key-path: {{ .ClientTLS.KeyPath }}
       cert-path: {{ .ClientTLS.CertPath }}
-
     consensus-type: BFT
     channel-id: {{ .Policy.ChannelID }}
 

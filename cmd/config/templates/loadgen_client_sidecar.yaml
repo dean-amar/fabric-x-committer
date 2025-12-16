@@ -28,5 +28,4 @@ sidecar-client:
           {{- range .ServiceTLS.CACertPaths }}
           - {{ . }}
           {{- end }}
-
   channel-id: {{ .Policy.ChannelID }}

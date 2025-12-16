@@ -9,7 +9,7 @@ set -e
 
 ops="${*:-db orderer committer loadgen}"
 
-if [[ $ops == *"--insecure"** ]]; then
+if [[ $ops == *"--insecure"* ]]; then
   # Set TLS mode to none-tls.
   export SC_COORDINATOR_SERVER_TLS_MODE="none"
   export SC_COORDINATOR_VERIFIER_TLS_MODE="none"

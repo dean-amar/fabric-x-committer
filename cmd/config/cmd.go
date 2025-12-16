@@ -71,7 +71,7 @@ func SidecarCMD(use string) *cobra.Command {
 			cmd.Printf("Starting %v\n", SidecarName)
 			defer cmd.Printf("%v ended\n", SidecarName)
 
-			service, err := sidecar.New(conf.ConvertToConfigPrameters())
+			service, err := sidecar.New(conf.ToParams())
 			if err != nil {
 				return errors.Wrap(err, "failed to create sidecar service")
 			}

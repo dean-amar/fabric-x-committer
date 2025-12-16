@@ -62,12 +62,12 @@ func serverDecoder(dataType, targetType reflect.Type, rawData any) (result any, 
 }
 
 // organizationParametersDecoder parses raw string overrides into
-// OrganizationParameters structs or slices of them.
+// OrganizationConfig structs or slices of them.
 // Supports ENV override formats like:
 //
 //	"msp-id=org0;id=0,broadcast,deliver,127.0.0.1:7050;ca=/client_certs/ca-certificate.pem"
 //
-// If applied to a slice type ([]OrganizationParameters), a single item
+// If applied to a slice type ([]OrganizationConfig), a single item
 // override becomes a slice with one element.
 func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (any, error) {
 	stringData, ok := viperutil.GetStringData(dataType, raw)
@@ -75,7 +75,7 @@ func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (
 		return raw, nil
 	}
 
-	if targetType == reflect.TypeOf(ordererconn.OrganizationParameters{}) {
+	if targetType == reflect.TypeOf(ordererconn.OrganizationConfig{}) {
 		org, err := parseOrganizationParameters(stringData)
 		if err != nil {
 			return nil, err
@@ -84,8 +84,8 @@ func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (
 	}
 
 	if targetType.Kind() == reflect.Slice &&
-		(targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationParameters{}) ||
-			targetType.Elem() == reflect.TypeOf(&ordererconn.OrganizationParameters{})) {
+		(targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationConfig{}) ||
+			targetType.Elem() == reflect.TypeOf(&ordererconn.OrganizationConfig{})) {
 
 		org, err := parseOrganizationParameters(stringData)
 		if err != nil {
@@ -94,7 +94,7 @@ func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (
 
 		sliceValue := reflect.MakeSlice(targetType, 1, 1)
 
-		if targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationParameters{}) {
+		if targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationConfig{}) {
 			sliceValue.Index(0).Set(reflect.ValueOf(*org))
 		} else {
 			sliceValue.Index(0).Set(reflect.ValueOf(org))
@@ -105,13 +105,13 @@ func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (
 	return raw, nil
 }
 
-func parseOrganizationParameters(raw string) (*ordererconn.OrganizationParameters, error) {
+func parseOrganizationParameters(raw string) (*ordererconn.OrganizationConfig, error) {
 	parts := strings.Split(raw, ";")
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid OrganizationParameters string: %s", raw)
+		return nil, fmt.Errorf("invalid OrganizationConfig string: %s", raw)
 	}
 
-	org := &ordererconn.OrganizationParameters{}
+	org := &ordererconn.OrganizationConfig{}
 
 	// Part 1: msp-id=orgX
 	if strings.HasPrefix(parts[0], "msp-id=") {

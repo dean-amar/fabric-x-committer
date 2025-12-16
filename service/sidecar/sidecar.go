@@ -20,10 +20,9 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/hyperledger/fabric-x-committer/api/protoblocktx"
-	"github.com/hyperledger/fabric-x-committer/api/protocoordinatorservice"
-	"github.com/hyperledger/fabric-x-committer/api/protonotify"
-	"github.com/hyperledger/fabric-x-committer/api/types"
+	"github.com/hyperledger/fabric-x-committer/api/applicationpb"
+	"github.com/hyperledger/fabric-x-committer/api/committerpb"
+	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -45,8 +44,8 @@ type Service struct {
 	coordConn          *grpc.ClientConn
 	blockToBeCommitted chan *common.Block
 	committedBlock     chan *common.Block
-	statusQueue        chan []*protonotify.TxStatusEvent
-	config             *ConfigParameters
+	statusQueue        chan []*committerpb.TxStatusEvent
+	config             *Parameters
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 }
@@ -54,7 +53,7 @@ type Service struct {
 // New creates a sidecar service.
 // We need to wrap this config just that instead of orderer with list of organizationParamereters,
 // this config needs to include an orderer config
-func New(c *ConfigParameters) (*Service, error) {
+func New(c *Parameters) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 	err := LoadBootstrapConfig(c)
 	if err != nil {
@@ -92,7 +91,7 @@ func New(c *ConfigParameters) (*Service, error) {
 		metrics:            metrics,
 		blockToBeCommitted: make(chan *common.Block, bufferSize),
 		committedBlock:     make(chan *common.Block, bufferSize),
-		statusQueue:        make(chan []*protonotify.TxStatusEvent, bufferSize),
+		statusQueue:        make(chan []*committerpb.TxStatusEvent, bufferSize),
 	}, nil
 }
 
@@ -119,7 +118,7 @@ func (s *Service) Run(ctx context.Context) error {
 	s.coordConn = conn
 	defer connection.CloseConnectionsLog(conn)
 	logger.Infof("sidecar connected to coordinator at %s", s.config.Committer.Endpoint)
-	coordClient := protocoordinatorservice.NewCoordinatorClient(conn)
+	coordClient := servicepb.NewCoordinatorClient(conn)
 
 	g, gCtx := errgroup.WithContext(pCtx)
 
@@ -153,13 +152,13 @@ func (s *Service) Run(ctx context.Context) error {
 // RegisterService registers for the sidecar's GRPC services.
 func (s *Service) RegisterService(server *grpc.Server) {
 	peer.RegisterDeliverServer(server, s.ledgerService)
-	protonotify.RegisterNotifierServer(server, s.notifier)
+	committerpb.RegisterNotifierServer(server, s.notifier)
 	healthgrpc.RegisterHealthServer(server, s.healthcheck)
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(
 	ctx context.Context,
-	coordClient protocoordinatorservice.CoordinatorClient,
+	coordClient servicepb.CoordinatorClient,
 ) error {
 	defer s.metrics.coordConnection.Disconnected(s.coordConn.CanonicalTarget())
 	nextBlockNum, err := s.recover(ctx, coordClient)
@@ -223,7 +222,7 @@ func (s *Service) configUpdater(block *common.Block) {
 	}
 }
 
-func (s *Service) recover(ctx context.Context, coordClient protocoordinatorservice.CoordinatorClient) (uint64, error) {
+func (s *Service) recover(ctx context.Context, coordClient servicepb.CoordinatorClient) (uint64, error) {
 	logger.Info("recovering sidecar")
 	// If the sidecar fails but the coordinator remains active, the sidecar
 	// must wait for the coordinator to become idle (i.e., to finish
@@ -266,7 +265,7 @@ func (s *Service) recover(ctx context.Context, coordClient protocoordinatorservi
 }
 
 func (s *Service) recoverConfigTransactionFromStateDB(
-	ctx context.Context, client protocoordinatorservice.CoordinatorClient,
+	ctx context.Context, client servicepb.CoordinatorClient,
 ) error {
 	configMsg, err := client.GetConfigTransaction(ctx, nil)
 	if err != nil {
@@ -289,7 +288,7 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 
 func (s *Service) recoverLedgerStore(
 	ctx context.Context,
-	client protocoordinatorservice.CoordinatorClient,
+	client servicepb.CoordinatorClient,
 	stateDBHeight uint64,
 ) error {
 	blockStoreHeight := s.ledgerService.GetBlockHeight()
@@ -339,11 +338,11 @@ func (s *Service) recoverLedgerStore(
 
 func appendMissingBlock(
 	ctx context.Context,
-	client protocoordinatorservice.CoordinatorClient,
+	client servicepb.CoordinatorClient,
 	blk *common.Block,
 	committedBlocks channel.Writer[*common.Block],
 ) error {
-	var txIDToHeight utils.SyncMap[string, types.Height]
+	var txIDToHeight utils.SyncMap[string, servicepb.Height]
 	mappedBlock, err := mapBlock(blk, &txIDToHeight)
 	if err != nil {
 		// This can never occur unless there is a bug in the relay.
@@ -351,13 +350,13 @@ func appendMissingBlock(
 	}
 
 	txIDs := make([]string, len(mappedBlock.block.Txs))
-	expectedHeight := make(map[string]*types.Height, len(mappedBlock.block.Txs))
+	expectedHeight := make(map[string]*servicepb.Height, len(mappedBlock.block.Txs))
 	for i, tx := range mappedBlock.block.Txs {
 		txIDs[i] = tx.Ref.TxId
-		expectedHeight[tx.Ref.TxId] = types.NewHeightFromTxRef(tx.Ref)
+		expectedHeight[tx.Ref.TxId] = servicepb.NewHeightFromTxRef(tx.Ref)
 	}
 
-	txsStatus, err := client.GetTransactionsStatus(ctx, &protoblocktx.QueryStatus{TxIDs: txIDs})
+	txsStatus, err := client.GetTransactionsStatus(ctx, &applicationpb.QueryStatus{TxIDs: txIDs})
 	if err != nil {
 		return errors.Wrap(err, "failed to get transaction status from the coordinator")
 	}
@@ -394,7 +393,7 @@ func (s *Service) Close() {
 	s.ledgerService.close()
 }
 
-func waitForIdleCoordinator(ctx context.Context, client protocoordinatorservice.CoordinatorClient) error {
+func waitForIdleCoordinator(ctx context.Context, client servicepb.CoordinatorClient) error {
 	for {
 		waitingTxs, err := client.NumberOfWaitingTransactionsForStatus(ctx, nil)
 		if err != nil {
@@ -409,20 +408,20 @@ func waitForIdleCoordinator(ctx context.Context, client protocoordinatorservice.
 }
 
 func fillStatuses(
-	finalStatuses []protoblocktx.Status,
-	statuses map[string]*protoblocktx.StatusWithHeight,
-	expectedHeight map[string]*types.Height,
+	finalStatuses []applicationpb.Status,
+	statuses map[string]*applicationpb.StatusWithHeight,
+	expectedHeight map[string]*servicepb.Height,
 ) error {
 	for txID, height := range expectedHeight {
 		s, ok := statuses[txID]
 		if !ok {
 			return errors.Newf("committer should have the status of txID [%s] but it does not", txID)
 		}
-		if types.AreSame(height, types.NewHeight(s.BlockNumber, s.TxNumber)) {
+		if servicepb.AreSame(height, servicepb.NewHeight(s.BlockNumber, s.TxNumber)) {
 			finalStatuses[height.TxNum] = s.Code
 			continue
 		}
-		finalStatuses[height.TxNum] = protoblocktx.Status_REJECTED_DUPLICATE_TX_ID
+		finalStatuses[height.TxNum] = applicationpb.Status_REJECTED_DUPLICATE_TX_ID
 	}
 	return nil
 }

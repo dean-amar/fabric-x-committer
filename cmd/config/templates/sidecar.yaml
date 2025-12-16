@@ -19,12 +19,13 @@ server:
     enforcement-policy:
       min-time: 60s
       permit-without-stream: false
-
 monitoring:
   server:
     endpoint: {{ .ServiceEndpoints.Metrics | default "localhost:0" }}
 
 orderer:
+  channel-id: {{ .Policy.ChannelID }}
+  consensus-type: BFT
   connection:
     - msp-id: "org0"
       endpoints:
@@ -35,8 +36,14 @@ orderer:
         {{- range .ClientTLS.CACertPaths }}
         - {{ . }}
         {{- end }}
+  tls:
+    mode: {{ .ClientTLS.Mode }}
+    key-path: {{ .ClientTLS.KeyPath }}
+    cert-path: {{ .ClientTLS.CertPath }}
 
-  tls: &clientTLS
+committer:
+  endpoint: {{ .Endpoints.Coordinator.Server }}
+  tls:
     mode: {{ .ClientTLS.Mode }}
     key-path: {{ .ClientTLS.KeyPath }}
     cert-path: {{ .ClientTLS.CertPath }}
@@ -44,13 +51,6 @@ orderer:
       {{- range .ClientTLS.CACertPaths }}
       - {{ . }}
       {{- end }}
-
-  channel-id: {{ .Policy.ChannelID }}
-  consensus-type: BFT
-
-committer:
-  endpoint: {{ .Endpoints.Coordinator.Server }}
-  tls: *clientTLS
 
 ledger:
   path: {{ .LedgerPath }}

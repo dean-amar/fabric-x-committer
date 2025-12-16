@@ -49,27 +49,26 @@ type (
 // New instantiate a new sidecar client.
 func New(config *Parameters) (*Client, error) {
 	cm := &ordererconn.ConnectionManager{}
-	tlsConfig := connection.OrdererTLSConfig{
-		Mode:     config.Client.TLS.Mode,
-		KeyPath:  config.Client.TLS.KeyPath,
-		CertPath: config.Client.TLS.CertPath,
-	}
-	CACertsCopy := make([]string, len(config.Client.TLS.CACertPaths))
-	copy(CACertsCopy, config.Client.TLS.CACertPaths)
-	connConfig := ordererconn.ConfigParameters{
-		Connection: []*ordererconn.OrganizationParametersWithCaCertBytes{
+	caCerts := make([]string, len(config.Client.TLS.CACertPaths))
+	copy(caCerts, config.Client.TLS.CACertPaths)
+	connConfig := ordererconn.Parameters{
+		SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+			Retry: config.Client.Retry,
+			TLS:   config.Client.TLS.ToOrdererTLSConfig(),
+		},
+		Connection: []*ordererconn.OrganizationParameters{
 			{
-				Endpoints: []*commontypes.OrdererEndpoint{{
-					Host: config.Client.Endpoint.Host,
-					Port: config.Client.Endpoint.Port,
-				}},
-				CACerts: CACertsCopy,
+				OrganizationConfig: ordererconn.OrganizationConfig{
+					Endpoints: []*commontypes.OrdererEndpoint{{
+						Host: config.Client.Endpoint.Host,
+						Port: config.Client.Endpoint.Port,
+					}},
+					CACerts: caCerts,
+				},
 			},
 		},
-		Retry: config.Client.Retry,
-		TLS:   tlsConfig,
 	}
-	if err := cm.Update(connConfig); err != nil {
+	if err := cm.Update(&connConfig); err != nil {
 		return nil, err
 	}
 	return &Client{

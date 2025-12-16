@@ -212,28 +212,34 @@ func TestLoadGenForSidecar(t *testing.T) {
 						ordererServers[i] = preAllocatePorts(t, serverTLSConfig)
 					}
 					// Start server under test
-					sidecarConf := &sidecar.ConfigParameters{
-						Server: sidecarServerConf,
-						Orderer: ordererconn.ConfigParameters{
-							Connection: []*ordererconn.OrganizationParametersWithCaCertBytes{
+					sidecarConf := &sidecar.Parameters{
+						SharedConfig: sidecar.SharedConfig{
+							Server:                        sidecarServerConf,
+							LastCommittedBlockSetInterval: 100 * time.Millisecond,
+							WaitingTxsLimit:               5000,
+							Committer: test.NewInsecureClientConfig(
+								&coordinatorServer.Configs[0].Endpoint,
+							),
+							Monitoring: defaultMonitoring(),
+							Ledger: sidecar.LedgerConfig{
+								Path: t.TempDir(),
+							},
+						},
+						Orderer: ordererconn.Parameters{
+							SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+								ConsensusType: ordererconn.Bft,
+							},
+							Connection: []*ordererconn.OrganizationParameters{
 								{
-									Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
-									CACerts:   clientTLSConfig.CACertPaths,
+									OrganizationConfig: ordererconn.OrganizationConfig{
+										Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
+										CACerts:   clientTLSConfig.CACertPaths,
+									},
 								},
 							},
-							TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig),
-							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
-							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
-							ConsensusType: ordererconn.Bft,
-						},
-						LastCommittedBlockSetInterval: 100 * time.Millisecond,
-						WaitingTxsLimit:               5000,
-						Committer: test.NewInsecureClientConfig(
-							&coordinatorServer.Configs[0].Endpoint,
-						),
-						Monitoring: defaultMonitoring(),
-						Ledger: sidecar.LedgerConfig{
-							Path: t.TempDir(),
 						},
 					}
 					service, err := sidecar.New(sidecarConf)
@@ -276,32 +282,36 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 					endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 					sidecarConf := &sidecar.Config{
-						Server: connection.NewLocalHostServerWithTLS(serverTLSConfig),
+						SharedConfig: sidecar.SharedConfig{
+							Server:                        connection.NewLocalHostServerWithTLS(serverTLSConfig),
+							LastCommittedBlockSetInterval: 100 * time.Millisecond,
+							WaitingTxsLimit:               5000,
+							Committer: test.NewInsecureClientConfig(
+								&coordinatorServer.Configs[0].Endpoint,
+							),
+							Monitoring: defaultMonitoring(),
+							Ledger: sidecar.LedgerConfig{
+								Path: t.TempDir(),
+							},
+						},
 						Orderer: ordererconn.Config{
-							Connection: []*ordererconn.OrganizationParameters{
+							SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+								ConsensusType: ordererconn.Bft,
+								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+							},
+							Connection: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
 									CACerts:   clientTLSConfig.CACertPaths,
 								},
 							},
-							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
-							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
-							ConsensusType: ordererconn.Bft,
-							TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig),
-						},
-						LastCommittedBlockSetInterval: 100 * time.Millisecond,
-						WaitingTxsLimit:               5000,
-						Committer: test.NewInsecureClientConfig(
-							&coordinatorServer.Configs[0].Endpoint,
-						),
-						Monitoring: defaultMonitoring(),
-						Ledger: sidecar.LedgerConfig{
-							Path: t.TempDir(),
 						},
 					}
 
 					// Start sidecar.
-					service, err := sidecar.New(sidecarConf.ConvertToConfigPrameters())
+					service, err := sidecar.New(sidecarConf.ToParams())
 					require.NoError(t, err)
 					t.Cleanup(service.Close)
 					test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)
@@ -367,16 +377,18 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 					// Start client
 					clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
 						Orderer: ordererconn.Config{
-							Connection: []*ordererconn.OrganizationParameters{
+							SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+								ConsensusType: ordererconn.Bft,
+								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+							},
+							Connection: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
 									CACerts:   clientTLSConfig.CACertPaths,
 								},
 							},
-							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
-							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
-							ConsensusType: ordererconn.Bft,
-							TLS:           test.ConvertTLSConfigToOrdererTLSConfig(&clientTLSConfig),
 						},
 						BroadcastParallelism: 5,
 					}

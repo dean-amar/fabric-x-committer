@@ -64,31 +64,31 @@ type (
 		PermitWithoutStream bool          `mapstructure:"permit-without-stream"`
 	}
 
+	// BaseTLSConfig contains the essential fields for any TLS identity (Mode, Public Key, Private Key).
+	// It is embedded into specific configs that need this foundation.
+	BaseTLSConfig struct {
+		Mode     string `mapstructure:"mode"`
+		CertPath string `mapstructure:"cert-path"`
+		KeyPath  string `mapstructure:"key-path"`
+	}
+
 	// TLSConfig holds the TLS options and certificate paths
 	// used for secure communication between servers and clients.
 	// Credentials are built based on the configuration mode.
 	// For example, If only server-side TLS is required, the certificate pool (certPool) is not built (for a server),
 	// since the relevant certificates paths are defined in the YAML according to the selected mode.
 	TLSConfig struct {
-		Mode string `mapstructure:"mode"`
-		// CertPath is the path to the certificate file (public key).
-		CertPath string `mapstructure:"cert-path"`
-		// KeyPath is the path to the key file (private key).
-		KeyPath     string   `mapstructure:"key-path"`
-		CACertPaths []string `mapstructure:"ca-cert-paths"`
+		BaseTLSConfig `mapstructure:",squash"`
+		CACertPaths   []string `mapstructure:"ca-cert-paths"`
 	}
 
-	// OrdererTLSConfig holds the TLS options and certificate paths (only private and public keys)
-	// Used for the orderer client connectivity.
+	// OrdererTLSConfig is a restricted config (identity only) for orderer clients.
+	// It reuses the base fields but strictly excludes CA paths.
 	OrdererTLSConfig struct {
-		Mode string `mapstructure:"mode"`
-		// CertPath is the path to the certificate file (public key).
-		CertPath string `mapstructure:"cert-path"`
-		// KeyPath is the path to the key file (private key).
-		KeyPath string `mapstructure:"key-path"`
+		BaseTLSConfig `mapstructure:",squash"`
 	}
 
-	// TLSParameters holds the TLS options and certificate in bytes
+	// TLSParameters holds the loaded runtime bytes.
 	TLSParameters struct {
 		Mode    string
 		Cert    []byte
@@ -108,11 +108,21 @@ const (
 	DefaultTLSMinVersion = tls.VersionTLS12
 )
 
+// ConvertToTLSConfig promotes the restricted Orderer config to a full TLSConfig.
+// Note: The resulting config will have empty CA paths.
 func (c OrdererTLSConfig) ConvertToTLSConfig() *TLSConfig {
+	bc := c.BaseTLSConfig
 	return &TLSConfig{
-		Mode:     c.Mode,
-		KeyPath:  c.KeyPath,
-		CertPath: c.CertPath,
+		BaseTLSConfig: bc,
+	}
+}
+
+// ToOrdererTLSConfig narrows a full TLSConfig down to an OrdererTLSConfig.
+// It effectively strips out the CA certificates, keeping only the Identity.
+func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
+	bc := c.BaseTLSConfig
+	return OrdererTLSConfig{
+		BaseTLSConfig: bc,
 	}
 }
 

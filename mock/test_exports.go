@@ -13,7 +13,7 @@ import (
 
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
-	"github.com/hyperledger/fabric-x-common/internaltools/configtxgen/genesisconfig"
+	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -36,7 +36,7 @@ func StartMockSVService(t *testing.T, numService int) (
 	sigVerServers := test.StartGrpcServersForTest(t.Context(), t, len(mockSigVer),
 		func(server *grpc.Server, index int) {
 			mockSigVer[index].RegisterService(server)
-		})
+		}, nil)
 	return mockSigVer, sigVerServers
 }
 
@@ -58,7 +58,7 @@ func StartMockVCService(t *testing.T, numService int) (*VcService, *test.GrpcSer
 
 	vcGrpc := test.StartGrpcServersForTest(t.Context(), t, numService, func(server *grpc.Server, _ int) {
 		sharedVC.RegisterService(server)
-	})
+	}, nil)
 	return sharedVC, vcGrpc
 }
 
@@ -80,7 +80,7 @@ func StartMockCoordinatorService(t *testing.T) (
 	mockCoordinator := NewMockCoordinator()
 	coordinatorGrpc := test.StartGrpcServersForTest(t.Context(), t, 1, func(server *grpc.Server, _ int) {
 		mockCoordinator.RegisterService(server)
-	})
+	}, nil)
 	return mockCoordinator, coordinatorGrpc
 }
 
@@ -120,7 +120,7 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 	servers := test.StartGrpcServersForTest(
 		t.Context(), t, conf.NumService, func(server *grpc.Server, _ int) {
 			service.RegisterService(server)
-		},
+		}, nil,
 	)
 	return service, servers
 }
@@ -157,8 +157,8 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		OrdererServers: ordererServers,
 		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
 			holder.RegisterService(s)
-		}),
-		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil),
+		}, &conf.Config.ServerConfigs[0].TLS),
+		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, &conf.Config.ServerConfigs[0].TLS),
 	}
 }
 
@@ -177,7 +177,7 @@ func (e *OrdererTestEnv) SubmitConfigBlock(t *testing.T, conf *workload.ConfigBl
 	if conf.MetaNamespaceVerificationKey == nil {
 		conf.MetaNamespaceVerificationKey = e.TestConfig.MetaNamespaceVerificationKey
 	}
-	configBlock, err := workload.CreateDefaultConfigBlock(conf, genesisconfig.TwoOrgsSampleFabricX)
+	configBlock, err := workload.CreateDefaultConfigBlock(conf, configtxgen.TwoOrgsSampleFabricX)
 	require.NoError(t, err)
 	e.Orderer.SubmitBlock(t.Context(), configBlock)
 	return configBlock

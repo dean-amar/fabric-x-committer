@@ -22,7 +22,7 @@ type (
 	// OrdererAdapter applies load on the sidecar.
 	OrdererAdapter struct {
 		commonAdapter
-		config *OrdererClientConfigParams
+		config *OrdererClientConfig
 	}
 )
 
@@ -30,13 +30,13 @@ type (
 func NewOrdererAdapter(config *OrdererClientConfig, res *ClientResources) *OrdererAdapter {
 	return &OrdererAdapter{
 		commonAdapter: commonAdapter{res: res},
-		config:        config.ConvertToParams(),
+		config:        config,
 	}
 }
 
 // RunWorkload applies load on the sidecar.
 func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
-	client, err := deliver.New(&c.config.Orderer)
+	client, err := deliver.New(c.config.Orderer.ToParams())
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 
 	streams := make([]*test.BroadcastStream, c.config.BroadcastParallelism)
 	for i := range streams {
-		streams[i], err = test.NewBroadcastStream(gCtx, &c.config.Orderer)
+		streams[i], err = test.NewBroadcastStream(gCtx, c.config.Orderer.ToParams())
 		if err != nil {
 			connection.CloseConnectionsLog(streams[:i]...)
 			return err

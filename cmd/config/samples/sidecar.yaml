@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# middle config that includes only the bytes certs.
 # fix parser.
 # append endpoints instead of all the gateconfigs
 server:

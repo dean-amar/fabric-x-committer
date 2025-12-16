@@ -18,48 +18,44 @@ type (
 	// Config for the orderer-client.
 	// It supports multi-organization connectivity with the same ledger and consensus type.
 	Config struct {
-		ConsensusType string                    `mapstructure:"consensus-type"`
-		ChannelID     string                    `mapstructure:"channel-id"`
-		Connection    []*OrganizationParameters `mapstructure:"connection"`
-		Identity      *IdentityConfig           `mapstructure:"identity"`
-		Retry         *connection.RetryProfile  `mapstructure:"reconnect"`
-		// this TLS config acts as an orderer client with the same
-		// set of creds but has a list of CA certs for all orderers.
-		TLS connection.OrdererTLSConfig `mapstructure:"tls"`
+		SharedOrdererConfig `mapstructure:",squash"`
+		Connection          []*OrganizationConfig `mapstructure:"connection"`
 	}
 
-	ConfigParameters struct {
-		ConsensusType string
-		ChannelID     string
-		Connection    []*OrganizationParametersWithCaCertBytes
-		Identity      *IdentityConfig
-		Retry         *connection.RetryProfile
-		TLS           connection.OrdererTLSConfig
+	Parameters struct {
+		SharedOrdererConfig
+		Connection []*OrganizationParameters
 	}
 
-	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
-	OrganizationParameters struct {
+	SharedOrdererConfig struct {
+		ConsensusType string                      `mapstructure:"consensus-type"`
+		ChannelID     string                      `mapstructure:"channel-id"`
+		Identity      *IdentityConfig             `mapstructure:"identity"`
+		Retry         *connection.RetryProfile    `mapstructure:"reconnect"`
+		TLS           connection.OrdererTLSConfig `mapstructure:"tls"`
+	}
+
+	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationConfig struct {
 		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
 		CACerts   []string                       `mapstructure:"ca-cert-paths"`
 	}
 
-	// OrganizationParametersWithCaCertBytes contains the MspID (Organization ID), orderer endpoints, and their TLS config.
-	OrganizationParametersWithCaCertBytes struct {
-		MspID        string
-		Endpoints    []*commontypes.OrdererEndpoint
-		CACerts      []string
+	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationParameters struct {
+		OrganizationConfig
 		CACertsBytes [][]byte
 	}
 
 	// GateConfig acts as the full configuration after reading information from the config block.
 	GateConfig struct {
-		OrganizationParametersWithCaCertBytes
+		OrganizationParameters
 		TLS   *connection.TLSParameters
 		Retry *connection.RetryProfile
 	}
 
-	// IdentityConfig defines the committer's identity.
+	// IdentityConfig defines the orderer's MSP.
 	IdentityConfig struct {
 		// MspID indicates to which MSP this client belongs to.
 		MspID  string               `mapstructure:"msp-id" yaml:"msp-id"`
@@ -89,31 +85,26 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
-func (c *Config) ConvertToOrdererConfigParameters() *ConfigParameters {
-	orgParams := make([]*OrganizationParametersWithCaCertBytes, 0, len(c.Connection))
-	for _, orgParam := range c.Connection {
-		orgParams = append(orgParams, orgParam.ConvertToOrgParamsWithBytes())
+func (c *Config) ToParams() *Parameters {
+	orgParams := make([]*OrganizationParameters, 0, len(c.Connection))
+	for _, org := range c.Connection {
+		orgParams = append(orgParams, org.ToParams())
 	}
-	return &ConfigParameters{
-		ConsensusType: c.ConsensusType,
-		ChannelID:     c.ChannelID,
-		Connection:    orgParams,
-		Identity:      c.Identity,
-		Retry:         c.Retry,
-		TLS:           c.TLS,
+	sc := c.SharedOrdererConfig
+	return &Parameters{
+		SharedOrdererConfig: sc,
+		Connection:          orgParams,
 	}
 }
 
-func (op *OrganizationParameters) ConvertToOrgParamsWithBytes() *OrganizationParametersWithCaCertBytes {
-	return &OrganizationParametersWithCaCertBytes{
-		MspID:     op.MspID,
-		Endpoints: op.Endpoints,
-		CACerts:   op.CACerts,
+func (o OrganizationConfig) ToParams() *OrganizationParameters {
+	return &OrganizationParameters{
+		OrganizationConfig: o,
 	}
 }
 
 // CreateConfigWithRequiredParams comment will be added.
-func (c *ConfigParameters) CreateConfigWithRequiredParams(ogp *OrganizationParametersWithCaCertBytes) (*GateConfig, error) {
+func (c *Parameters) CreateConfigWithRequiredParams(ogp *OrganizationParameters) (*GateConfig, error) {
 	tlsConfig := c.TLS.ConvertToTLSConfig()
 	for _, caPath := range ogp.CACerts {
 		tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, caPath)
@@ -126,22 +117,22 @@ func (c *ConfigParameters) CreateConfigWithRequiredParams(ogp *OrganizationParam
 		tlsParams.CACerts = append(tlsParams.CACerts, caCertByte)
 	}
 	return &GateConfig{
-		OrganizationParametersWithCaCertBytes: *ogp,
-		TLS:                                   tlsParams,
-		Retry:                                 c.Retry,
+		OrganizationParameters: *ogp,
+		TLS:                    tlsParams,
+		Retry:                  c.Retry,
 	}, nil
 }
 
 // ValidateConfig validate the configuration.
-func ValidateConfig(c *ConfigParameters) error {
+func ValidateConfig(c *Parameters) error {
 	if c.ConsensusType == "" {
 		c.ConsensusType = DefaultConsensus
 	}
 	if c.ConsensusType != Bft && c.ConsensusType != Cft {
 		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
 	}
-	for _, og := range c.Connection {
-		if err := ValidateConnectionConfig(og); err != nil {
+	for _, org := range c.Connection {
+		if err := ValidateConnectionConfig(org); err != nil {
 			return err
 		}
 	}
@@ -149,7 +140,7 @@ func ValidateConfig(c *ConfigParameters) error {
 }
 
 // ValidateConnectionConfig validate the configuration.
-func ValidateConnectionConfig(c *OrganizationParametersWithCaCertBytes) error {
+func ValidateConnectionConfig(c *OrganizationParameters) error {
 	if c == nil {
 		return ErrEmptyConnectionConfig
 	}
