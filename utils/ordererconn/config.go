@@ -105,11 +105,11 @@ func (o OrganizationConfig) ToParams() *OrganizationParameters {
 
 // CreateConfigWithRequiredParams comment will be added.
 func (c *Parameters) CreateConfigWithRequiredParams(ogp *OrganizationParameters) (*GateConfig, error) {
-	tlsConfig := c.TLS.ConvertToTLSConfig()
+	tlsConfig := c.TLS.ToTLSConfig()
 	for _, caPath := range ogp.CACerts {
 		tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, caPath)
 	}
-	tlsParams, err := tlsConfig.ConvertToTLSParams()
+	tlsParams, err := tlsConfig.ToParams()
 	if err != nil {
 		return nil, errors.Wrap(err, "could not convert to TLS params")
 	}

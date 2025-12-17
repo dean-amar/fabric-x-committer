@@ -16,7 +16,6 @@ orderer-client:
         {{- range .ClientTLS.CACertPaths }}
         - {{ . }}
         {{- end }}
-
   orderer:
     connection:
       - msp-id: "org0"

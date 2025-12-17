@@ -108,9 +108,9 @@ const (
 	DefaultTLSMinVersion = tls.VersionTLS12
 )
 
-// ConvertToTLSConfig promotes the restricted Orderer config to a full TLSConfig.
+// ToTLSConfig promotes the restricted Orderer config to a full TLSConfig.
 // Note: The resulting config will have empty CA paths.
-func (c OrdererTLSConfig) ConvertToTLSConfig() *TLSConfig {
+func (c OrdererTLSConfig) ToTLSConfig() *TLSConfig {
 	bc := c.BaseTLSConfig
 	return &TLSConfig{
 		BaseTLSConfig: bc,
@@ -126,7 +126,7 @@ func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
 	}
 }
 
-func (c TLSConfig) ConvertToTLSParams() (*TLSParameters, error) {
+func (c TLSConfig) ToParams() (*TLSParameters, error) {
 	if c.Mode == NoneTLSMode {
 		return &TLSParameters{
 			Mode: c.Mode,
@@ -171,7 +171,7 @@ func (c TLSConfig) ConvertToTLSParams() (*TLSParameters, error) {
 // ServerCredentials returns the gRPC transport credentials to be used by a server,
 // based on the provided TLS configuration after converting it to bytes.
 func (c TLSConfig) ServerCredentials() (credentials.TransportCredentials, error) {
-	tlsConfigParams, err := c.ConvertToTLSParams()
+	tlsConfigParams, err := c.ToParams()
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (c TLSConfig) ServerCredentials() (credentials.TransportCredentials, error)
 // ClientCredentials returns the gRPC transport credentials to be used by a client,
 // based on the provided TLS configuration after converting it to bytes.
 func (c TLSConfig) ClientCredentials() (credentials.TransportCredentials, error) {
-	tlsConfigParams, err := c.ConvertToTLSParams()
+	tlsConfigParams, err := c.ToParams()
 	if err != nil {
 		return nil, err
 	}

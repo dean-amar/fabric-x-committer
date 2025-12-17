@@ -31,7 +31,7 @@ type (
 	ConnectionManager struct {
 		configVersion atomic.Uint64
 		connections   map[string]*grpc.ClientConn
-		config        []*GateConfig
+		endpoints     []*commontypes.OrdererEndpoint
 		lock          sync.Mutex
 	}
 
@@ -116,7 +116,7 @@ func (c *ConnectionManager) Update(config *Parameters) error {
 	// We use a connection cache to avoid opening the same connection multiple times.
 	connCache := make(map[string]*grpc.ClientConn)
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
-	configs := make([]*GateConfig, len(config.Connection))
+	var allOrgEndpoints []*commontypes.OrdererEndpoint
 	for _, ogParams := range config.Connection {
 		gateConfig, err := config.CreateConfigWithRequiredParams(ogParams)
 		if err != nil {
@@ -143,7 +143,7 @@ func (c *ConnectionManager) Update(config *Parameters) error {
 				connections[filterKey(filter)] = conn
 			}
 		}
-		configs = append(configs, gateConfig)
+		allOrgEndpoints = append(allOrgEndpoints, gateConfig.Endpoints...)
 	}
 
 	// We lock once we read internal members.
@@ -155,7 +155,7 @@ func (c *ConnectionManager) Update(config *Parameters) error {
 	c.configVersion.Add(1)
 	closeConnection(c.connections)
 	c.connections = connections
-	c.config = configs
+	c.endpoints = allOrgEndpoints
 	return nil
 }
 
@@ -180,14 +180,10 @@ func (c *ConnectionManager) GetConnectionPerID(filters ...ConnFilter) (map[uint3
 		return ret, v
 	}
 	filter := aggregateFilter(filters...)
-	for _, gateConf := range c.config {
-		if gateConf != nil {
-			for _, id := range getAllIDs(gateConf.Endpoints) {
-				conn := c.connections[filterKey(filter, WithID(id))]
-				if conn != nil {
-					ret[id] = conn
-				}
-			}
+	for _, id := range getAllIDs(c.endpoints) {
+		conn := c.connections[filterKey(filter, WithID(id))]
+		if conn != nil {
+			ret[id] = conn
 		}
 	}
 	return ret, v
