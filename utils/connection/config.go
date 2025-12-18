@@ -88,7 +88,7 @@ type (
 		BaseTLSConfig `mapstructure:",squash"`
 	}
 
-	// TLSParameters holds the loaded runtime bytes.
+	// TLSParameters holds the loaded runtime TLS certificates bytes.
 	TLSParameters struct {
 		Mode    string
 		Cert    []byte
@@ -127,28 +127,20 @@ func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
 }
 
 func (c TLSConfig) ToParams() (*TLSParameters, error) {
-	if c.Mode == NoneTLSMode {
+	if c.Mode == NoneTLSMode || c.Mode == UnmentionedTLSMode {
 		return &TLSParameters{
 			Mode: c.Mode,
 		}, nil
 	}
 
-	var (
-		certBytes, keyBytes []byte
-		err                 error
-	)
-	if c.CertPath != UnmentionedTLSMode {
-		certBytes, err = os.ReadFile(c.CertPath)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to load certificate from %s", c.CertPath)
-		}
+	certBytes, err := os.ReadFile(c.CertPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to load certificate from %s", c.CertPath)
 	}
 
-	if c.KeyPath != UnmentionedTLSMode {
-		keyBytes, err = os.ReadFile(c.KeyPath)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to load private key from %s", c.KeyPath)
-		}
+	keyBytes, err := os.ReadFile(c.KeyPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to load private key from %s", c.KeyPath)
 	}
 
 	caCertBytes := make([][]byte, 0, len(c.CACertPaths))

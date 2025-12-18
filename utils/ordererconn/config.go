@@ -21,12 +21,10 @@ type (
 		CommonConfig `mapstructure:",squash"`
 		Connection   []*OrganizationConfig `mapstructure:"connection"`
 	}
-
 	Parameters struct {
 		CommonConfig
 		Connection []*OrganizationParameters
 	}
-
 	CommonConfig struct {
 		ConsensusType string                      `mapstructure:"consensus-type"`
 		ChannelID     string                      `mapstructure:"channel-id"`
@@ -34,32 +32,29 @@ type (
 		Retry         *connection.RetryProfile    `mapstructure:"reconnect"`
 		TLS           connection.OrdererTLSConfig `mapstructure:"tls"`
 	}
-
-	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their TLS config.
-	OrganizationConfig struct {
-		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
-		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
-		CACerts   []string                       `mapstructure:"ca-cert-paths"`
-	}
-
-	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
-	OrganizationParameters struct {
-		OrganizationConfig
-		CACertsBytes [][]byte
-	}
-
-	// GateConfig acts as the full configuration after reading information from the config block.
-	GateConfig struct {
-		TLS   *connection.TLSParameters
-		Retry *connection.RetryProfile
-	}
-
 	// IdentityConfig defines the orderer's MSP.
 	IdentityConfig struct {
 		// MspID indicates to which MSP this client belongs to.
 		MspID  string               `mapstructure:"msp-id" yaml:"msp-id"`
 		MSPDir string               `mapstructure:"msp-dir" yaml:"msp-dir"`
 		BCCSP  *factory.FactoryOpts `mapstructure:"bccsp" yaml:"bccsp"`
+	}
+	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationConfig struct {
+		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
+		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
+		CACerts   []string                       `mapstructure:"ca-cert-paths"`
+	}
+	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	OrganizationParameters struct {
+		OrganizationConfig
+		CACertsBytes [][]byte
+	}
+	// OrdererConnectionParameters is the orderer client config with tls parameters already loaded bytes.
+	OrdererConnectionParameters struct {
+		Endpoints []*connection.Endpoint
+		TLS       *connection.TLSParameters
+		Retry     *connection.RetryProfile
 	}
 )
 
@@ -102,22 +97,21 @@ func (o OrganizationConfig) ToParams() *OrganizationParameters {
 	}
 }
 
-// CreateConfigWithRequiredParams comment will be added.
-func (c *Parameters) CreateConfigWithRequiredParams(ogp *OrganizationParameters) (*GateConfig, error) {
+// CreateOrdererConnectionParameters comment will be added.
+func (c *Parameters) CreateOrdererConnectionParameters(organizationParams *OrganizationParameters, endpoints []*connection.Endpoint) (*OrdererConnectionParameters, error) {
 	tlsConfig := c.TLS.ToTLSConfig()
-	for _, caPath := range ogp.CACerts {
-		tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, caPath)
-	}
+	tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, organizationParams.CACerts...)
+
 	tlsParams, err := tlsConfig.ToParams()
 	if err != nil {
 		return nil, errors.Wrap(err, "could not convert to TLS params")
 	}
-	for _, caCertByte := range ogp.CACertsBytes {
-		tlsParams.CACerts = append(tlsParams.CACerts, caCertByte)
-	}
-	return &GateConfig{
-		TLS:   tlsParams,
-		Retry: c.Retry,
+	tlsParams.CACerts = append(tlsParams.CACerts, organizationParams.CACertsBytes...)
+
+	return &OrdererConnectionParameters{
+		Endpoints: endpoints,
+		TLS:       tlsParams,
+		Retry:     c.Retry,
 	}, nil
 }
 
