@@ -225,7 +225,7 @@ func makeConfig(t *testing.T, tlsConfig connection.TLSConfig) (
 	require.Len(t, ordererServer.Servers, instanceCount)
 
 	conf := ordererconn.Parameters{
-		SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+		CommonConfig: ordererconn.CommonConfig{
 			ChannelID:     channelForTest,
 			ConsensusType: ordererconn.Bft,
 			Retry:         &testGrpcRetryProfile,

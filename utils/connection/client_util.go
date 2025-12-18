@@ -71,7 +71,7 @@ func NewLoadBalancedConnection(config *MultiClientConfig) (*grpc.ClientConn, err
 
 // NewLoadBalancedConnectionForOrderer creates a connection with load balancing between the endpoints
 // in the given config.
-func NewLoadBalancedConnectionForOrderer(endpoints []*Endpoint, tlsConfig TLSParameters, retry *RetryProfile) (*grpc.ClientConn, error) {
+func NewLoadBalancedConnectionForOrderer(endpoints []*Endpoint, tlsConfig *TLSParameters, retry *RetryProfile) (*grpc.ClientConn, error) {
 	tlsCredentials, err := tlsConfig.ClientCredentials()
 	if err != nil {
 		return nil, err

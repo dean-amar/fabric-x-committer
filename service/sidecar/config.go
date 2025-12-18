@@ -28,7 +28,7 @@ type (
 	// and the config of ledger service, and the orderer setup.
 	// It may contain the orderer endpoint from which the sidecar pulls blocks.
 	Config struct {
-		SharedConfig `mapstructure:",squash"`
+		CommonConfig `mapstructure:",squash"`
 		Orderer      ordererconn.Config `mapstructure:"orderer"`
 	}
 
@@ -40,11 +40,11 @@ type (
 	}
 
 	Parameters struct {
-		SharedConfig
+		CommonConfig
 		Orderer ordererconn.Parameters
 	}
 
-	SharedConfig struct {
+	CommonConfig struct {
 		Server                        *connection.ServerConfig  `mapstructure:"server"`
 		Monitoring                    monitoring.Config         `mapstructure:"monitoring"`
 		Committer                     *connection.ClientConfig  `mapstructure:"committer"`
@@ -76,9 +76,9 @@ const (
 )
 
 func (c *Config) ToParams() *Parameters {
-	sc := c.SharedConfig
+	sc := c.CommonConfig
 	return &Parameters{
-		SharedConfig: sc,
+		CommonConfig: sc,
 		Orderer:      *c.Orderer.ToParams(),
 	}
 }

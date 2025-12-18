@@ -52,7 +52,7 @@ func New(config *Parameters) (*Client, error) {
 	caCerts := make([]string, len(config.Client.TLS.CACertPaths))
 	copy(caCerts, config.Client.TLS.CACertPaths)
 	connConfig := ordererconn.Parameters{
-		SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+		CommonConfig: ordererconn.CommonConfig{
 			Retry: config.Client.Retry,
 			TLS:   config.Client.TLS.ToOrdererTLSConfig(),
 		},

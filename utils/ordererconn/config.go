@@ -18,16 +18,16 @@ type (
 	// Config for the orderer-client.
 	// It supports multi-organization connectivity with the same ledger and consensus type.
 	Config struct {
-		SharedOrdererConfig `mapstructure:",squash"`
-		Connection          []*OrganizationConfig `mapstructure:"connection"`
+		CommonConfig `mapstructure:",squash"`
+		Connection   []*OrganizationConfig `mapstructure:"connection"`
 	}
 
 	Parameters struct {
-		SharedOrdererConfig
+		CommonConfig
 		Connection []*OrganizationParameters
 	}
 
-	SharedOrdererConfig struct {
+	CommonConfig struct {
 		ConsensusType string                      `mapstructure:"consensus-type"`
 		ChannelID     string                      `mapstructure:"channel-id"`
 		Identity      *IdentityConfig             `mapstructure:"identity"`
@@ -50,7 +50,6 @@ type (
 
 	// GateConfig acts as the full configuration after reading information from the config block.
 	GateConfig struct {
-		OrganizationParameters
 		TLS   *connection.TLSParameters
 		Retry *connection.RetryProfile
 	}
@@ -90,10 +89,10 @@ func (c *Config) ToParams() *Parameters {
 	for _, org := range c.Connection {
 		orgParams = append(orgParams, org.ToParams())
 	}
-	sc := c.SharedOrdererConfig
+	sc := c.CommonConfig
 	return &Parameters{
-		SharedOrdererConfig: sc,
-		Connection:          orgParams,
+		CommonConfig: sc,
+		Connection:   orgParams,
 	}
 }
 
@@ -117,9 +116,8 @@ func (c *Parameters) CreateConfigWithRequiredParams(ogp *OrganizationParameters)
 		tlsParams.CACerts = append(tlsParams.CACerts, caCertByte)
 	}
 	return &GateConfig{
-		OrganizationParameters: *ogp,
-		TLS:                    tlsParams,
-		Retry:                  c.Retry,
+		TLS:   tlsParams,
+		Retry: c.Retry,
 	}, nil
 }
 

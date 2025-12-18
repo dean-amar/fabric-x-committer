@@ -226,7 +226,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		test.NewSecuredConnection(t, s.Endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
 	)
 	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Parameters{
-		SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+		CommonConfig: ordererconn.CommonConfig{
 			TLS:           c.SystemConfig.ClientTLS.ToOrdererTLSConfig(),
 			ChannelID:     s.Policy.ChannelID,
 			Identity:      s.Policy.Identity,

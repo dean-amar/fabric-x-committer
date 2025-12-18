@@ -117,15 +117,15 @@ func (c *ConnectionManager) Update(config *Parameters) error {
 	connCache := make(map[string]*grpc.ClientConn)
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
 	var allOrgEndpoints []*commontypes.OrdererEndpoint
-	for _, ogParams := range config.Connection {
-		gateConfig, err := config.CreateConfigWithRequiredParams(ogParams)
+	for _, orgParams := range config.Connection {
+		gateConfig, err := config.CreateConfigWithRequiredParams(orgParams)
 		if err != nil {
 			return err
 		}
-		for _, id := range append(getAllIDs(ogParams.Endpoints), anyID) {
+		for _, id := range append(getAllIDs(orgParams.Endpoints), anyID) {
 			for _, api := range allAPIs {
 				filter := aggregateFilter(WithAPI(api), WithID(id))
-				endpoints := filterOrdererEndpoints(ogParams.Endpoints, filter)
+				endpoints := filterOrdererEndpoints(orgParams.Endpoints, filter)
 				if len(endpoints) == 0 {
 					continue
 				}
@@ -143,7 +143,7 @@ func (c *ConnectionManager) Update(config *Parameters) error {
 				connections[filterKey(filter)] = conn
 			}
 		}
-		allOrgEndpoints = append(allOrgEndpoints, gateConfig.Endpoints...)
+		allOrgEndpoints = append(allOrgEndpoints, orgParams.Endpoints...)
 	}
 
 	// We lock once we read internal members.
@@ -204,7 +204,7 @@ func openConnection(
 	// We shuffle the endpoints for load balancing.
 	shuffle(endpoints)
 	logger.Infof("Opening connections to %d endpoints: %v.", len(endpoints), endpoints)
-	return connection.NewLoadBalancedConnectionForOrderer(endpoints, *conf.TLS, conf.Retry)
+	return connection.NewLoadBalancedConnectionForOrderer(endpoints, conf.TLS, conf.Retry)
 }
 
 func makeEndpointsKey(endpoint []*connection.Endpoint) string {

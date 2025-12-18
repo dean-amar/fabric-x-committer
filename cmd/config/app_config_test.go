@@ -54,7 +54,7 @@ var (
 			"/client-certs/ca-certificate.pem",
 		},
 	}
-	defaultCACertificatePaths = []string{
+	defaultClientCACertificatePaths = []string{
 		"/client-certs/ca-certificate.pem",
 	}
 )
@@ -69,7 +69,7 @@ func TestReadConfigSidecar(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &sidecar.Config{
-			SharedConfig: sidecar.SharedConfig{
+			CommonConfig: sidecar.CommonConfig{
 				Server:     newServerConfig("localhost", 4001),
 				Monitoring: newMonitoringConfig("localhost", 2114),
 				Committer: &connection.ClientConfig{
@@ -86,7 +86,7 @@ func TestReadConfigSidecar(t *testing.T) {
 				ChannelBufferSize:             100,
 			},
 			Orderer: ordererconn.Config{
-				SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+				CommonConfig: ordererconn.CommonConfig{
 					ChannelID: "mychannel",
 				},
 				Connection: []*ordererconn.OrganizationConfig{
@@ -102,7 +102,7 @@ func TestReadConfigSidecar(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/sidecar.yaml",
 		expectedConfig: &sidecar.Config{
-			SharedConfig: sidecar.SharedConfig{
+			CommonConfig: sidecar.CommonConfig{
 				Server: &connection.ServerConfig{
 					Endpoint: *newEndpoint("", 4001),
 					TLS:      defaultServerTLSConfig,
@@ -130,7 +130,7 @@ func TestReadConfigSidecar(t *testing.T) {
 				ChannelBufferSize:             100,
 			},
 			Orderer: ordererconn.Config{
-				SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+				CommonConfig: ordererconn.CommonConfig{
 					ChannelID: "mychannel",
 					TLS:       defaultClientTLSConfig.ToOrdererTLSConfig(),
 				},
@@ -140,7 +140,7 @@ func TestReadConfigSidecar(t *testing.T) {
 						Endpoints: []*commontypes.OrdererEndpoint{
 							newOrdererEndpoint("", "orderer"),
 						},
-						CACerts: defaultCACertificatePaths,
+						CACerts: defaultClientCACertificatePaths,
 					},
 				},
 			},
@@ -383,7 +383,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", 4001),
 					Orderer: ordererconn.Config{
-						SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+						CommonConfig: ordererconn.CommonConfig{
 							ChannelID:     "mychannel",
 							ConsensusType: ordererconn.Bft,
 							TLS:           defaultClientTLSConfig.ToOrdererTLSConfig(),
@@ -394,7 +394,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 								Endpoints: []*commontypes.OrdererEndpoint{
 									newOrdererEndpoint("", "orderer"),
 								},
-								CACerts: defaultCACertificatePaths,
+								CACerts: defaultClientCACertificatePaths,
 							},
 						},
 					},

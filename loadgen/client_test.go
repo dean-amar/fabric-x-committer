@@ -213,7 +213,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 					}
 					// Start server under test
 					sidecarConf := &sidecar.Parameters{
-						SharedConfig: sidecar.SharedConfig{
+						CommonConfig: sidecar.CommonConfig{
 							Server:                        sidecarServerConf,
 							LastCommittedBlockSetInterval: 100 * time.Millisecond,
 							WaitingTxsLimit:               5000,
@@ -226,7 +226,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 							},
 						},
 						Orderer: ordererconn.Parameters{
-							SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+							CommonConfig: ordererconn.CommonConfig{
 								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
 								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
@@ -277,7 +277,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 					endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 					sidecarConf := &sidecar.Config{
-						SharedConfig: sidecar.SharedConfig{
+						CommonConfig: sidecar.CommonConfig{
 							Server:                        connection.NewLocalHostServerWithTLS(serverTLSConfig),
 							LastCommittedBlockSetInterval: 100 * time.Millisecond,
 							WaitingTxsLimit:               5000,
@@ -290,7 +290,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 							},
 						},
 						Orderer: ordererconn.Config{
-							SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+							CommonConfig: ordererconn.CommonConfig{
 								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 								ConsensusType: ordererconn.Bft,
@@ -367,7 +367,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 					// Start client
 					clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
 						Orderer: ordererconn.Config{
-							SharedOrdererConfig: ordererconn.SharedOrdererConfig{
+							CommonConfig: ordererconn.CommonConfig{
 								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 								ConsensusType: ordererconn.Bft,
