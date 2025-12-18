@@ -126,6 +126,7 @@ func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
 	}
 }
 
+// ToParams converts a TLSConfig with path fields into a struct that holds the actual bytes of the certificates.
 func (c TLSConfig) ToParams() (*TLSParameters, error) {
 	if c.Mode == NoneTLSMode || c.Mode == UnmentionedTLSMode {
 		return &TLSParameters{

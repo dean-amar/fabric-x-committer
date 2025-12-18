@@ -232,7 +232,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 								ConsensusType: ordererconn.Bft,
 							},
-							Connection: []*ordererconn.OrganizationParameters{
+							Organizations: []*ordererconn.OrganizationParameters{
 								{
 									OrganizationConfig: ordererconn.OrganizationConfig{
 										Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
@@ -296,7 +296,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 								ConsensusType: ordererconn.Bft,
 								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
 							},
-							Connection: []*ordererconn.OrganizationConfig{
+							Organizations: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
 									CACerts:   clientTLSConfig.CACertPaths,
@@ -373,7 +373,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 								ConsensusType: ordererconn.Bft,
 								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
 							},
-							Connection: []*ordererconn.OrganizationConfig{
+							Organizations: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
 									CACerts:   clientTLSConfig.CACertPaths,

@@ -232,7 +232,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			Identity:      s.Policy.Identity,
 			ConsensusType: ordererconn.Bft,
 		},
-		Connection: []*ordererconn.OrganizationParameters{
+		Organizations: []*ordererconn.OrganizationParameters{
 			{
 				OrganizationConfig: ordererconn.OrganizationConfig{
 					Endpoints: s.Policy.OrdererEndpoints,

@@ -106,18 +106,17 @@ func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ..
 // Update updates the connection configs.
 // This will close all connections, forcing the clients to reload.
 func (c *ConnectionManager) Update(config *Parameters) error {
-	for _, orgParams := range config.Connection {
-		if err := ValidateConnectionConfig(orgParams); err != nil {
-			return err
-		}
+	if err := ValidateOrganizationParametersConfig(config.Organizations...); err != nil {
+		return err
 	}
 	// We pre create all the connections to ensure correct form.
 	connections := make(map[string]*grpc.ClientConn)
 	// We use a connection cache to avoid opening the same connection multiple times.
 	connCache := make(map[string]*grpc.ClientConn)
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
+	// We save the connection for later usage.
 	var allOrgsEndpoints []*commontypes.OrdererEndpoint
-	for _, orgParams := range config.Connection {
+	for _, orgParams := range config.Organizations {
 		for _, id := range append(getAllIDs(orgParams.Endpoints), anyID) {
 			for _, api := range allAPIs {
 				filter := aggregateFilter(WithAPI(api), WithID(id))

@@ -164,7 +164,7 @@ func newSidecarTestEnvWithTLS(
 				ChannelID: ordererEnv.TestConfig.ChanID,
 				TLS:       conf.ClientTLS.ToOrdererTLSConfig(),
 			},
-			Connection: []*ordererconn.OrganizationConfig{
+			Organizations: []*ordererconn.OrganizationConfig{
 				{
 					Endpoints: initOrdererEndpoints,
 					CACerts:   conf.ClientTLS.CACertPaths,
@@ -320,9 +320,10 @@ func TestSidecarConfigUpdate(t *testing.T) {
 func TestSidecarConfigRecovery(t *testing.T) {
 	t.Parallel()
 	env := newSidecarTestEnvWithTLS(t,
-		sidecarTestConfig{NumService: 3,
-			ClientTLS: test.InsecureTLSConfig,
-			ServerTLS: test.InsecureTLSConfig,
+		sidecarTestConfig{
+			NumService: 3,
+			ClientTLS:  test.InsecureTLSConfig,
+			ServerTLS:  test.InsecureTLSConfig,
 		},
 	)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -350,7 +351,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Log("Modify the Sidecar config, use illegal host endpoint")
 	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
 	// as the sidecar expects the Endpoints to be non-empty.
-	env.config.Orderer.Connection = []*ordererconn.OrganizationParameters{
+	env.config.Orderer.Organizations = []*ordererconn.OrganizationParameters{
 		{
 			OrganizationConfig: ordererconn.OrganizationConfig{
 				Endpoints: []*commontypes.OrdererEndpoint{
@@ -555,9 +556,10 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 func TestSidecarVerifyBadTxForm(t *testing.T) {
 	t.Parallel()
 	env := newSidecarTestEnvWithTLS(t,
-		sidecarTestConfig{WithConfigBlock: true,
-			ServerTLS: test.InsecureTLSConfig,
-			ClientTLS: test.InsecureTLSConfig,
+		sidecarTestConfig{
+			WithConfigBlock: true,
+			ServerTLS:       test.InsecureTLSConfig,
+			ClientTLS:       test.InsecureTLSConfig,
 		},
 	)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)

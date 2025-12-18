@@ -9,7 +9,6 @@ package connection
 import (
 	"context"
 	"fmt"
-	"google.golang.org/grpc/resolver"
 	"io"
 	"net"
 	"regexp"
@@ -19,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/resolver/manual"
 	"google.golang.org/grpc/status"
 
@@ -71,7 +71,8 @@ func NewLoadBalancedConnection(config *MultiClientConfig) (*grpc.ClientConn, err
 
 // NewLoadBalancedConnectionForOrderer creates a connection with load balancing between the endpoints
 // in the given config.
-func NewLoadBalancedConnectionForOrderer(endpoints []*Endpoint, tlsConfig *TLSParameters, retry *RetryProfile) (*grpc.ClientConn, error) {
+func NewLoadBalancedConnectionForOrderer(endpoints []*Endpoint, tlsConfig *TLSParameters, retry *RetryProfile,
+) (*grpc.ClientConn, error) {
 	tlsCredentials, err := tlsConfig.ClientCredentials()
 	if err != nil {
 		return nil, err

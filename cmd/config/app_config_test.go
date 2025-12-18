@@ -89,7 +89,7 @@ func TestReadConfigSidecar(t *testing.T) {
 				CommonConfig: ordererconn.CommonConfig{
 					ChannelID: "mychannel",
 				},
-				Connection: []*ordererconn.OrganizationConfig{
+				Organizations: []*ordererconn.OrganizationConfig{
 					{
 						Endpoints: []*commontypes.OrdererEndpoint{
 							newOrdererEndpoint("", "localhost"),
@@ -134,7 +134,7 @@ func TestReadConfigSidecar(t *testing.T) {
 					ChannelID: "mychannel",
 					TLS:       defaultClientTLSConfig.ToOrdererTLSConfig(),
 				},
-				Connection: []*ordererconn.OrganizationConfig{
+				Organizations: []*ordererconn.OrganizationConfig{
 					{
 						MspID: "org0",
 						Endpoints: []*commontypes.OrdererEndpoint{
@@ -388,7 +388,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 							ConsensusType: ordererconn.Bft,
 							TLS:           defaultClientTLSConfig.ToOrdererTLSConfig(),
 						},
-						Connection: []*ordererconn.OrganizationConfig{
+						Organizations: []*ordererconn.OrganizationConfig{
 							{
 								MspID: "org0",
 								Endpoints: []*commontypes.OrdererEndpoint{

@@ -56,7 +56,7 @@ func New(config *Parameters) (*Client, error) {
 			Retry: config.Client.Retry,
 			TLS:   config.Client.TLS.ToOrdererTLSConfig(),
 		},
-		Connection: []*ordererconn.OrganizationParameters{
+		Organizations: []*ordererconn.OrganizationParameters{
 			{
 				OrganizationConfig: ordererconn.OrganizationConfig{
 					Endpoints: []*commontypes.OrdererEndpoint{{

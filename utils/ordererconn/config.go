@@ -15,16 +15,22 @@ import (
 )
 
 type (
-	// Config for the orderer-client.
-	// It supports multi-organization connectivity with the same ledger and consensus type.
+	// Config defines the static configuration of the orderer client as loaded from YAML file.
+	// It supports connectivity to multiple organization's orderer.
 	Config struct {
-		CommonConfig `mapstructure:",squash"`
-		Connection   []*OrganizationConfig `mapstructure:"connection"`
+		CommonConfig  `mapstructure:",squash"`
+		Organizations []*OrganizationConfig `mapstructure:"connection"`
 	}
+	// Parameters define the fully resolved runtime configuration of the orderer
+	// client.
 	Parameters struct {
 		CommonConfig
-		Connection []*OrganizationParameters
+		Organizations []*OrganizationParameters
 	}
+	// CommonConfig contains configuration fields shared between Config and
+	// Parameters.
+	// These settings define the orderer client, including consensus and channel identity, client MSP configuration,
+	// retry behavior, and TLS settings.
 	CommonConfig struct {
 		ConsensusType string                      `mapstructure:"consensus-type"`
 		ChannelID     string                      `mapstructure:"channel-id"`
@@ -79,18 +85,21 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
+// ToParams converts the orderer's config into a parameter struct that holds the Root CAs certificates in bytes.
 func (c *Config) ToParams() *Parameters {
-	orgParams := make([]*OrganizationParameters, 0, len(c.Connection))
-	for _, org := range c.Connection {
+	orgParams := make([]*OrganizationParameters, 0, len(c.Organizations))
+	for _, org := range c.Organizations {
 		orgParams = append(orgParams, org.ToParams())
 	}
 	sc := c.CommonConfig
 	return &Parameters{
-		CommonConfig: sc,
-		Connection:   orgParams,
+		CommonConfig:  sc,
+		Organizations: orgParams,
 	}
 }
 
+// ToParams converts the Organization Config into a parameter struct.
+// @TODO: convert the organizationConfig into OrganizationParameters with the bytes. split the implementations.
 func (o OrganizationConfig) ToParams() *OrganizationParameters {
 	return &OrganizationParameters{
 		OrganizationConfig: o,
@@ -98,13 +107,15 @@ func (o OrganizationConfig) ToParams() *OrganizationParameters {
 }
 
 // CreateOrdererConnectionParameters comment will be added.
-func (c *Parameters) CreateOrdererConnectionParameters(organizationParams *OrganizationParameters, endpoints []*connection.Endpoint) (*OrdererConnectionParameters, error) {
+func (c *Parameters) CreateOrdererConnectionParameters(
+	organizationParams *OrganizationParameters, endpoints []*connection.Endpoint,
+) (*OrdererConnectionParameters, error) {
 	tlsConfig := c.TLS.ToTLSConfig()
 	tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, organizationParams.CACerts...)
 
 	tlsParams, err := tlsConfig.ToParams()
 	if err != nil {
-		return nil, errors.Wrap(err, "could not convert to TLS params")
+		return nil, errors.Wrap(err, "could not convert to TLS parameters")
 	}
 	tlsParams.CACerts = append(tlsParams.CACerts, organizationParams.CACertsBytes...)
 
@@ -123,32 +134,29 @@ func ValidateConfig(c *Parameters) error {
 	if c.ConsensusType != Bft && c.ConsensusType != Cft {
 		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
 	}
-	for _, org := range c.Connection {
-		if err := ValidateConnectionConfig(org); err != nil {
-			return err
-		}
-	}
-	return nil
+	return ValidateOrganizationParametersConfig(c.Organizations...)
 }
 
-// ValidateConnectionConfig validate the configuration.
-func ValidateConnectionConfig(c *OrganizationParameters) error {
-	if c == nil {
-		return ErrEmptyConnectionConfig
-	}
-	if len(c.Endpoints) == 0 {
-		return ErrNoEndpoints
-	}
-	uniqueEndpoints := make(map[string]string)
-	for _, e := range c.Endpoints {
-		if e.Host == "" || e.Port == 0 {
-			return ErrEmptyEndpoint
+// ValidateOrganizationParametersConfig validate the configuration.
+func ValidateOrganizationParametersConfig(organizations ...*OrganizationParameters) error {
+	for _, org := range organizations {
+		if org == nil {
+			return ErrEmptyConnectionConfig
 		}
-		target := e.Address()
-		if other, ok := uniqueEndpoints[target]; ok {
-			return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
+		if len(org.Endpoints) == 0 {
+			return ErrNoEndpoints
 		}
-		uniqueEndpoints[target] = e.String()
+		uniqueEndpoints := make(map[string]string)
+		for _, e := range org.Endpoints {
+			if e.Host == "" || e.Port == 0 {
+				return ErrEmptyEndpoint
+			}
+			target := e.Address()
+			if other, ok := uniqueEndpoints[target]; ok {
+				return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
+			}
+			uniqueEndpoints[target] = e.String()
+		}
 	}
 	return nil
 }

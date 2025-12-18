@@ -23,27 +23,30 @@ import (
 )
 
 type (
-	// Config holds the configuration of the sidecar service. This includes
-	// sidecar endpoint, committer endpoint to which the sidecar pushes the block and pulls statuses,
-	// and the config of ledger service, and the orderer setup.
+	// Config defines the static configuration of the sidecar service as loaded from the YAML file.
+	// This includes sidecar endpoint, committer endpoint to which the sidecar pushes the block and pulls statuses,
+	// and the config of ledger service, and the orderer parameters setup.
 	// It may contain the orderer endpoint from which the sidecar pulls blocks.
 	Config struct {
 		CommonConfig `mapstructure:",squash"`
 		Orderer      ordererconn.Config `mapstructure:"orderer"`
 	}
 
-	// NotificationServiceConfig holds the parameters for notifications.
-	NotificationServiceConfig struct {
-		// MaxTimeout is an upper limit on the request's timeout to prevent resource exhaustion.
-		// If a request doesn't specify a timeout, this value will be used.
-		MaxTimeout time.Duration `mapstructure:"max-timeout"`
-	}
-
+	// Parameters defines the fully resolved runtime configuration of the sidecar service.
+	// In addition to the common sidecar settings, it contains orderer parameters
+	// and is used by the sidecar during execution.
 	Parameters struct {
 		CommonConfig
 		Orderer ordererconn.Parameters
 	}
 
+	// CommonConfig contains configuration fields shared between Config and
+	// Parameters.
+	//
+	// These settings define the core behavior of the sidecar service, including
+	// server and monitoring configuration, committer connectivity, ledger and
+	// notification services, internal limits, buffering behavior, and bootstrap
+	// settings.
 	CommonConfig struct {
 		Server                        *connection.ServerConfig  `mapstructure:"server"`
 		Monitoring                    monitoring.Config         `mapstructure:"monitoring"`
@@ -55,6 +58,13 @@ type (
 		// ChannelBufferSize is the buffer size that will be used to queue blocks, requests, and statuses.
 		ChannelBufferSize int       `mapstructure:"channel-buffer-size"`
 		Bootstrap         Bootstrap `mapstructure:"bootstrap"`
+	}
+
+	// NotificationServiceConfig holds the parameters for notifications.
+	NotificationServiceConfig struct {
+		// MaxTimeout is an upper limit on the request's timeout to prevent resource exhaustion.
+		// If a request doesn't specify a timeout, this value will be used.
+		MaxTimeout time.Duration `mapstructure:"max-timeout"`
 	}
 
 	// Bootstrap configures how to obtain the bootstrap configuration.
@@ -75,6 +85,8 @@ const (
 	defaultBufferSize             = 100
 )
 
+// ToParams converts a config struct into parameters struct.
+// specifically, it converts the Orderer field from config to parameters.
 func (c *Config) ToParams() *Parameters {
 	sc := c.CommonConfig
 	return &Parameters{
@@ -124,11 +136,11 @@ func OverwriteConfigFromEnvelope(conf *Parameters, envelope *common.Envelope) er
 	if err != nil {
 		return err
 	}
-	for i := range conf.Orderer.Connection {
-		conf.Orderer.Connection[i].Endpoints = orgParams[i].Endpoints
+	for i := range conf.Orderer.Organizations {
+		conf.Orderer.Organizations[i].Endpoints = orgParams[i].Endpoints
 	}
 	return nil
-	//conf.Orderer.Connection, err = getDeliveryEndpointsFromConfig(bundle)
+	//conf.Orderer.Organizations, err = getDeliveryEndpointsFromConfig(bundle)
 	//if err != nil {
 	//	return err
 	//}
@@ -136,13 +148,13 @@ func OverwriteConfigFromEnvelope(conf *Parameters, envelope *common.Envelope) er
 }
 
 func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*ordererconn.OrganizationParameters, error) {
-	oc, ok := bundle.OrdererConfig()
+	ordererCfg, ok := bundle.OrdererConfig()
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
 	totalCAs := 0
-	var orgParams []*ordererconn.OrganizationParameters
-	for orgID, org := range oc.Organizations() {
+	orgParams := make([]*ordererconn.OrganizationParameters, 0, len(ordererCfg.Organizations()))
+	for orgID, org := range ordererCfg.Organizations() {
 		var endpoints []*commontypes.OrdererEndpoint
 		endpointsStr := org.Endpoints()
 		for _, eStr := range endpointsStr {

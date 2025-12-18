@@ -53,12 +53,12 @@ func TestBroadcastDeliver(t *testing.T) {
 
 			// Set the orderer client credentials.
 			conf.TLS = clientTLSConfig.ToOrdererTLSConfig()
-			allEndpoints := conf.Connection[0].Endpoints
+			allEndpoints := conf.Organizations[0].Endpoints
 
 			// We only take the bottom endpoints for now.
 			// Later we take the other endpoints and update the client.
-			conf.Connection[0].Endpoints = allEndpoints[:6]
-			conf.Connection[0].CACerts = clientTLSConfig.CACertPaths
+			conf.Organizations[0].Endpoints = allEndpoints[:6]
+			conf.Organizations[0].CACerts = clientTLSConfig.CACertPaths
 			client, err := New(&conf)
 			require.NoError(t, err)
 			t.Cleanup(client.CloseConnections)
@@ -138,7 +138,7 @@ func TestBroadcastDeliver(t *testing.T) {
 				unavailable: 2,
 			})
 			t.Log("Update endpoints")
-			conf.Connection = []*ordererconn.OrganizationParameters{
+			conf.Organizations = []*ordererconn.OrganizationParameters{
 				{
 					OrganizationConfig: ordererconn.OrganizationConfig{
 						Endpoints: allEndpoints[6:],
@@ -230,13 +230,13 @@ func makeConfig(t *testing.T, tlsConfig connection.TLSConfig) (
 			ConsensusType: ordererconn.Bft,
 			Retry:         &testGrpcRetryProfile,
 		},
-		Connection: make([]*ordererconn.OrganizationParameters, 1),
+		Organizations: make([]*ordererconn.OrganizationParameters, 1),
 	}
-	conf.Connection[0] = &ordererconn.OrganizationParameters{}
+	conf.Organizations[0] = &ordererconn.OrganizationParameters{}
 	servers := make([]test.GrpcServers, idCount)
 	for i, c := range ordererServer.Configs {
 		id := uint32(i % idCount) //nolint:gosec // integer overflow conversion int -> uint32
-		conf.Connection[0].Endpoints = append(conf.Connection[0].Endpoints, &commontypes.OrdererEndpoint{
+		conf.Organizations[0].Endpoints = append(conf.Organizations[0].Endpoints, &commontypes.OrdererEndpoint{
 			ID:   id,
 			Host: c.Endpoint.Host,
 			Port: c.Endpoint.Port,
@@ -249,7 +249,7 @@ func makeConfig(t *testing.T, tlsConfig connection.TLSConfig) (
 		require.Lenf(t, s.Configs, serverPerID, "id: %d", i)
 		require.Lenf(t, s.Servers, serverPerID, "id: %d", i)
 	}
-	for i, e := range conf.Connection[0].Endpoints {
+	for i, e := range conf.Organizations[0].Endpoints {
 		t.Logf("ENDPOINT [%02d] %s", i, e.String())
 	}
 	return ordererService, servers, conf
