@@ -38,7 +38,7 @@ type (
 
 	// ServerStarter is a function that receives a TLS configuration, starts the server,
 	// and returns a RPCAttempt function for initiating a client connection and attempting an RPC call.
-	ServerStarter func(t *testing.T, serverTLS connection.TLSConfig) RPCAttempt
+	ServerStarter func(t *testing.T, serverTLS, clientTLS connection.TLSConfig) RPCAttempt
 
 	// RPCAttempt is a function returned by ServerStarter that contains the information
 	// needed to start a client connection and attempt an RPC call.
@@ -144,7 +144,9 @@ func RunSecureConnectionTest(
 			t.Parallel()
 			// create server's tls config and start it according to the server tls mode.
 			serverTLS, _ := tlsMgr.CreateServerCredentials(t, tc.serverMode, defaultHostName)
-			rpcAttemptFunc := starter(t, serverTLS)
+			ordererClientTLSConfig := baseClientTLS
+			ordererClientTLSConfig.Mode = tc.serverMode
+			rpcAttemptFunc := starter(t, serverTLS, ordererClientTLSConfig)
 			// for each server secure mode, build the client's test cases.
 			for _, clientTestCase := range tc.cases {
 				t.Run(clientTestCase.testDescription, func(t *testing.T) {

@@ -98,7 +98,7 @@ func StartMockCoordinatorServiceFromListWithConfig(
 }
 
 // StartMockOrderingServices starts a specified number of mock ordering service and register cancellation.
-func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
+func StartMockOrderingServices(t *testing.T, conf *OrdererConfig, tlsConfig connection.TLSConfig) (
 	*Orderer, *test.GrpcServers,
 ) {
 	t.Helper()
@@ -120,7 +120,7 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 	servers := test.StartGrpcServersForTest(
 		t.Context(), t, conf.NumService, func(server *grpc.Server, _ int) {
 			service.RegisterService(server)
-		}, nil,
+		}, &tlsConfig,
 	)
 	return service, servers
 }
@@ -142,12 +142,13 @@ type OrdererTestConfig struct {
 	NumFake                      int
 	NumHolders                   int
 	MetaNamespaceVerificationKey []byte
+	TLS                          connection.TLSConfig
 }
 
 // NewOrdererTestEnv creates and starts a new OrdererTestEnv.
 func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 	t.Helper()
-	orderer, ordererServers := StartMockOrderingServices(t, conf.Config)
+	orderer, ordererServers := StartMockOrderingServices(t, conf.Config, conf.TLS)
 	holder := &HoldingOrderer{Orderer: orderer}
 	holder.Release()
 	return &OrdererTestEnv{
@@ -157,7 +158,7 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		OrdererServers: ordererServers,
 		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
 			holder.RegisterService(s)
-		}, nil),
+		}, &conf.TLS),
 		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, nil),
 	}
 }

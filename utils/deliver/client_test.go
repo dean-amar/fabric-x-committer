@@ -49,7 +49,7 @@ func TestBroadcastDeliver(t *testing.T) {
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
 
 			// We use a short retry grpc-config to shorten the test time.
-			ordererService, servers, conf := makeConfig(t, &serverTLSConfig)
+			ordererService, servers, conf := makeConfig(t, serverTLSConfig)
 
 			// Set the orderer client credentials.
 			conf.TLS = clientTLSConfig.ToOrdererTLSConfig()
@@ -207,7 +207,7 @@ func submit(
 	require.Equal(t, tx.Id, hdr.TxId)
 }
 
-func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (
+func makeConfig(t *testing.T, tlsConfig connection.TLSConfig) (
 	*mock.Orderer, []test.GrpcServers, ordererconn.Parameters,
 ) {
 	t.Helper()
@@ -217,20 +217,11 @@ func makeConfig(t *testing.T, tlsConfig *connection.TLSConfig) (
 	instanceCount := idCount * serverPerID
 	t.Logf("Instance count: %d; idCount: %d", instanceCount, idCount)
 
-	config := &mock.OrdererConfig{
+	ordererService, ordererServer := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
 		NumService:      instanceCount,
 		BlockSize:       1,
 		SendConfigBlock: true,
-	}
-	if tlsConfig != nil {
-		sc := make([]*connection.ServerConfig, instanceCount)
-		for i := range sc {
-			creds := *tlsConfig
-			sc[i] = connection.NewLocalHostServerWithTLS(creds)
-		}
-		config.ServerConfigs = sc
-	}
-	ordererService, ordererServer := mock.StartMockOrderingServices(t, config)
+	}, tlsConfig)
 	require.Len(t, ordererServer.Servers, instanceCount)
 
 	conf := ordererconn.Parameters{
