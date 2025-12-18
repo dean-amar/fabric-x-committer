@@ -36,7 +36,7 @@ func StartMockSVService(t *testing.T, numService int) (
 	sigVerServers := test.StartGrpcServersForTest(t.Context(), t, len(mockSigVer),
 		func(server *grpc.Server, index int) {
 			mockSigVer[index].RegisterService(server)
-		}, nil)
+		}, test.InsecureTLSConfig)
 	return mockSigVer, sigVerServers
 }
 
@@ -58,7 +58,7 @@ func StartMockVCService(t *testing.T, numService int) (*VcService, *test.GrpcSer
 
 	vcGrpc := test.StartGrpcServersForTest(t.Context(), t, numService, func(server *grpc.Server, _ int) {
 		sharedVC.RegisterService(server)
-	}, nil)
+	}, test.InsecureTLSConfig)
 	return sharedVC, vcGrpc
 }
 
@@ -80,7 +80,7 @@ func StartMockCoordinatorService(t *testing.T) (
 	mockCoordinator := NewMockCoordinator()
 	coordinatorGrpc := test.StartGrpcServersForTest(t.Context(), t, 1, func(server *grpc.Server, _ int) {
 		mockCoordinator.RegisterService(server)
-	}, nil)
+	}, test.InsecureTLSConfig)
 	return mockCoordinator, coordinatorGrpc
 }
 
@@ -120,7 +120,7 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig, tlsConfig conn
 	servers := test.StartGrpcServersForTest(
 		t.Context(), t, conf.NumService, func(server *grpc.Server, _ int) {
 			service.RegisterService(server)
-		}, &tlsConfig,
+		}, tlsConfig,
 	)
 	return service, servers
 }
@@ -158,8 +158,8 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		OrdererServers: ordererServers,
 		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
 			holder.RegisterService(s)
-		}, &conf.TLS),
-		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, nil),
+		}, conf.TLS),
+		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, test.InsecureTLSConfig),
 	}
 }
 

@@ -112,15 +112,12 @@ func StartGrpcServersForTest(
 	t *testing.T,
 	numService int,
 	register func(*grpc.Server, int),
-	serverCreds *connection.TLSConfig,
+	serverCreds connection.TLSConfig,
 ) *GrpcServers {
 	t.Helper()
-	if serverCreds == nil {
-		serverCreds = &InsecureTLSConfig
-	}
 	sc := make([]*connection.ServerConfig, numService)
 	for i := range sc {
-		sc[i] = connection.NewLocalHostServerWithTLS(*serverCreds)
+		sc[i] = connection.NewLocalHostServerWithTLS(serverCreds)
 	}
 	return StartGrpcServersWithConfigForTest(ctx, t, sc, register)
 }
