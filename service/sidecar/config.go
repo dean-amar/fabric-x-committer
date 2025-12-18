@@ -87,12 +87,16 @@ const (
 
 // ToParams converts a config struct into parameters struct.
 // specifically, it converts the Orderer field from config to parameters.
-func (c *Config) ToParams() *Parameters {
+func (c *Config) ToParams() (*Parameters, error) {
 	sc := c.CommonConfig
+	ordererParams, err := c.Orderer.ToParams()
+	if err != nil {
+		return nil, errors.Wrap(err, "could not convert sidecar config into parameters")
+	}
 	return &Parameters{
 		CommonConfig: sc,
-		Orderer:      *c.Orderer.ToParams(),
-	}
+		Orderer:      *ordererParams,
+	}, nil
 }
 
 // LoadBootstrapConfig loads the bootstrap config according to the bootstrap method.
@@ -168,10 +172,8 @@ func getDeliveryEndpointsFromConfig(bundle *channelconfig.Bundle) ([]*orderercon
 		rootCAs := org.MSP().GetTLSRootCerts()
 		totalCAs += len(rootCAs)
 		orgParams = append(orgParams, &ordererconn.OrganizationParameters{
-			OrganizationConfig: ordererconn.OrganizationConfig{
-				Endpoints: endpoints,
-				MspID:     orgID,
-			},
+			Endpoints:    endpoints,
+			MspID:        orgID,
 			CACertsBytes: rootCAs,
 		})
 	}

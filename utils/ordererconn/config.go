@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package ordererconn
 
 import (
+	"os"
+
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
@@ -45,15 +47,16 @@ type (
 		MSPDir string               `mapstructure:"msp-dir" yaml:"msp-dir"`
 		BCCSP  *factory.FactoryOpts `mapstructure:"bccsp" yaml:"bccsp"`
 	}
-	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	// OrganizationConfig contains the MspID (Organization ID), orderer endpoints, and their root CA paths.
 	OrganizationConfig struct {
 		MspID     string                         `mapstructure:"msp-id" yaml:"msp-id"`
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
 		CACerts   []string                       `mapstructure:"ca-cert-paths"`
 	}
-	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their TLS config.
+	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their root CAs in bytes.
 	OrganizationParameters struct {
-		OrganizationConfig
+		MspID        string
+		Endpoints    []*commontypes.OrdererEndpoint
 		CACertsBytes [][]byte
 	}
 	// OrdererConnectionParameters is the orderer client config with tls parameters already loaded bytes.
@@ -86,34 +89,44 @@ var (
 )
 
 // ToParams converts the orderer's config into a parameter struct that holds the Root CAs certificates in bytes.
-func (c *Config) ToParams() *Parameters {
+func (c *Config) ToParams() (*Parameters, error) {
 	orgParams := make([]*OrganizationParameters, 0, len(c.Organizations))
-	for _, org := range c.Organizations {
-		orgParams = append(orgParams, org.ToParams())
+	for _, orgConfig := range c.Organizations {
+		orgParam, err := orgConfig.ToParams()
+		if err != nil {
+			return nil, errors.Wrapf(err, "could not convert organization config into parameters")
+		}
+		orgParams = append(orgParams, orgParam)
 	}
 	sc := c.CommonConfig
 	return &Parameters{
 		CommonConfig:  sc,
 		Organizations: orgParams,
-	}
+	}, nil
 }
 
 // ToParams converts the Organization Config into a parameter struct.
-// @TODO: convert the organizationConfig into OrganizationParameters with the bytes. split the implementations.
-func (o OrganizationConfig) ToParams() *OrganizationParameters {
-	return &OrganizationParameters{
-		OrganizationConfig: o,
+func (o OrganizationConfig) ToParams() (*OrganizationParameters, error) {
+	caCertBytes := make([][]byte, 0)
+	for _, caPath := range o.CACerts {
+		caBytes, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to load CA certificate from %s", caBytes)
+		}
+		caCertBytes = append(caCertBytes, caBytes)
 	}
+	return &OrganizationParameters{
+		MspID:        o.MspID,
+		Endpoints:    o.Endpoints,
+		CACertsBytes: caCertBytes,
+	}, nil
 }
 
 // CreateOrdererConnectionParameters comment will be added.
 func (c *Parameters) CreateOrdererConnectionParameters(
 	organizationParams *OrganizationParameters, endpoints []*connection.Endpoint,
 ) (*OrdererConnectionParameters, error) {
-	tlsConfig := c.TLS.ToTLSConfig()
-	tlsConfig.CACertPaths = append(tlsConfig.CACertPaths, organizationParams.CACerts...)
-
-	tlsParams, err := tlsConfig.ToParams()
+	tlsParams, err := c.TLS.ToTLSConfig().ToParams()
 	if err != nil {
 		return nil, errors.Wrap(err, "could not convert to TLS parameters")
 	}

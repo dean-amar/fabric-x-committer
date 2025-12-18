@@ -211,6 +211,11 @@ func TestLoadGenForSidecar(t *testing.T) {
 					for i := range ordererServers {
 						ordererServers[i] = preAllocatePorts(t, serverTLSConfig)
 					}
+					orgParams, err := ordererconn.OrganizationConfig{
+						Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
+						CACerts:   clientTLSConfig.CACertPaths,
+					}.ToParams()
+					require.NoError(t, err)
 					// Start server under test
 					sidecarConf := &sidecar.Parameters{
 						CommonConfig: sidecar.CommonConfig{
@@ -233,12 +238,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 								ConsensusType: ordererconn.Bft,
 							},
 							Organizations: []*ordererconn.OrganizationParameters{
-								{
-									OrganizationConfig: ordererconn.OrganizationConfig{
-										Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
-										CACerts:   clientTLSConfig.CACertPaths,
-									},
-								},
+								orgParams,
 							},
 						},
 					}
@@ -306,7 +306,9 @@ func TestLoadGenForOrderer(t *testing.T) {
 					}
 
 					// Start sidecar.
-					service, err := sidecar.New(sidecarConf.ToParams())
+					sidecarParams, err := sidecarConf.ToParams()
+					require.NoError(t, err)
+					service, err := sidecar.New(sidecarParams)
 					require.NoError(t, err)
 					t.Cleanup(service.Close)
 					test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)

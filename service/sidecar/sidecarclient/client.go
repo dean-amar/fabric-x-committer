@@ -49,23 +49,23 @@ type (
 // New instantiate a new sidecar client.
 func New(config *Parameters) (*Client, error) {
 	cm := &ordererconn.ConnectionManager{}
-	caCerts := make([]string, len(config.Client.TLS.CACertPaths))
-	copy(caCerts, config.Client.TLS.CACertPaths)
+	sidecarClientParams, err := ordererconn.OrganizationConfig{
+		Endpoints: []*commontypes.OrdererEndpoint{{
+			Host: config.Client.Endpoint.Host,
+			Port: config.Client.Endpoint.Port,
+		}},
+		CACerts: config.Client.TLS.CACertPaths,
+	}.ToParams()
+	if err != nil {
+		return nil, err
+	}
 	connConfig := ordererconn.Parameters{
 		CommonConfig: ordererconn.CommonConfig{
 			Retry: config.Client.Retry,
 			TLS:   config.Client.TLS.ToOrdererTLSConfig(),
 		},
 		Organizations: []*ordererconn.OrganizationParameters{
-			{
-				OrganizationConfig: ordererconn.OrganizationConfig{
-					Endpoints: []*commontypes.OrdererEndpoint{{
-						Host: config.Client.Endpoint.Host,
-						Port: config.Client.Endpoint.Port,
-					}},
-					CACerts: caCerts,
-				},
-			},
+			sidecarClientParams,
 		},
 	}
 	if err := cm.Update(&connConfig); err != nil {

@@ -103,9 +103,10 @@ func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ..
 	return result
 }
 
-// Update updates the connection configs.
-// This will close all connections, forcing the clients to reload.
-func (c *ConnectionManager) Update(config *Parameters) error {
+// Update rebuilds the orderer connection state from the provided configuration,
+// closing all existing connections and forcing clients to reload.
+// Complexity is inherent: this function atomically builds and cache connections across organizations.
+func (c *ConnectionManager) Update(config *Parameters) error { //nolint:gocognit
 	if err := ValidateOrganizationParametersConfig(config.Organizations...); err != nil {
 		return err
 	}

@@ -225,6 +225,12 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.notifyClient = committerpb.NewNotifierClient(
 		test.NewSecuredConnection(t, s.Endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
 	)
+
+	orgParams, err := ordererconn.OrganizationConfig{
+		Endpoints: s.Policy.OrdererEndpoints,
+		CACerts:   c.SystemConfig.ClientTLS.CACertPaths,
+	}.ToParams()
+	require.NoError(t, err)
 	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Parameters{
 		CommonConfig: ordererconn.CommonConfig{
 			TLS:           c.SystemConfig.ClientTLS.ToOrdererTLSConfig(),
@@ -233,12 +239,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			ConsensusType: ordererconn.Bft,
 		},
 		Organizations: []*ordererconn.OrganizationParameters{
-			{
-				OrganizationConfig: ordererconn.OrganizationConfig{
-					Endpoints: s.Policy.OrdererEndpoints,
-					CACerts:   c.SystemConfig.ClientTLS.CACertPaths,
-				},
-			},
+			orgParams,
 		},
 	})
 	require.NoError(t, err)

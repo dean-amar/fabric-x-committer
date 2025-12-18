@@ -172,7 +172,8 @@ func newSidecarTestEnvWithTLS(
 			},
 		},
 	}
-	sidecarParams := sidecarConf.ToParams()
+	sidecarParams, err := sidecarConf.ToParams()
+	require.NoError(t, err)
 	sidecar, err := New(sidecarParams)
 	require.NoError(t, err)
 	t.Cleanup(sidecar.Close)
@@ -351,17 +352,15 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Log("Modify the Sidecar config, use illegal host endpoint")
 	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
 	// as the sidecar expects the Endpoints to be non-empty.
-	env.config.Orderer.Organizations = []*ordererconn.OrganizationParameters{
-		{
-			OrganizationConfig: ordererconn.OrganizationConfig{
-				Endpoints: []*commontypes.OrdererEndpoint{
-					{Host: "localhost", Port: 9999},
-				},
-			},
+	ordererParams, err := ordererconn.OrganizationConfig{
+		Endpoints: []*commontypes.OrdererEndpoint{
+			{Host: "localhost", Port: 9999},
 		},
+	}.ToParams()
+	require.NoError(t, err)
+	env.config.Orderer.Organizations = []*ordererconn.OrganizationParameters{
+		ordererParams,
 	}
-
-	var err error
 	t.Log("Create a new sidecar with the new configuration")
 	env.sidecar, err = New(&env.config)
 	require.NoError(t, err)
