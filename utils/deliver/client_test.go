@@ -140,7 +140,7 @@ func TestBroadcastDeliver(t *testing.T) {
 			ordererParams, err := ordererconn.OrganizationConfig{
 				Endpoints: allEndpoints[6:],
 				CACerts:   clientTLSConfig.CACertPaths,
-			}.ToParams()
+			}.ToParams(clientTLSConfig.Mode)
 			require.NoError(t, err)
 			conf.Organizations = []*ordererconn.OrganizationParameters{ordererParams}
 			require.NoError(t, client.UpdateConnections(&conf))
@@ -223,7 +223,7 @@ func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
 
 	orgParams, err := ordererconn.OrganizationConfig{
 		CACerts: clientTLS.CACertPaths,
-	}.ToParams()
+	}.ToParams(clientTLS.Mode)
 	require.NoError(t, err)
 	conf := ordererconn.Parameters{
 		CommonConfig: ordererconn.CommonConfig{

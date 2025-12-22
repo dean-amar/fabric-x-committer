@@ -92,7 +92,7 @@ var (
 func (c *Config) ToParams() (*Parameters, error) {
 	orgParams := make([]*OrganizationParameters, 0, len(c.Organizations))
 	for _, orgConfig := range c.Organizations {
-		orgParam, err := orgConfig.ToParams()
+		orgParam, err := orgConfig.ToParams(c.TLS.Mode)
 		if err != nil {
 			return nil, errors.Wrapf(err, "could not convert organization config into parameters")
 		}
@@ -106,20 +106,23 @@ func (c *Config) ToParams() (*Parameters, error) {
 }
 
 // ToParams converts the Organization Config into a parameter struct.
-func (o OrganizationConfig) ToParams() (*OrganizationParameters, error) {
-	caCertBytes := make([][]byte, 0)
+func (o OrganizationConfig) ToParams(tlsMode string) (*OrganizationParameters, error) {
+	orgParams := &OrganizationParameters{
+		MspID:        o.MspID,
+		Endpoints:    o.Endpoints,
+		CACertsBytes: make([][]byte, 0),
+	}
+	if tlsMode == connection.NoneTLSMode || tlsMode == connection.UnmentionedTLSMode {
+		return orgParams, nil
+	}
 	for _, caPath := range o.CACerts {
 		caBytes, err := os.ReadFile(caPath)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to load CA certificate from %s", caBytes)
 		}
-		caCertBytes = append(caCertBytes, caBytes)
+		orgParams.CACertsBytes = append(orgParams.CACertsBytes, caBytes)
 	}
-	return &OrganizationParameters{
-		MspID:        o.MspID,
-		Endpoints:    o.Endpoints,
-		CACertsBytes: caCertBytes,
-	}, nil
+	return orgParams, nil
 }
 
 // CreateOrdererConnectionParameters comment will be added.

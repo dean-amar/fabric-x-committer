@@ -356,7 +356,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 		Endpoints: []*commontypes.OrdererEndpoint{
 			{Host: "localhost", Port: 9999},
 		},
-	}.ToParams()
+	}.ToParams(test.InsecureTLSConfig.Mode)
 	require.NoError(t, err)
 	env.config.Orderer.Organizations = []*ordererconn.OrganizationParameters{
 		ordererParams,

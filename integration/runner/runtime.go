@@ -229,7 +229,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	orgParams, err := ordererconn.OrganizationConfig{
 		Endpoints: s.Policy.OrdererEndpoints,
 		CACerts:   c.SystemConfig.ClientTLS.CACertPaths,
-	}.ToParams()
+	}.ToParams(c.SystemConfig.ClientTLS.Mode)
 	require.NoError(t, err)
 	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Parameters{
 		CommonConfig: ordererconn.CommonConfig{

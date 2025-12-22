@@ -115,7 +115,7 @@ func (c *ConnectionManager) Update(config *Parameters) error { //nolint:gocognit
 	// We use a connection cache to avoid opening the same connection multiple times.
 	connCache := make(map[string]*grpc.ClientConn)
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
-	// We save the connection for later usage.
+	// We save the endpoints for later processing.
 	var allOrgsEndpoints []*commontypes.OrdererEndpoint
 	for _, orgParams := range config.Organizations {
 		for _, id := range append(getAllIDs(orgParams.Endpoints), anyID) {

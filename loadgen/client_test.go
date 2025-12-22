@@ -214,7 +214,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 					orgParams, err := ordererconn.OrganizationConfig{
 						Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
 						CACerts:   clientTLSConfig.CACertPaths,
-					}.ToParams()
+					}.ToParams(clientTLSConfig.Mode)
 					require.NoError(t, err)
 					// Start server under test
 					sidecarConf := &sidecar.Parameters{

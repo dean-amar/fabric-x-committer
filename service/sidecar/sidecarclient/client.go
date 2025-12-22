@@ -55,7 +55,7 @@ func New(config *Parameters) (*Client, error) {
 			Port: config.Client.Endpoint.Port,
 		}},
 		CACerts: config.Client.TLS.CACertPaths,
-	}.ToParams()
+	}.ToParams(config.Client.TLS.Mode)
 	if err != nil {
 		return nil, err
 	}
