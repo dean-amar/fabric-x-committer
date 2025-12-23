@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package config
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -26,7 +25,7 @@ import (
 func decoderHook() viper.DecoderConfigOption {
 	return viper.DecodeHook(mapstructure.ComposeDecodeHookFunc(
 		viperutil.StringSliceViaEnvDecodeHook, viperutil.ByteSizeDecodeHook, viperutil.OrdererEndpointDecoder,
-		durationDecoder, serverDecoder, endpointDecoder, organizationParametersDecoder,
+		durationDecoder, serverDecoder, endpointDecoder, organizationDecoder,
 	))
 }
 
@@ -61,77 +60,35 @@ func serverDecoder(dataType, targetType reflect.Type, rawData any) (result any, 
 	return ret, err
 }
 
-// organizationParametersDecoder parses raw string overrides into
-// OrganizationConfig structs or slices of them.
-// Supports ENV override formats like:
-//
-//	"msp-id=org0;id=0,broadcast,deliver,127.0.0.1:7050;ca=/client_certs/ca-certificate.pem"
-//
-// If applied to a slice type ([]OrganizationConfig), a single item
-// override becomes a slice with one element.
-func organizationParametersDecoder(dataType, targetType reflect.Type, raw any) (any, error) {
-	stringData, ok := viperutil.GetStringData(dataType, raw)
-	if !ok {
-		return raw, nil
+func organizationDecoder(dataType, targetType reflect.Type, rawData any) (any, error) {
+	stringData, ok := viperutil.GetStringData(dataType, rawData)
+	if !ok || targetType != reflect.TypeOf(ordererconn.OrganizationConfig{}) {
+		return rawData, nil
 	}
-
-	if targetType == reflect.TypeOf(ordererconn.OrganizationConfig{}) {
-		org, err := parseOrganizationParameters(stringData)
-		if err != nil {
-			return nil, err
-		}
-		return *org, nil
-	}
-
-	if targetType.Kind() == reflect.Slice &&
-		(targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationConfig{}) ||
-			targetType.Elem() == reflect.TypeOf(&ordererconn.OrganizationConfig{})) {
-
-		org, err := parseOrganizationParameters(stringData)
-		if err != nil {
-			return nil, err
-		}
-
-		sliceValue := reflect.MakeSlice(targetType, 1, 1)
-
-		if targetType.Elem() == reflect.TypeOf(ordererconn.OrganizationConfig{}) {
-			sliceValue.Index(0).Set(reflect.ValueOf(*org))
-		} else {
-			sliceValue.Index(0).Set(reflect.ValueOf(org))
-		}
-		return sliceValue.Interface(), nil
-	}
-
-	return raw, nil
+	return parseOrganizationConfig(stringData)
 }
 
-func parseOrganizationParameters(raw string) (*ordererconn.OrganizationConfig, error) {
-	parts := strings.Split(raw, ";")
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid OrganizationConfig string: %s", raw)
+func parseOrganizationConfig(valueRaw string) (ordererconn.OrganizationConfig, error) {
+	out := ordererconn.OrganizationConfig{}
+	for _, item := range strings.Split(valueRaw, ";") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(item, "msp-id="):
+			out.MspID = strings.TrimPrefix(item, "msp-id=")
+		case strings.HasPrefix(item, "ca="):
+			out.CACerts = append(out.CACerts, strings.TrimPrefix(item, "ca="))
+		default:
+			// If it's not a key=value pair for MSP or CA, assume it's an OrdererEndpoint definition
+			// and delegate to the endpoint parser
+			ep, err := commontypes.ParseOrdererEndpoint(item)
+			if err != nil {
+				return out, err
+			}
+			out.Endpoints = append(out.Endpoints, ep)
+		}
 	}
-
-	org := &ordererconn.OrganizationConfig{}
-
-	// Part 1: msp-id=orgX
-	if strings.HasPrefix(parts[0], "msp-id=") {
-		org.MspID = strings.TrimPrefix(parts[0], "msp-id=")
-	} else {
-		return nil, fmt.Errorf("missing msp-id in override: %s", raw)
-	}
-
-	// Part 2: endpoint definition
-	// Example: "id=0,broadcast,deliver,host:7050"
-	ep, err := commontypes.ParseOrdererEndpoint(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("failed parsing orderer endpoint: %w", err)
-	}
-	org.Endpoints = []*commontypes.OrdererEndpoint{ep}
-
-	// Part 3: optional CA cert
-	if len(parts) > 2 && strings.HasPrefix(parts[2], "ca=") {
-		org.CACerts = []string{strings.TrimPrefix(parts[2], "ca=")}
-	}
-
-	return org, nil
+	return out, nil
 }
