@@ -25,7 +25,7 @@ type (
 		Identity      *IdentityConfig             `mapstructure:"identity"`
 		Retry         *connection.RetryProfile    `mapstructure:"reconnect"`
 		TLS           connection.OrdererTLSConfig `mapstructure:"tls"`
-		Organizations []*OrganizationConfig       `mapstructure:"connection"`
+		Organizations []*OrganizationConfig       `mapstructure:"organizations"`
 	}
 	// IdentityConfig defines the orderer's MSP.
 	IdentityConfig struct {

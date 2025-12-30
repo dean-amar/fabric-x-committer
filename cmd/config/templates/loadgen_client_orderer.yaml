@@ -17,7 +17,7 @@ orderer-client:
         - {{ . }}
         {{- end }}
   orderer:
-    connection:
+    organizations:
       - msp-id: "org0"
         endpoints:
           {{- range .Endpoints.Orderer }}

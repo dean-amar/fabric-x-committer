@@ -26,7 +26,7 @@ monitoring:
 orderer:
   channel-id: {{ .Policy.ChannelID }}
   consensus-type: BFT
-  connection:
+  organizations:
     - msp-id: "org0"
       endpoints:
         {{- range .Endpoints.Orderer }}

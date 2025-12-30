@@ -31,7 +31,7 @@ orderer-client:
       ca-cert-paths:
         - /client-certs/ca-certificate.pem
   orderer:
-    connection:
+    organizations:
       - msp-id: "org0"
         endpoints:
           - id=0,broadcast,deliver,orderer:7050
