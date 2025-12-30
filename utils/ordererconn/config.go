@@ -102,19 +102,30 @@ func (o *OrganizationConfig) ToParams(tlsMode string) (*OrganizationParameters, 
 	return orgParams, nil
 }
 
-// ReadOnlyEndpointsFromOrgParameters is a temp function that will be removed once we support
-// having root CAs in the config block.
-// For now, it is reading the config-block organization information but uses it all but the root CAs.
-func ReadOnlyEndpointsFromOrgParameters(
-	organizationConfig []*OrganizationConfig, organizationParameters []*OrganizationParameters,
-) {
-	if len(organizationConfig) != len(organizationParameters) {
+// UpdateConfigFromParameters is a temporary workaround.
+// Once the config-block-with-crypto tool is added, we will remove this function.
+// For now, it's saving the initialized root CAs we got from the config
+// and uses them for the updated orderer endpoints that arrived from the config block.
+func (c *Config) UpdateConfigFromParameters(parameters []*OrganizationParameters) {
+	if len(parameters) == 0 {
 		return
 	}
-	// we are only changing the endpoints and MSP IDs, leaving the rootCAs as they are.
-	for i := range organizationConfig {
-		organizationConfig[i].MspID = organizationParameters[i].MspID
-		organizationConfig[i].Endpoints = organizationParameters[i].Endpoints
+
+	var CACerts []string
+	if len(c.Organizations) > 0 {
+		CACerts = c.Organizations[0].CACerts
+	}
+
+	c.Organizations = make([]*OrganizationConfig, 0, len(parameters))
+	for _, p := range parameters {
+		org := &OrganizationConfig{
+			MspID:   p.MspID,
+			CACerts: CACerts,
+		}
+		if len(p.Endpoints) > 0 {
+			org.Endpoints = append([]*commontypes.OrdererEndpoint(nil), p.Endpoints...)
+		}
+		c.Organizations = append(c.Organizations, org)
 	}
 }
 

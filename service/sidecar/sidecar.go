@@ -29,7 +29,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/deliver"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 )
 
 var logger = logging.New("sidecar")
@@ -57,12 +56,16 @@ type Service struct {
 func New(c *Config) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 
-	orgParams, err := LoadBootstrapConfig(c.Bootstrap)
+	orgParams, err := LoadOrganizationsFromBootstrapConfig(c.Bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load shared config: %w", err)
 	}
 
-	ordererconn.ReadOnlyEndpointsFromOrgParameters(c.Orderer.Organizations, orgParams)
+	// Temporary workaround.
+	// Once the config-block-with-crypto tool is added, we will call deliver.New(&c.Orderer, orgParams) directly.
+	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
+	// LoadOrganizationsFromBootstrapConfig currently returns OrganizationParameters with unknown root CAs.
+	c.Orderer.UpdateConfigFromParameters(orgParams)
 
 	// 1. Fetch blocks from the ordering service.
 	ordererClient, err := deliver.New(&c.Orderer, nil)
@@ -220,12 +223,18 @@ func (s *Service) configUpdater(block *common.Block) {
 		logger.Warnf("failed to load config from block %d: %v", block.Header.Number, err)
 		return
 	}
-	ordererconn.ReadOnlyEndpointsFromOrgParameters(s.config.Orderer.Organizations, orgParams)
-	orgParamsNew, err := s.config.Orderer.OrganizationConfigToParameters()
+
+	// Temporary workaround.
+	// Once the config-block-with-crypto tool is added, we will call
+	// s.ordererClient.UpdateConnections(orgParams) directly.
+	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
+	// GetOrganizationsFromConfigBlock currently returns OrganizationParameters with unknown root CAs.
+	s.config.Orderer.UpdateConfigFromParameters(orgParams)
+	updatedOrgParams, err := s.config.Orderer.OrganizationConfigToParameters()
 	if err != nil {
 		logger.Warn(err)
 	}
-	err = s.ordererClient.UpdateConnections(orgParamsNew)
+	err = s.ordererClient.UpdateConnections(updatedOrgParams)
 	if err != nil {
 		logger.Warnf("failed to update config for block %d: %v", block.Header.Number, err)
 	}
@@ -291,12 +300,18 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 	if err != nil {
 		return err
 	}
-	ordererconn.ReadOnlyEndpointsFromOrgParameters(s.config.Orderer.Organizations, orgParams)
-	orgParamsNew, err := s.config.Orderer.OrganizationConfigToParameters()
+
+	// Temporary workaround.
+	// Once the config-block-with-crypto tool is added, we will call
+	// s.ordererClient.UpdateConnections(orgParams) directly.
+	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
+	// GetOrganizationParametersFromEnvelope currently returns OrganizationParameters with unknown root CAs.
+	s.config.Orderer.UpdateConfigFromParameters(orgParams)
+	updatedOrgParams, err := s.config.Orderer.OrganizationConfigToParameters()
 	if err != nil {
 		return err
 	}
-	err = s.ordererClient.UpdateConnections(orgParamsNew)
+	err = s.ordererClient.UpdateConnections(updatedOrgParams)
 	return errors.Wrapf(err, "failed to update connections")
 }
 
