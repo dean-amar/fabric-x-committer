@@ -111,16 +111,16 @@ func (c *Config) UpdateConfigFromParameters(parameters []*OrganizationParameters
 		return
 	}
 
-	var CACerts []string
+	var caCerts []string
 	if len(c.Organizations) > 0 {
-		CACerts = c.Organizations[0].CACerts
+		caCerts = c.Organizations[0].CACerts
 	}
 
 	c.Organizations = make([]*OrganizationConfig, 0, len(parameters))
 	for _, p := range parameters {
 		org := &OrganizationConfig{
 			MspID:   p.MspID,
-			CACerts: CACerts,
+			CACerts: caCerts,
 		}
 		if len(p.Endpoints) > 0 {
 			org.Endpoints = append([]*commontypes.OrdererEndpoint(nil), p.Endpoints...)
