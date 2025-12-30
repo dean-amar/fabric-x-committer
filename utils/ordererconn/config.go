@@ -135,50 +135,46 @@ func ValidateConfig(c *Config) error {
 	return ValidateOrganizationConfig(c.Organizations...)
 }
 
-// ValidateOrganizationConfig validate the configuration.
+// ValidateOrganizationConfig validate the organization configuration.
 func ValidateOrganizationConfig(organizations ...*OrganizationConfig) error {
 	for _, org := range organizations {
 		if org == nil {
 			return ErrEmptyConnectionConfig
 		}
-		if len(org.Endpoints) == 0 {
-			return ErrNoEndpoints
-		}
-		uniqueEndpoints := make(map[string]string)
-		for _, e := range org.Endpoints {
-			if e.Host == "" || e.Port == 0 {
-				return ErrEmptyEndpoint
-			}
-			target := e.Address()
-			if other, ok := uniqueEndpoints[target]; ok {
-				return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
-			}
-			uniqueEndpoints[target] = e.String()
+		if err := validateEndpoints(org.Endpoints); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// ValidateOrganizationParameters validate the configuration.
+// ValidateOrganizationParameters validate the organization parameters.
 func ValidateOrganizationParameters(organizations ...*OrganizationParameters) error {
 	for _, org := range organizations {
 		if org == nil {
 			return ErrEmptyConnectionConfig
 		}
-		if len(org.Endpoints) == 0 {
-			return ErrNoEndpoints
+		if err := validateEndpoints(org.Endpoints); err != nil {
+			return err
 		}
-		uniqueEndpoints := make(map[string]string)
-		for _, e := range org.Endpoints {
-			if e.Host == "" || e.Port == 0 {
-				return ErrEmptyEndpoint
-			}
-			target := e.Address()
-			if other, ok := uniqueEndpoints[target]; ok {
-				return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
-			}
-			uniqueEndpoints[target] = e.String()
+	}
+	return nil
+}
+
+func validateEndpoints(endpoints []*commontypes.OrdererEndpoint) error {
+	if len(endpoints) == 0 {
+		return ErrNoEndpoints
+	}
+	uniqueEndpoints := make(map[string]string, len(endpoints))
+	for _, e := range endpoints {
+		if e == nil || e.Host == "" || e.Port == 0 {
+			return ErrEmptyEndpoint
 		}
+		target := e.Address()
+		if other, ok := uniqueEndpoints[target]; ok {
+			return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
+		}
+		uniqueEndpoints[target] = e.String()
 	}
 	return nil
 }

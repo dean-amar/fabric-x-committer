@@ -112,7 +112,6 @@ func NewConnectionManager(config *Config) (*ConnectionManager, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	tlsConfig := &connection.TLSConfig{
 		BaseTLSConfig: config.TLS.BaseTLSConfig,
 	}
@@ -120,7 +119,6 @@ func NewConnectionManager(config *Config) (*ConnectionManager, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	// create connection manager with the config's retry policy and TLS.
 	cm := &ConnectionManager{
 		tlsParameters: tlsParams,
