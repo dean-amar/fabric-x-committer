@@ -62,11 +62,11 @@ var knownConnectionIssues = regexp.MustCompile(`(?i)EOF|connection\s+refused|clo
 // NewLoadBalancedConnection creates a connection with load balancing between the endpoints
 // in the given config.
 func NewLoadBalancedConnection(config *MultiClientConfig) (*grpc.ClientConn, error) {
-	tlsBundle, err := config.TLS.ToParams()
+	tlsMaterials, err := config.TLS.ToMaterials()
 	if err != nil {
 		return nil, err
 	}
-	tlsCredentials, err := tlsBundle.ClientCredentials()
+	tlsCredentials, err := tlsMaterials.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -75,9 +75,9 @@ func NewLoadBalancedConnection(config *MultiClientConfig) (*grpc.ClientConn, err
 
 // NewLoadBalancedConnectionForOrderer creates a connection with load balancing between the endpoints
 // in the given config.
-func NewLoadBalancedConnectionForOrderer(endpoints []*Endpoint, tlsBundle *TLSParameters, retry *RetryProfile,
+func NewLoadBalancedConnectionForOrderer(endpoints []*Endpoint, tlsMaterials *TLSMaterials, retry *RetryProfile,
 ) (*grpc.ClientConn, error) {
-	tlsCredentials, err := tlsBundle.ClientCredentials()
+	tlsCredentials, err := tlsMaterials.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -109,11 +109,11 @@ func newLoadBalancedConnection(
 
 // NewConnectionPerEndpoint creates a list of connections; one for each endpoint in the given config.
 func NewConnectionPerEndpoint(config *MultiClientConfig) ([]*grpc.ClientConn, error) {
-	tlsBundle, err := config.TLS.ToParams()
+	tlsMaterials, err := config.TLS.ToMaterials()
 	if err != nil {
 		return nil, err
 	}
-	tlsCreds, err := tlsBundle.ClientCredentials()
+	tlsCreds, err := tlsMaterials.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -134,11 +134,11 @@ func NewConnectionPerEndpoint(config *MultiClientConfig) ([]*grpc.ClientConn, er
 
 // NewSingleConnection creates a single connection given a client config.
 func NewSingleConnection(config *ClientConfig) (*grpc.ClientConn, error) {
-	tlsBundle, err := config.TLS.ToParams()
+	tlsMaterials, err := config.TLS.ToMaterials()
 	if err != nil {
 		return nil, err
 	}
-	tlsCreds, err := tlsBundle.ClientCredentials()
+	tlsCreds, err := tlsMaterials.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}

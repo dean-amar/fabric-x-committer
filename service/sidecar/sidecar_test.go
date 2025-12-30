@@ -254,62 +254,66 @@ func TestSidecar(t *testing.T) {
 }
 
 func TestSidecarConfigUpdate(t *testing.T) {
-	t.Parallel()
-	sc, cc := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3, NumHolders: 3, ClientTLS: cc, ServerTLS: sc})
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	t.Cleanup(cancel)
-	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, cc)
-	env.requireBlock(ctx, t, 0)
+	for _, mode := range test.ServerModes {
+		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
+			t.Parallel()
+			sc, cc := test.CreateServerAndClientTLSConfig(t, mode)
+			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3, NumHolders: 3, ClientTLS: cc, ServerTLS: sc})
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			t.Cleanup(cancel)
+			env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, cc)
+			env.requireBlock(ctx, t, 0)
 
-	t.Log("Sanity check")
-	expectedBlock := uint64(1)
-	env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
-	expectedBlock++
+			t.Log("Sanity check")
+			expectedBlock := uint64(1)
+			env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
+			expectedBlock++
 
-	submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
-		env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-			OrdererEndpoints: endpoints,
+			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
+				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
+					OrdererEndpoints: endpoints,
+				})
+			}
+
+			t.Log("Update the sidecar to use a second orderer group")
+			env.ordererEnv.Holder.HoldFromBlock.Store(expectedBlock + 2)
+			submitConfigBlock(env.ordererEnv.AllHolderEndpoints())
+			env.requireBlock(ctx, t, expectedBlock)
+			expectedBlock++
+
+			t.Log("Sanity check")
+			env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
+			expectedBlock++
+
+			t.Log("Submit new config block, and ensure it was not received")
+			// We submit the config that returns to the non-holding orderer.
+			// But it should not be processed as the sidecar should have switched to the holding
+			// orderer.
+			submitConfigBlock(env.ordererEnv.AllRealOrdererEndpoints())
+			select {
+			case <-ctx.Done():
+				t.Fatal("context deadline exceeded")
+			case <-env.committedBlock:
+				t.Fatal("the sidecar cannot receive blocks since its orderer holds them")
+			case <-time.After(expectedProcessingTime):
+				t.Log("Fantastic")
+			}
+
+			t.Log("We expect the block to be held")
+			nextBlock, err := env.coordinator.GetNextBlockNumberToCommit(ctx, nil)
+			require.NoError(t, err)
+			require.NotNil(t, nextBlock)
+			require.Equal(t, expectedBlock, nextBlock.Number)
+
+			t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
+			env.ordererEnv.Holder.HoldFromBlock.Add(1)
+			env.requireBlock(ctx, t, expectedBlock)
+			expectedBlock++
+
+			t.Log("The sidecar should use the non-holding orderer, so the holding should not affect the processing")
+			env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
 		})
 	}
-
-	t.Log("Update the sidecar to use a second orderer group")
-	env.ordererEnv.Holder.HoldFromBlock.Store(expectedBlock + 2)
-	submitConfigBlock(env.ordererEnv.AllHolderEndpoints())
-	env.requireBlock(ctx, t, expectedBlock)
-	expectedBlock++
-
-	t.Log("Sanity check")
-	env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
-	expectedBlock++
-
-	t.Log("Submit new config block, and ensure it was not received")
-	// We submit the config that returns to the non-holding orderer.
-	// But it should not be processed as the sidecar should have switched to the holding
-	// orderer.
-	submitConfigBlock(env.ordererEnv.AllRealOrdererEndpoints())
-	select {
-	case <-ctx.Done():
-		t.Fatal("context deadline exceeded")
-	case <-env.committedBlock:
-		t.Fatal("the sidecar cannot receive blocks since its orderer holds them")
-	case <-time.After(expectedProcessingTime):
-		t.Log("Fantastic")
-	}
-
-	t.Log("We expect the block to be held")
-	nextBlock, err := env.coordinator.GetNextBlockNumberToCommit(ctx, nil)
-	require.NoError(t, err)
-	require.NotNil(t, nextBlock)
-	require.Equal(t, expectedBlock, nextBlock.Number)
-
-	t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
-	env.ordererEnv.Holder.HoldFromBlock.Add(1)
-	env.requireBlock(ctx, t, expectedBlock)
-	expectedBlock++
-
-	t.Log("The sidecar should use the non-holding orderer, so the holding should not affect the processing")
-	env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
 }
 
 func TestSidecarConfigRecovery(t *testing.T) {

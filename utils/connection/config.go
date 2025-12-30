@@ -88,8 +88,8 @@ type (
 		KeyPath  string `mapstructure:"key-path"`
 	}
 
-	// TLSParameters holds the loaded runtime TLS certificates bytes.
-	TLSParameters struct {
+	// TLSMaterials holds the loaded runtime TLS material (certificate/key/CA certs).
+	TLSMaterials struct {
 		Mode    string
 		Cert    []byte
 		Key     []byte
@@ -110,7 +110,7 @@ const (
 
 // ServerCredentials returns the gRPC transport credentials to be used by a server,
 // based on the provided TLS configuration.
-func (c TLSParameters) ServerCredentials() (credentials.TransportCredentials, error) {
+func (c TLSMaterials) ServerCredentials() (credentials.TransportCredentials, error) {
 	switch c.Mode {
 	case NoneTLSMode, UnmentionedTLSMode:
 		return insecure.NewCredentials(), nil
@@ -145,7 +145,7 @@ func (c TLSParameters) ServerCredentials() (credentials.TransportCredentials, er
 
 // ClientCredentials returns the gRPC transport credentials to be used by a client,
 // based on the provided TLS configuration.
-func (c TLSParameters) ClientCredentials() (credentials.TransportCredentials, error) {
+func (c TLSMaterials) ClientCredentials() (credentials.TransportCredentials, error) {
 	switch c.Mode {
 	case NoneTLSMode, UnmentionedTLSMode:
 		return insecure.NewCredentials(), nil
@@ -198,10 +198,10 @@ func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
 	}
 }
 
-// ToParams converts a TLSConfig with path fields into a struct that holds the actual bytes of the certificates.
-func (c TLSConfig) ToParams() (*TLSParameters, error) {
+// ToMaterials converts a TLSConfig with path fields into a struct that holds the actual bytes of the certificates.
+func (c TLSConfig) ToMaterials() (*TLSMaterials, error) {
 	if c.Mode == NoneTLSMode || c.Mode == UnmentionedTLSMode {
-		return &TLSParameters{
+		return &TLSMaterials{
 			Mode: c.Mode,
 		}, nil
 	}
@@ -225,7 +225,7 @@ func (c TLSConfig) ToParams() (*TLSParameters, error) {
 		caCertBytes = append(caCertBytes, caBytes)
 	}
 
-	return &TLSParameters{
+	return &TLSMaterials{
 		Mode:    c.Mode,
 		Cert:    certBytes,
 		Key:     keyBytes,

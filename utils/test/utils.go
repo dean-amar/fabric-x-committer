@@ -271,9 +271,9 @@ func NewSecuredConnectionWithRetry(
 	retry connection.RetryProfile,
 ) *grpc.ClientConn {
 	t.Helper()
-	tlsBundle, err := tlsConfig.ToParams()
+	tlsMaterials, err := tlsConfig.ToMaterials()
 	require.NoError(t, err)
-	tlsCreds, err := tlsBundle.ClientCredentials()
+	tlsCreds, err := tlsMaterials.ClientCredentials()
 	require.NoError(t, err)
 	conn, err := connection.NewConnection(connection.Parameters{
 		Address: endpoint.Address(),

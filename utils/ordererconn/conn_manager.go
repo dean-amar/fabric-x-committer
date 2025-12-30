@@ -34,7 +34,7 @@ type (
 		endpoints     []*commontypes.OrdererEndpoint
 		lock          sync.Mutex
 		retry         *connection.RetryProfile
-		tlsParameters *connection.TLSParameters
+		tlsParameters *connection.TLSMaterials
 	}
 
 	// ConnFilter is used to filter connections.
@@ -46,7 +46,7 @@ type (
 	// OpenConnectionParameters is the orderer client config with tls parameters already loaded bytes.
 	OpenConnectionParameters struct {
 		Endpoints []*connection.Endpoint
-		TLS       *connection.TLSParameters
+		TLS       *connection.TLSMaterials
 		Retry     *connection.RetryProfile
 	}
 )
@@ -111,7 +111,7 @@ func NewConnectionManager(config *Config, orgs []*OrganizationParameters) (*Conn
 	}
 	tlsParams, err := (&connection.TLSConfig{
 		BaseTLSConfig: config.TLS.BaseTLSConfig,
-	}).ToParams()
+	}).ToMaterials()
 	if err != nil {
 		return nil, err
 	}
