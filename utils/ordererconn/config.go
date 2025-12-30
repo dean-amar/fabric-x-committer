@@ -46,12 +46,6 @@ type (
 		Endpoints    []*commontypes.OrdererEndpoint
 		CACertsBytes [][]byte
 	}
-	// OrdererConnectionParameters is the orderer client config with tls parameters already loaded bytes.
-	OrdererConnectionParameters struct {
-		Endpoints []*connection.Endpoint
-		TLS       *connection.TLSParameters
-		Retry     *connection.RetryProfile
-	}
 )
 
 const (

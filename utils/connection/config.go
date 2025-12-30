@@ -193,9 +193,8 @@ func buildCertPool(rootCAs [][]byte) (*x509.CertPool, error) {
 // ToOrdererTLSConfig narrows a full TLSConfig down to an OrdererTLSConfig.
 // It effectively strips out the CA certificates.
 func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
-	bc := c.BaseTLSConfig
 	return OrdererTLSConfig{
-		BaseTLSConfig: bc,
+		BaseTLSConfig: c.BaseTLSConfig,
 	}
 }
 

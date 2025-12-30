@@ -65,7 +65,7 @@ func New(c *Config) (*Service, error) {
 	ordererconn.ReadOnlyEndpointsFromOrgParameters(c.Orderer.Organizations, orgParams)
 
 	// 1. Fetch blocks from the ordering service.
-	ordererClient, err := deliver.New(&c.Orderer)
+	ordererClient, err := deliver.New(&c.Orderer, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create orderer client: %w", err)
 	}

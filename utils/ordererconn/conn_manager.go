@@ -42,6 +42,13 @@ type (
 		api string
 		id  uint32
 	}
+
+	// OpenConnectionParameters is the orderer client config with tls parameters already loaded bytes.
+	OpenConnectionParameters struct {
+		Endpoints []*connection.Endpoint
+		TLS       *connection.TLSParameters
+		Retry     *connection.RetryProfile
+	}
 )
 
 // ErrNoConnections may be returned when trying to get the next connection.
@@ -90,32 +97,21 @@ func aggregateFilter(filters ...ConnFilter) ConnFilter {
 	return k
 }
 
-func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ...ConnFilter) []*connection.Endpoint {
-	key := aggregateFilter(filters...)
-	result := make([]*connection.Endpoint, 0, len(endpoints))
-	for _, ep := range endpoints {
-		if key.api != anyAPI && !ep.SupportsAPI(key.api) {
-			continue
-		}
-		if key.id != anyID && ep.ID != key.id {
-			continue
-		}
-		result = append(result, &connection.Endpoint{Host: ep.Host, Port: ep.Port})
-	}
-	return result
-}
-
 // NewConnectionManager creates a connection manager and updates the connection via the organizationParameters.
-func NewConnectionManager(config *Config) (*ConnectionManager, error) {
-	// convert OrganizationConfigs to OrganizationParameters
-	orgParams, err := config.OrganizationConfigToParameters()
-	if err != nil {
-		return nil, err
+func NewConnectionManager(config *Config, orgs []*OrganizationParameters) (*ConnectionManager, error) {
+	var orgParams []*OrganizationParameters
+	if len(orgs) > 0 {
+		orgParams = orgs
+	} else {
+		var err error
+		orgParams, err = config.OrganizationConfigToParameters()
+		if err != nil {
+			return nil, err
+		}
 	}
-	tlsConfig := &connection.TLSConfig{
+	tlsParams, err := (&connection.TLSConfig{
 		BaseTLSConfig: config.TLS.BaseTLSConfig,
-	}
-	tlsParams, err := tlsConfig.ToParams()
+	}).ToParams()
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +155,7 @@ func (cm *ConnectionManager) Update(orgs []*OrganizationParameters) error { //no
 				conn, connInCache := connCache[endpointsKey]
 				if !connInCache {
 					var err error
-					conn, err = openConnection(&OrdererConnectionParameters{
+					conn, err = openConnection(&OpenConnectionParameters{
 						Endpoints: endpoints,
 						TLS:       &orgTLSParams,
 						Retry:     cm.retry,
@@ -228,12 +224,12 @@ func getAllIDs(endpoints []*commontypes.OrdererEndpoint) []uint32 {
 }
 
 func openConnection(
-	conf *OrdererConnectionParameters,
+	params *OpenConnectionParameters,
 ) (*grpc.ClientConn, error) {
 	// We shuffle the endpoints for load balancing.
-	shuffle(conf.Endpoints)
-	logger.Infof("Opening connections to %d endpoints: %v.", len(conf.Endpoints), conf.Endpoints)
-	return connection.NewLoadBalancedConnectionForOrderer(conf.Endpoints, conf.TLS, conf.Retry)
+	shuffle(params.Endpoints)
+	logger.Infof("Opening connections to %d endpoints: %v.", len(params.Endpoints), params.Endpoints)
+	return connection.NewLoadBalancedConnectionForOrderer(params.Endpoints, params.TLS, params.Retry)
 }
 
 func makeEndpointsKey(endpoint []*connection.Endpoint) string {
@@ -267,4 +263,19 @@ func closeConnection(connections map[string]*grpc.ClientConn) {
 
 func shuffle[T any](nodes []T) {
 	rand.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
+}
+
+func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ...ConnFilter) []*connection.Endpoint {
+	key := aggregateFilter(filters...)
+	result := make([]*connection.Endpoint, 0, len(endpoints))
+	for _, ep := range endpoints {
+		if key.api != anyAPI && !ep.SupportsAPI(key.api) {
+			continue
+		}
+		if key.id != anyID && ep.ID != key.id {
+			continue
+		}
+		result = append(result, &connection.Endpoint{Host: ep.Host, Port: ep.Port})
+	}
+	return result
 }

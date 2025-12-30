@@ -62,7 +62,7 @@ func NewBroadcastStream(ctx context.Context, config *ordererconn.Config) (*Broad
 		return nil, errors.Wrap(err, "error validating config")
 	}
 
-	cm, err := ordererconn.NewConnectionManager(config)
+	cm, err := ordererconn.NewConnectionManager(config, nil)
 	if err != nil {
 		return nil, err
 	}

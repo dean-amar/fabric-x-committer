@@ -57,7 +57,7 @@ func TestBroadcastDeliver(t *testing.T) {
 			// We only take the bottom endpoints for now.
 			// Later we take the other endpoints and update the client.
 			conf.Organizations[0].Endpoints = allEndpoints[:6]
-			client, err := New(&conf)
+			client, err := New(&conf, nil)
 			require.NoError(t, err)
 			t.Cleanup(client.CloseConnections)
 
