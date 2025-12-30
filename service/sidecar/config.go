@@ -65,8 +65,8 @@ const (
 	defaultBufferSize             = 100
 )
 
-// LoadOrganizationsFromBootstrapConfig loads the bootstrap config according to the bootstrap method.
-func LoadOrganizationsFromBootstrapConfig(bootstrap Bootstrap) ([]*ordererconn.OrganizationMaterial, error) {
+// LoadOrganizationsFromGenesisBlock loads the bootstrap config according to the bootstrap method.
+func LoadOrganizationsFromGenesisBlock(bootstrap Bootstrap) ([]*ordererconn.OrganizationMaterial, error) {
 	if bootstrap.GenesisBlockFilePath == "" {
 		return nil, nil
 	}

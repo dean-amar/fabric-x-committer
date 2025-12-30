@@ -54,15 +54,15 @@ type Service struct {
 func New(c *Config) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 
-	orgsMaterial, err := LoadOrganizationsFromBootstrapConfig(c.Bootstrap)
+	orgsMaterial, err := LoadOrganizationsFromGenesisBlock(c.Bootstrap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load shared config: %w", err)
+		return nil, fmt.Errorf("failed to load organizations materials: %w", err)
 	}
 
 	// Temporary workaround.
 	// Once the config-block-with-crypto tool is added, we will call deliver.New(&c.Orderer, orgParams) directly.
 	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
-	// LoadOrganizationsFromBootstrapConfig currently returns OrganizationParameters with unknown root CAs.
+	// LoadOrganizationsFromGenesisBlock currently returns OrganizationParameters with unknown root CAs.
 	c.Orderer.UpdateConfigFromOrganizationsMaterial(orgsMaterial)
 
 	// 1. Fetch blocks from the ordering service.
@@ -228,11 +228,11 @@ func (s *Service) configUpdater(block *common.Block) {
 	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
 	// GetOrganizationsFromConfigBlock currently returns OrganizationParameters with unknown root CAs.
 	s.config.Orderer.UpdateConfigFromOrganizationsMaterial(orgsMaterial)
-	updatedOrgParams, err := s.config.Orderer.OrganizationsConfigToMaterials()
+	updatedOrgsMat, err := s.config.Orderer.OrganizationsConfigToMaterials()
 	if err != nil {
 		logger.Warn(err)
 	}
-	err = s.ordererClient.UpdateConnections(updatedOrgParams)
+	err = s.ordererClient.UpdateConnections(updatedOrgsMat)
 	if err != nil {
 		logger.Warnf("failed to update config for block %d: %v", block.Header.Number, err)
 	}
@@ -305,11 +305,11 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
 	// GetOrganizationsFromEnvelope currently returns OrganizationParameters with unknown root CAs.
 	s.config.Orderer.UpdateConfigFromOrganizationsMaterial(orgsMaterial)
-	updatedOrgParams, err := s.config.Orderer.OrganizationsConfigToMaterials()
+	updatedOrgsMat, err := s.config.Orderer.OrganizationsConfigToMaterials()
 	if err != nil {
 		return err
 	}
-	err = s.ordererClient.UpdateConnections(updatedOrgParams)
+	err = s.ordererClient.UpdateConnections(updatedOrgsMat)
 	return errors.Wrapf(err, "failed to update connections")
 }
 
