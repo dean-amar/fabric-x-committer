@@ -66,7 +66,7 @@ const (
 )
 
 // LoadOrganizationsFromBootstrapConfig loads the bootstrap config according to the bootstrap method.
-func LoadOrganizationsFromBootstrapConfig(bootstrap Bootstrap) ([]*ordererconn.OrganizationParameters, error) {
+func LoadOrganizationsFromBootstrapConfig(bootstrap Bootstrap) ([]*ordererconn.OrganizationMaterial, error) {
 	if bootstrap.GenesisBlockFilePath == "" {
 		return nil, nil
 	}
@@ -78,37 +78,37 @@ func LoadOrganizationsFromBootstrapConfig(bootstrap Bootstrap) ([]*ordererconn.O
 }
 
 // GetOrganizationsFromConfigBlock overwrites the orderer connection with fields from a config block.
-func GetOrganizationsFromConfigBlock(configBlock *common.Block) ([]*ordererconn.OrganizationParameters, error) {
+func GetOrganizationsFromConfigBlock(configBlock *common.Block) ([]*ordererconn.OrganizationMaterial, error) {
 	envelope, err := protoutil.ExtractEnvelope(configBlock, 0)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to extract envelope")
 	}
-	return GetOrganizationParametersFromEnvelope(envelope)
+	return GetOrganizationsFromEnvelope(envelope)
 }
 
-// GetOrganizationParametersFromEnvelope overwrites the orderer connection config with fields from a config transaction.
+// GetOrganizationsFromEnvelope overwrites the orderer connection config with fields from a config transaction.
 // For now, it fetches the following:
 // - Orderer endpoints.
 // - RootCAs per organization.
-func GetOrganizationParametersFromEnvelope(envelope *common.Envelope) ([]*ordererconn.OrganizationParameters, error) {
+func GetOrganizationsFromEnvelope(envelope *common.Envelope) ([]*ordererconn.OrganizationMaterial, error) {
 	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create config bundle")
 	}
 
-	orgParams, err := readOrganizationParametersFromBundle(bundle)
+	orgsMaterial, err := readOrganizationsFromBundle(bundle)
 	if err != nil {
 		return nil, err
 	}
-	return orgParams, nil
+	return orgsMaterial, nil
 }
 
-func readOrganizationParametersFromBundle(bundle *channelconfig.Bundle) ([]*ordererconn.OrganizationParameters, error) {
+func readOrganizationsFromBundle(bundle *channelconfig.Bundle) ([]*ordererconn.OrganizationMaterial, error) {
 	ordererCfg, ok := bundle.OrdererConfig()
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
-	orgParams := make([]*ordererconn.OrganizationParameters, 0, len(ordererCfg.Organizations()))
+	organizationMaterials := make([]*ordererconn.OrganizationMaterial, 0, len(ordererCfg.Organizations()))
 	for orgID, org := range ordererCfg.Organizations() {
 		var endpoints []*commontypes.OrdererEndpoint
 		endpointsStr := org.Endpoints()
@@ -120,11 +120,11 @@ func readOrganizationParametersFromBundle(bundle *channelconfig.Bundle) ([]*orde
 			e.MspID = orgID
 			endpoints = append(endpoints, e)
 		}
-		orgParams = append(orgParams, &ordererconn.OrganizationParameters{
-			MspID:        orgID,
-			Endpoints:    endpoints,
-			CACertsBytes: org.MSP().GetTLSRootCerts(),
+		organizationMaterials = append(organizationMaterials, &ordererconn.OrganizationMaterial{
+			MspID:     orgID,
+			Endpoints: endpoints,
+			CACerts:   org.MSP().GetTLSRootCerts(),
 		})
 	}
-	return orgParams, nil
+	return organizationMaterials, nil
 }

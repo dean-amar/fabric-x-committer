@@ -258,7 +258,9 @@ func TestSidecarConfigUpdate(t *testing.T) {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			sc, cc := test.CreateServerAndClientTLSConfig(t, mode)
-			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3, NumHolders: 3, ClientTLS: cc, ServerTLS: sc})
+			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
+				NumService: 3, NumHolders: 3, ClientTLS: cc, ServerTLS: sc,
+			})
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			t.Cleanup(cancel)
 			env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, cc)

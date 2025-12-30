@@ -40,11 +40,11 @@ type (
 		Endpoints []*commontypes.OrdererEndpoint `mapstructure:"endpoints"`
 		CACerts   []string                       `mapstructure:"ca-cert-paths"`
 	}
-	// OrganizationParameters contains the MspID (Organization ID), orderer endpoints, and their root CAs in bytes.
-	OrganizationParameters struct {
-		MspID        string
-		Endpoints    []*commontypes.OrdererEndpoint
-		CACertsBytes [][]byte
+	// OrganizationMaterial contains the MspID (Organization ID), orderer endpoints, and their root CAs in bytes.
+	OrganizationMaterial struct {
+		MspID     string
+		Endpoints []*commontypes.OrdererEndpoint
+		CACerts   [][]byte
 	}
 )
 
@@ -69,44 +69,43 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
-// OrganizationConfigToParameters converts list of OrganizationConfig to OrganizationParameters.
-func (c *Config) OrganizationConfigToParameters() ([]*OrganizationParameters, error) {
-	orgParams := make([]*OrganizationParameters, 0, len(c.Organizations))
+// OrganizationsConfigToMaterials converts list of OrganizationConfig to OrganizationMaterial.
+func (c *Config) OrganizationsConfigToMaterials() ([]*OrganizationMaterial, error) {
+	organizationsMaterial := make([]*OrganizationMaterial, 0, len(c.Organizations))
 	for _, orgConfig := range c.Organizations {
-		orgParam, err := orgConfig.ToParams(c.TLS.Mode)
+		orgMaterial, err := orgConfig.toMaterial(c.TLS.Mode)
 		if err != nil {
 			return nil, errors.Wrapf(err, "could not convert organization config into parameters")
 		}
-		orgParams = append(orgParams, orgParam)
+		organizationsMaterial = append(organizationsMaterial, orgMaterial)
 	}
-	return orgParams, nil
+	return organizationsMaterial, nil
 }
 
-// ToParams converts the Organization Config into a parameter struct.
-func (o *OrganizationConfig) ToParams(tlsMode string) (*OrganizationParameters, error) {
-	orgParams := &OrganizationParameters{
-		MspID:        o.MspID,
-		Endpoints:    o.Endpoints,
-		CACertsBytes: make([][]byte, 0),
+func (oc *OrganizationConfig) toMaterial(tlsMode string) (*OrganizationMaterial, error) {
+	orgParams := &OrganizationMaterial{
+		MspID:     oc.MspID,
+		Endpoints: oc.Endpoints,
+		CACerts:   make([][]byte, 0),
 	}
 	if tlsMode == connection.NoneTLSMode || tlsMode == connection.UnmentionedTLSMode {
 		return orgParams, nil
 	}
-	for _, caPath := range o.CACerts {
+	for _, caPath := range oc.CACerts {
 		caBytes, err := os.ReadFile(caPath)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to load CA certificate from %s", caBytes)
 		}
-		orgParams.CACertsBytes = append(orgParams.CACertsBytes, caBytes)
+		orgParams.CACerts = append(orgParams.CACerts, caBytes)
 	}
 	return orgParams, nil
 }
 
-// UpdateConfigFromParameters is a temporary workaround.
+// UpdateConfigFromOrganizationsMaterial is a temporary workaround.
 // Once the config-block-with-crypto tool is added, we will remove this function.
 // For now, it's saving the initialized root CAs we got from the config
 // and uses them for the updated orderer endpoints that arrived from the config block.
-func (c *Config) UpdateConfigFromParameters(parameters []*OrganizationParameters) {
+func (c *Config) UpdateConfigFromOrganizationsMaterial(parameters []*OrganizationMaterial) {
 	if len(parameters) == 0 {
 		return
 	}
@@ -154,7 +153,7 @@ func ValidateOrganizationConfig(organizations ...*OrganizationConfig) error {
 }
 
 // ValidateOrganizationParameters validate the organization parameters.
-func ValidateOrganizationParameters(organizations ...*OrganizationParameters) error {
+func ValidateOrganizationParameters(organizations ...*OrganizationMaterial) error {
 	for _, org := range organizations {
 		if org == nil {
 			return ErrEmptyConnectionConfig
@@ -172,7 +171,7 @@ func validateEndpoints(endpoints []*commontypes.OrdererEndpoint) error {
 	}
 	uniqueEndpoints := make(map[string]string, len(endpoints))
 	for _, e := range endpoints {
-		if e == nil || e.Host == "" || e.Port == 0 {
+		if e.Host == "" || e.Port == 0 {
 			return ErrEmptyEndpoint
 		}
 		target := e.Address()

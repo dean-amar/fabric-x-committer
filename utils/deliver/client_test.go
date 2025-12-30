@@ -142,7 +142,7 @@ func TestBroadcastDeliver(t *testing.T) {
 					CACerts:   clientTLSConfig.CACertPaths,
 				},
 			}
-			orgParams, err := conf.OrganizationConfigToParameters()
+			orgParams, err := conf.OrganizationsConfigToMaterials()
 			require.NoError(t, err)
 			require.NoError(t, client.UpdateConnections(orgParams))
 			submit(t, &conf, outputBlocks, expectedSubmit{

@@ -43,8 +43,8 @@ type (
 		id  uint32
 	}
 
-	// OpenConnectionParameters is the orderer client config with tls parameters already loaded bytes.
-	OpenConnectionParameters struct {
+	// openConnectionParameters is the orderer client config with tls parameters already loaded bytes.
+	openConnectionParameters struct {
 		Endpoints []*connection.Endpoint
 		TLS       *connection.TLSMaterials
 		Retry     *connection.RetryProfile
@@ -97,14 +97,16 @@ func aggregateFilter(filters ...ConnFilter) ConnFilter {
 	return k
 }
 
-// NewConnectionManager creates a connection manager and updates the connection via the organizationParameters.
-func NewConnectionManager(config *Config, orgs []*OrganizationParameters) (*ConnectionManager, error) {
-	var orgParams []*OrganizationParameters
+// NewConnectionManager constructs a ConnectionManager and initializes its connections.
+// It's orgMaterial provided, we are updating the config accordingly.
+// Else, we are using the config's organization.
+func NewConnectionManager(config *Config, orgs []*OrganizationMaterial) (*ConnectionManager, error) {
+	var orgsMaterial []*OrganizationMaterial
 	if len(orgs) > 0 {
-		orgParams = orgs
+		orgsMaterial = orgs
 	} else {
 		var err error
-		orgParams, err = config.OrganizationConfigToParameters()
+		orgsMaterial, err = config.OrganizationsConfigToMaterials()
 		if err != nil {
 			return nil, err
 		}
@@ -120,18 +122,17 @@ func NewConnectionManager(config *Config, orgs []*OrganizationParameters) (*Conn
 		tlsParameters: tlsParams,
 		retry:         config.Retry,
 	}
-	// update connections.
-	if err = cm.Update(orgParams); err != nil {
+	if err = cm.Update(orgsMaterial); err != nil {
 		return nil, err
 	}
 	return cm, nil
 }
 
-// Update rebuilds the orderer connection state from the provided configuration,
-// closing all existing connections and forcing clients to reload.
+// Update updates the orderer connections.
+// This will close all connections, forcing the clients to reload.
 // Complexity is inherent: this function atomically builds and cache connections across organizations.
-func (cm *ConnectionManager) Update(orgs []*OrganizationParameters) error { //nolint:gocognit
-	if err := ValidateOrganizationParameters(orgs...); err != nil {
+func (cm *ConnectionManager) Update(orgsMat []*OrganizationMaterial) error { //nolint:gocognit
+	if err := ValidateOrganizationParameters(orgsMat...); err != nil {
 		return err
 	}
 	// We pre create all the connections to ensure correct form.
@@ -141,9 +142,9 @@ func (cm *ConnectionManager) Update(orgs []*OrganizationParameters) error { //no
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
 	// We save the endpoints for later processing.
 	var allOrgsEndpoints []*commontypes.OrdererEndpoint
-	for _, orgParams := range orgs {
+	for _, orgParams := range orgsMat {
 		orgTLSParams := *cm.tlsParameters
-		orgTLSParams.CACerts = append(orgTLSParams.CACerts, orgParams.CACertsBytes...)
+		orgTLSParams.CACerts = append(orgTLSParams.CACerts, orgParams.CACerts...)
 		for _, id := range append(getAllIDs(orgParams.Endpoints), anyID) {
 			for _, api := range allAPIs {
 				filter := aggregateFilter(WithAPI(api), WithID(id))
@@ -155,7 +156,7 @@ func (cm *ConnectionManager) Update(orgs []*OrganizationParameters) error { //no
 				conn, connInCache := connCache[endpointsKey]
 				if !connInCache {
 					var err error
-					conn, err = openConnection(&OpenConnectionParameters{
+					conn, err = openConnection(&openConnectionParameters{
 						Endpoints: endpoints,
 						TLS:       &orgTLSParams,
 						Retry:     cm.retry,
@@ -224,7 +225,7 @@ func getAllIDs(endpoints []*commontypes.OrdererEndpoint) []uint32 {
 }
 
 func openConnection(
-	params *OpenConnectionParameters,
+	params *openConnectionParameters,
 ) (*grpc.ClientConn, error) {
 	// We shuffle the endpoints for load balancing.
 	shuffle(params.Endpoints)
