@@ -54,7 +54,6 @@ func TestBroadcastDeliver(t *testing.T) {
 			// Set the orderer client credentials.
 			conf.TLS = clientTLSConfig.ToOrdererTLSConfig()
 			allEndpoints := conf.Organizations[0].Endpoints
-
 			// We only take the bottom endpoints for now.
 			// Later we take the other endpoints and update the client.
 			conf.Organizations[0].Endpoints = allEndpoints[:6]
@@ -137,13 +136,15 @@ func TestBroadcastDeliver(t *testing.T) {
 				unavailable: 2,
 			})
 			t.Log("Update endpoints")
-			ordererParams, err := ordererconn.OrganizationConfig{
-				Endpoints: allEndpoints[6:],
-				CACerts:   clientTLSConfig.CACertPaths,
-			}.ToParams(clientTLSConfig.Mode)
+			conf.Organizations = []*ordererconn.OrganizationConfig{
+				{
+					Endpoints: allEndpoints[6:],
+					CACerts:   clientTLSConfig.CACertPaths,
+				},
+			}
+			orgParams, err := conf.OrganizationConfigToParameters()
 			require.NoError(t, err)
-			conf.Organizations = []*ordererconn.OrganizationParameters{ordererParams}
-			require.NoError(t, client.UpdateConnections(&conf))
+			require.NoError(t, client.UpdateConnections(orgParams))
 			submit(t, &conf, outputBlocks, expectedSubmit{
 				success: 3,
 			})
@@ -159,7 +160,7 @@ type expectedSubmit struct {
 
 func submit(
 	t *testing.T,
-	conf *ordererconn.Parameters,
+	conf *ordererconn.Config,
 	outputBlocks channel.Reader[*common.Block],
 	expected expectedSubmit,
 ) {
@@ -205,7 +206,7 @@ func submit(
 }
 
 func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
-	*mock.Orderer, []test.GrpcServers, ordererconn.Parameters,
+	*mock.Orderer, []test.GrpcServers, ordererconn.Config,
 ) {
 	t.Helper()
 
@@ -221,20 +222,17 @@ func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
 	}, serverTLS)
 	require.Len(t, ordererServer.Servers, instanceCount)
 
-	orgParams, err := ordererconn.OrganizationConfig{
-		CACerts: clientTLS.CACertPaths,
-	}.ToParams(clientTLS.Mode)
-	require.NoError(t, err)
-	conf := ordererconn.Parameters{
-		CommonConfig: ordererconn.CommonConfig{
-			ChannelID:     channelForTest,
-			ConsensusType: ordererconn.Bft,
-			Retry:         &testGrpcRetryProfile,
-			TLS:           clientTLS.ToOrdererTLSConfig(),
+	conf := ordererconn.Config{
+		ChannelID:     channelForTest,
+		ConsensusType: ordererconn.Bft,
+		Retry:         &testGrpcRetryProfile,
+		TLS:           clientTLS.ToOrdererTLSConfig(),
+		Organizations: []*ordererconn.OrganizationConfig{
+			{
+				CACerts: clientTLS.CACertPaths,
+			},
 		},
-		Organizations: []*ordererconn.OrganizationParameters{orgParams},
 	}
-	require.NotEmpty(t, conf.Organizations)
 	servers := make([]test.GrpcServers, idCount)
 	for i, c := range ordererServer.Configs {
 		id := uint32(i % idCount) //nolint:gosec // integer overflow conversion int -> uint32

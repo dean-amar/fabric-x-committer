@@ -226,20 +226,16 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		test.NewSecuredConnection(t, s.Endpoints.Sidecar.Server, c.SystemConfig.ClientTLS),
 	)
 
-	orgParams, err := ordererconn.OrganizationConfig{
-		Endpoints: s.Policy.OrdererEndpoints,
-		CACerts:   c.SystemConfig.ClientTLS.CACertPaths,
-	}.ToParams(c.SystemConfig.ClientTLS.Mode)
-	require.NoError(t, err)
-	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Parameters{
-		CommonConfig: ordererconn.CommonConfig{
-			TLS:           c.SystemConfig.ClientTLS.ToOrdererTLSConfig(),
-			ChannelID:     s.Policy.ChannelID,
-			Identity:      s.Policy.Identity,
-			ConsensusType: ordererconn.Bft,
-		},
-		Organizations: []*ordererconn.OrganizationParameters{
-			orgParams,
+	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
+		TLS:           c.SystemConfig.ClientTLS.ToOrdererTLSConfig(),
+		ChannelID:     s.Policy.ChannelID,
+		Identity:      s.Policy.Identity,
+		ConsensusType: ordererconn.Bft,
+		Organizations: []*ordererconn.OrganizationConfig{
+			{
+				Endpoints: s.Policy.OrdererEndpoints,
+				CACerts:   c.SystemConfig.ClientTLS.CACertPaths,
+			},
 		},
 	})
 	require.NoError(t, err)

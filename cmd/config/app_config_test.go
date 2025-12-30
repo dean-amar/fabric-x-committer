@@ -54,9 +54,7 @@ var (
 			"/client-certs/ca-certificate.pem",
 		},
 	}
-	defaultClientCACertificatePaths = []string{
-		"/client-certs/ca-certificate.pem",
-	}
+	defaultClientCACertificatePaths = defaultClientTLSConfig.CACertPaths
 )
 
 func TestReadConfigSidecar(t *testing.T) {
@@ -69,26 +67,10 @@ func TestReadConfigSidecar(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &sidecar.Config{
-			CommonConfig: sidecar.CommonConfig{
-				Server:     newServerConfig("localhost", 4001),
-				Monitoring: newMonitoringConfig("localhost", 2114),
-				Committer: &connection.ClientConfig{
-					Endpoint: newEndpoint("localhost", 9001),
-				},
-				Ledger: sidecar.LedgerConfig{
-					Path: "./ledger/",
-				},
-				Notification: sidecar.NotificationServiceConfig{
-					MaxTimeout: time.Minute,
-				},
-				LastCommittedBlockSetInterval: 3 * time.Second,
-				WaitingTxsLimit:               100_000,
-				ChannelBufferSize:             100,
-			},
+			Server:     newServerConfig("localhost", 4001),
+			Monitoring: newMonitoringConfig("localhost", 2114),
 			Orderer: ordererconn.Config{
-				CommonConfig: ordererconn.CommonConfig{
-					ChannelID: "mychannel",
-				},
+				ChannelID: "mychannel",
 				Organizations: []*ordererconn.OrganizationConfig{
 					{
 						Endpoints: []*commontypes.OrdererEndpoint{
@@ -97,43 +79,41 @@ func TestReadConfigSidecar(t *testing.T) {
 					},
 				},
 			},
+			Committer: &connection.ClientConfig{
+				Endpoint: newEndpoint("localhost", 9001),
+			},
+			Ledger: sidecar.LedgerConfig{
+				Path: "./ledger/",
+			},
+			Notification: sidecar.NotificationServiceConfig{
+				MaxTimeout: time.Minute,
+			},
+			LastCommittedBlockSetInterval: 3 * time.Second,
+			WaitingTxsLimit:               100_000,
+			ChannelBufferSize:             100,
 		},
 	}, {
 		name:           "sample",
 		configFilePath: "samples/sidecar.yaml",
 		expectedConfig: &sidecar.Config{
-			CommonConfig: sidecar.CommonConfig{
-				Server: &connection.ServerConfig{
-					Endpoint: *newEndpoint("", 4001),
-					TLS:      defaultServerTLSConfig,
-					KeepAlive: &connection.ServerKeepAliveConfig{
-						Params: &connection.ServerKeepAliveParamsConfig{
-							Time:    300 * time.Second,
-							Timeout: 600 * time.Second,
-						},
-						EnforcementPolicy: &connection.ServerKeepAliveEnforcementPolicyConfig{
-							MinTime:             60 * time.Second,
-							PermitWithoutStream: false,
-						},
+			Server: &connection.ServerConfig{
+				Endpoint: *newEndpoint("", 4001),
+				TLS:      defaultServerTLSConfig,
+				KeepAlive: &connection.ServerKeepAliveConfig{
+					Params: &connection.ServerKeepAliveParamsConfig{
+						Time:    300 * time.Second,
+						Timeout: 600 * time.Second,
+					},
+					EnforcementPolicy: &connection.ServerKeepAliveEnforcementPolicyConfig{
+						MinTime:             60 * time.Second,
+						PermitWithoutStream: false,
 					},
 				},
-				Monitoring: newMonitoringConfig("", 2114),
-				Committer:  newClientConfigWithDefaultTLS("coordinator", 9001),
-				Ledger: sidecar.LedgerConfig{
-					Path: "/root/sc/ledger",
-				},
-				Notification: sidecar.NotificationServiceConfig{
-					MaxTimeout: 10 * time.Minute,
-				},
-				LastCommittedBlockSetInterval: 5 * time.Second,
-				WaitingTxsLimit:               20_000_000,
-				ChannelBufferSize:             100,
 			},
+			Monitoring: newMonitoringConfig("", 2114),
 			Orderer: ordererconn.Config{
-				CommonConfig: ordererconn.CommonConfig{
-					ChannelID: "mychannel",
-					TLS:       defaultClientTLSConfig.ToOrdererTLSConfig(),
-				},
+				ChannelID: "mychannel",
+				TLS:       defaultClientTLSConfig.ToOrdererTLSConfig(),
 				Organizations: []*ordererconn.OrganizationConfig{
 					{
 						MspID: "org0",
@@ -144,6 +124,16 @@ func TestReadConfigSidecar(t *testing.T) {
 					},
 				},
 			},
+			Committer: newClientConfigWithDefaultTLS("coordinator", 9001),
+			Ledger: sidecar.LedgerConfig{
+				Path: "/root/sc/ledger",
+			},
+			Notification: sidecar.NotificationServiceConfig{
+				MaxTimeout: 10 * time.Minute,
+			},
+			LastCommittedBlockSetInterval: 5 * time.Second,
+			WaitingTxsLimit:               20_000_000,
+			ChannelBufferSize:             100,
 		},
 	}}
 	for _, test := range tests {
@@ -383,11 +373,9 @@ func TestReadConfigLoadGen(t *testing.T) {
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", 4001),
 					Orderer: ordererconn.Config{
-						CommonConfig: ordererconn.CommonConfig{
-							ChannelID:     "mychannel",
-							ConsensusType: ordererconn.Bft,
-							TLS:           defaultClientTLSConfig.ToOrdererTLSConfig(),
-						},
+						ChannelID:     "mychannel",
+						ConsensusType: ordererconn.Bft,
+						TLS:           defaultClientTLSConfig.ToOrdererTLSConfig(),
 						Organizations: []*ordererconn.OrganizationConfig{
 							{
 								MspID: "org0",

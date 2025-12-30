@@ -20,25 +20,12 @@ type (
 	// Config defines the static configuration of the orderer client as loaded from YAML file.
 	// It supports connectivity to multiple organization's orderer.
 	Config struct {
-		CommonConfig  `mapstructure:",squash"`
-		Organizations []*OrganizationConfig `mapstructure:"connection"`
-	}
-	// Parameters define the fully resolved runtime configuration of the orderer
-	// client.
-	Parameters struct {
-		CommonConfig
-		Organizations []*OrganizationParameters
-	}
-	// CommonConfig contains configuration fields shared between Config and
-	// Parameters.
-	// These settings define the orderer client, including consensus and channel identity, client MSP configuration,
-	// retry behavior, and TLS settings.
-	CommonConfig struct {
 		ConsensusType string                      `mapstructure:"consensus-type"`
 		ChannelID     string                      `mapstructure:"channel-id"`
 		Identity      *IdentityConfig             `mapstructure:"identity"`
 		Retry         *connection.RetryProfile    `mapstructure:"reconnect"`
 		TLS           connection.OrdererTLSConfig `mapstructure:"tls"`
+		Organizations []*OrganizationConfig       `mapstructure:"connection"`
 	}
 	// IdentityConfig defines the orderer's MSP.
 	IdentityConfig struct {
@@ -88,8 +75,8 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
-// ToParams converts the orderer's config into a parameter struct that holds the Root CAs certificates in bytes.
-func (c *Config) ToParams() (*Parameters, error) {
+// OrganizationConfigToParameters converts list of OrganizationConfig to OrganizationParameters.
+func (c *Config) OrganizationConfigToParameters() ([]*OrganizationParameters, error) {
 	orgParams := make([]*OrganizationParameters, 0, len(c.Organizations))
 	for _, orgConfig := range c.Organizations {
 		orgParam, err := orgConfig.ToParams(c.TLS.Mode)
@@ -98,15 +85,11 @@ func (c *Config) ToParams() (*Parameters, error) {
 		}
 		orgParams = append(orgParams, orgParam)
 	}
-	sc := c.CommonConfig
-	return &Parameters{
-		CommonConfig:  sc,
-		Organizations: orgParams,
-	}, nil
+	return orgParams, nil
 }
 
 // ToParams converts the Organization Config into a parameter struct.
-func (o OrganizationConfig) ToParams(tlsMode string) (*OrganizationParameters, error) {
+func (o *OrganizationConfig) ToParams(tlsMode string) (*OrganizationParameters, error) {
 	orgParams := &OrganizationParameters{
 		MspID:        o.MspID,
 		Endpoints:    o.Endpoints,
@@ -125,36 +108,59 @@ func (o OrganizationConfig) ToParams(tlsMode string) (*OrganizationParameters, e
 	return orgParams, nil
 }
 
-// CreateOrdererConnectionParameters comment will be added.
-func (c *Parameters) CreateOrdererConnectionParameters(
-	organizationParams *OrganizationParameters, endpoints []*connection.Endpoint,
-) (*OrdererConnectionParameters, error) {
-	tlsParams, err := c.TLS.ToTLSConfig().ToParams()
-	if err != nil {
-		return nil, errors.Wrap(err, "could not convert to TLS parameters")
+// ReadOnlyEndpointsFromOrgParameters is a temp function that will be removed once we support
+// having root CAs in the config block.
+// For now, it is reading the config-block organization information but uses it all but the root CAs.
+func ReadOnlyEndpointsFromOrgParameters(
+	organizationConfig []*OrganizationConfig, organizationParameters []*OrganizationParameters,
+) {
+	if len(organizationConfig) != len(organizationParameters) {
+		return
 	}
-	tlsParams.CACerts = append(tlsParams.CACerts, organizationParams.CACertsBytes...)
-
-	return &OrdererConnectionParameters{
-		Endpoints: endpoints,
-		TLS:       tlsParams,
-		Retry:     c.Retry,
-	}, nil
+	// we are only changing the endpoints and MSP IDs, leaving the rootCAs as they are.
+	for i := range organizationConfig {
+		organizationConfig[i].MspID = organizationParameters[i].MspID
+		organizationConfig[i].Endpoints = organizationParameters[i].Endpoints
+	}
 }
 
 // ValidateConfig validate the configuration.
-func ValidateConfig(c *Parameters) error {
+func ValidateConfig(c *Config) error {
 	if c.ConsensusType == "" {
 		c.ConsensusType = DefaultConsensus
 	}
 	if c.ConsensusType != Bft && c.ConsensusType != Cft {
 		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
 	}
-	return ValidateOrganizationParametersConfig(c.Organizations...)
+	return ValidateOrganizationConfig(c.Organizations...)
 }
 
-// ValidateOrganizationParametersConfig validate the configuration.
-func ValidateOrganizationParametersConfig(organizations ...*OrganizationParameters) error {
+// ValidateOrganizationConfig validate the configuration.
+func ValidateOrganizationConfig(organizations ...*OrganizationConfig) error {
+	for _, org := range organizations {
+		if org == nil {
+			return ErrEmptyConnectionConfig
+		}
+		if len(org.Endpoints) == 0 {
+			return ErrNoEndpoints
+		}
+		uniqueEndpoints := make(map[string]string)
+		for _, e := range org.Endpoints {
+			if e.Host == "" || e.Port == 0 {
+				return ErrEmptyEndpoint
+			}
+			target := e.Address()
+			if other, ok := uniqueEndpoints[target]; ok {
+				return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
+			}
+			uniqueEndpoints[target] = e.String()
+		}
+	}
+	return nil
+}
+
+// ValidateOrganizationParameters validate the configuration.
+func ValidateOrganizationParameters(organizations ...*OrganizationParameters) error {
 	for _, org := range organizations {
 		if org == nil {
 			return ErrEmptyConnectionConfig

@@ -43,7 +43,7 @@ import (
 )
 
 type sidecarTestEnv struct {
-	config            Parameters
+	config            Config
 	coordinator       *mock.Coordinator
 	coordinatorServer *test.GrpcServers
 	ordererEnv        *mock.OrdererTestEnv
@@ -144,26 +144,22 @@ func newSidecarTestEnvWithTLS(
 		initOrdererEndpoints = nil
 	}
 	sidecarConf := &Config{
-		CommonConfig: CommonConfig{
-			Server:    connection.NewLocalHostServerWithTLS(conf.ServerTLS),
-			Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
-			Ledger: LedgerConfig{
-				Path: t.TempDir(),
-			},
-			LastCommittedBlockSetInterval: 100 * time.Millisecond,
-			WaitingTxsLimit:               1000,
-			Monitoring: monitoring.Config{
-				Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
-			},
-			Bootstrap: Bootstrap{
-				GenesisBlockFilePath: genesisBlockFilePath,
-			},
+		Server:    connection.NewLocalHostServerWithTLS(conf.ServerTLS),
+		Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
+		Ledger: LedgerConfig{
+			Path: t.TempDir(),
+		},
+		LastCommittedBlockSetInterval: 100 * time.Millisecond,
+		WaitingTxsLimit:               1000,
+		Monitoring: monitoring.Config{
+			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
+		},
+		Bootstrap: Bootstrap{
+			GenesisBlockFilePath: genesisBlockFilePath,
 		},
 		Orderer: ordererconn.Config{
-			CommonConfig: ordererconn.CommonConfig{
-				ChannelID: ordererEnv.TestConfig.ChanID,
-				TLS:       conf.ClientTLS.ToOrdererTLSConfig(),
-			},
+			ChannelID: ordererEnv.TestConfig.ChanID,
+			TLS:       conf.ClientTLS.ToOrdererTLSConfig(),
 			Organizations: []*ordererconn.OrganizationConfig{
 				{
 					Endpoints: initOrdererEndpoints,
@@ -172,9 +168,7 @@ func newSidecarTestEnvWithTLS(
 			},
 		},
 	}
-	sidecarParams, err := sidecarConf.ToParams()
-	require.NoError(t, err)
-	sidecar, err := New(sidecarParams)
+	sidecar, err := New(sidecarConf)
 	require.NoError(t, err)
 	t.Cleanup(sidecar.Close)
 
@@ -183,7 +177,7 @@ func newSidecarTestEnvWithTLS(
 		coordinator:       coordinator,
 		coordinatorServer: coordinatorServer,
 		ordererEnv:        ordererEnv,
-		config:            *sidecarParams,
+		config:            *sidecarConf,
 		configBlock:       configBlock,
 	}
 }
@@ -352,15 +346,16 @@ func TestSidecarConfigRecovery(t *testing.T) {
 	t.Log("Modify the Sidecar config, use illegal host endpoint")
 	// We need to use ilegalEndpoints instead of an empty Endpoints struct,
 	// as the sidecar expects the Endpoints to be non-empty.
-	ordererParams, err := ordererconn.OrganizationConfig{
-		Endpoints: []*commontypes.OrdererEndpoint{
-			{Host: "localhost", Port: 9999},
+
+	env.config.Orderer.Organizations = []*ordererconn.OrganizationConfig{
+		{
+			Endpoints: []*commontypes.OrdererEndpoint{
+				{Host: "localhost", Port: 9999},
+			},
 		},
-	}.ToParams(test.InsecureTLSConfig.Mode)
-	require.NoError(t, err)
-	env.config.Orderer.Organizations = []*ordererconn.OrganizationParameters{
-		ordererParams,
 	}
+
+	var err error
 	t.Log("Create a new sidecar with the new configuration")
 	env.sidecar, err = New(&env.config)
 	require.NoError(t, err)

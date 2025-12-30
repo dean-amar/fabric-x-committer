@@ -64,14 +64,6 @@ type (
 		PermitWithoutStream bool          `mapstructure:"permit-without-stream"`
 	}
 
-	// BaseTLSConfig contains the essential fields for any TLS identity (Mode, Public Key, Private Key).
-	// It is embedded into specific configs that need this foundation.
-	BaseTLSConfig struct {
-		Mode     string `mapstructure:"mode"`
-		CertPath string `mapstructure:"cert-path"`
-		KeyPath  string `mapstructure:"key-path"`
-	}
-
 	// TLSConfig holds the TLS options and certificate paths
 	// used for secure communication between servers and clients.
 	// Credentials are built based on the configuration mode.
@@ -86,6 +78,14 @@ type (
 	// It reuses the base fields but strictly excludes CA paths.
 	OrdererTLSConfig struct {
 		BaseTLSConfig `mapstructure:",squash"`
+	}
+
+	// BaseTLSConfig contains the essential fields for any TLS identity (Mode, Public Key, Private Key).
+	// It is embedded into specific configs that need this foundation.
+	BaseTLSConfig struct {
+		Mode     string `mapstructure:"mode"`
+		CertPath string `mapstructure:"cert-path"`
+		KeyPath  string `mapstructure:"key-path"`
 	}
 
 	// TLSParameters holds the loaded runtime TLS certificates bytes.
@@ -107,79 +107,6 @@ const (
 	// DefaultTLSMinVersion is the minimum version required to achieve secure connections.
 	DefaultTLSMinVersion = tls.VersionTLS12
 )
-
-// ToTLSConfig promotes the restricted Orderer config to a full TLSConfig.
-// Note: The resulting config will have empty CA paths.
-func (c OrdererTLSConfig) ToTLSConfig() *TLSConfig {
-	bc := c.BaseTLSConfig
-	return &TLSConfig{
-		BaseTLSConfig: bc,
-	}
-}
-
-// ToOrdererTLSConfig narrows a full TLSConfig down to an OrdererTLSConfig.
-// It effectively strips out the CA certificates, keeping only the Identity.
-func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
-	bc := c.BaseTLSConfig
-	return OrdererTLSConfig{
-		BaseTLSConfig: bc,
-	}
-}
-
-// ToParams converts a TLSConfig with path fields into a struct that holds the actual bytes of the certificates.
-func (c TLSConfig) ToParams() (*TLSParameters, error) {
-	if c.Mode == NoneTLSMode || c.Mode == UnmentionedTLSMode {
-		return &TLSParameters{
-			Mode: c.Mode,
-		}, nil
-	}
-
-	certBytes, err := os.ReadFile(c.CertPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to load certificate from %s", c.CertPath)
-	}
-
-	keyBytes, err := os.ReadFile(c.KeyPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to load private key from %s", c.KeyPath)
-	}
-
-	caCertBytes := make([][]byte, 0, len(c.CACertPaths))
-	for _, caCertPath := range c.CACertPaths {
-		caBytes, err := os.ReadFile(caCertPath)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to load root CA cert from %s", caCertPath)
-		}
-		caCertBytes = append(caCertBytes, caBytes)
-	}
-
-	return &TLSParameters{
-		Mode:    c.Mode,
-		Cert:    certBytes,
-		Key:     keyBytes,
-		CACerts: caCertBytes,
-	}, nil
-}
-
-// ServerCredentials returns the gRPC transport credentials to be used by a server,
-// based on the provided TLS configuration after converting it to bytes.
-func (c TLSConfig) ServerCredentials() (credentials.TransportCredentials, error) {
-	tlsConfigParams, err := c.ToParams()
-	if err != nil {
-		return nil, err
-	}
-	return tlsConfigParams.ServerCredentials()
-}
-
-// ClientCredentials returns the gRPC transport credentials to be used by a client,
-// based on the provided TLS configuration after converting it to bytes.
-func (c TLSConfig) ClientCredentials() (credentials.TransportCredentials, error) {
-	tlsConfigParams, err := c.ToParams()
-	if err != nil {
-		return nil, err
-	}
-	return tlsConfigParams.ClientCredentials()
-}
 
 // ServerCredentials returns the gRPC transport credentials to be used by a server,
 // based on the provided TLS configuration.
@@ -261,4 +188,48 @@ func buildCertPool(rootCAs [][]byte) (*x509.CertPool, error) {
 		}
 	}
 	return certPool, nil
+}
+
+// ToOrdererTLSConfig narrows a full TLSConfig down to an OrdererTLSConfig.
+// It effectively strips out the CA certificates.
+func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
+	bc := c.BaseTLSConfig
+	return OrdererTLSConfig{
+		BaseTLSConfig: bc,
+	}
+}
+
+// ToParams converts a TLSConfig with path fields into a struct that holds the actual bytes of the certificates.
+func (c TLSConfig) ToParams() (*TLSParameters, error) {
+	if c.Mode == NoneTLSMode || c.Mode == UnmentionedTLSMode {
+		return &TLSParameters{
+			Mode: c.Mode,
+		}, nil
+	}
+
+	certBytes, err := os.ReadFile(c.CertPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to load certificate from %s", c.CertPath)
+	}
+
+	keyBytes, err := os.ReadFile(c.KeyPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to load private key from %s", c.KeyPath)
+	}
+
+	caCertBytes := make([][]byte, 0, len(c.CACertPaths))
+	for _, caCertPath := range c.CACertPaths {
+		caBytes, err := os.ReadFile(caCertPath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to load root CA cert from %s", caCertPath)
+		}
+		caCertBytes = append(caCertBytes, caBytes)
+	}
+
+	return &TLSParameters{
+		Mode:    c.Mode,
+		Cert:    certBytes,
+		Key:     keyBytes,
+		CACerts: caCertBytes,
+	}, nil
 }

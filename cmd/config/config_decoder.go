@@ -81,7 +81,7 @@ func parseOrganizationConfig(valueRaw string) (ordererconn.OrganizationConfig, e
 		case strings.HasPrefix(item, "ca="):
 			out.CACerts = append(out.CACerts, strings.TrimPrefix(item, "ca="))
 		default:
-			// If it's not a key=value pair for MSP or CA, assume it's an OrdererEndpoint definition
+			// If item != msp-id and ca, assume it's an OrdererEndpoint
 			// and delegate to the endpoint parser
 			ep, err := commontypes.ParseOrdererEndpoint(item)
 			if err != nil {

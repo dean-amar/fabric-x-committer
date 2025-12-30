@@ -33,6 +33,8 @@ type (
 		connections   map[string]*grpc.ClientConn
 		endpoints     []*commontypes.OrdererEndpoint
 		lock          sync.Mutex
+		retry         *connection.RetryProfile
+		tlsParameters *connection.TLSParameters
 	}
 
 	// ConnFilter is used to filter connections.
@@ -103,11 +105,39 @@ func filterOrdererEndpoints(endpoints []*commontypes.OrdererEndpoint, filters ..
 	return result
 }
 
+// NewConnectionManager creates a connection manager and updates the connection via the organizationParameters.
+func NewConnectionManager(config *Config) (*ConnectionManager, error) {
+	// convert OrganizationConfigs to OrganizationParameters
+	orgParams, err := config.OrganizationConfigToParameters()
+	if err != nil {
+		return nil, err
+	}
+
+	tlsConfig := &connection.TLSConfig{
+		BaseTLSConfig: config.TLS.BaseTLSConfig,
+	}
+	tlsParams, err := tlsConfig.ToParams()
+	if err != nil {
+		return nil, err
+	}
+
+	// create connection manager with the config's retry policy and TLS.
+	cm := &ConnectionManager{
+		tlsParameters: tlsParams,
+		retry:         config.Retry,
+	}
+	// update connections.
+	if err = cm.Update(orgParams); err != nil {
+		return nil, err
+	}
+	return cm, nil
+}
+
 // Update rebuilds the orderer connection state from the provided configuration,
 // closing all existing connections and forcing clients to reload.
 // Complexity is inherent: this function atomically builds and cache connections across organizations.
-func (c *ConnectionManager) Update(config *Parameters) error { //nolint:gocognit
-	if err := ValidateOrganizationParametersConfig(config.Organizations...); err != nil {
+func (cm *ConnectionManager) Update(orgs []*OrganizationParameters) error { //nolint:gocognit
+	if err := ValidateOrganizationParameters(orgs...); err != nil {
 		return err
 	}
 	// We pre create all the connections to ensure correct form.
@@ -117,7 +147,9 @@ func (c *ConnectionManager) Update(config *Parameters) error { //nolint:gocognit
 	allAPIs := []string{anyAPI, Broadcast, Deliver}
 	// We save the endpoints for later processing.
 	var allOrgsEndpoints []*commontypes.OrdererEndpoint
-	for _, orgParams := range config.Organizations {
+	for _, orgParams := range orgs {
+		orgTLSParams := *cm.tlsParameters
+		orgTLSParams.CACerts = append(orgTLSParams.CACerts, orgParams.CACertsBytes...)
 		for _, id := range append(getAllIDs(orgParams.Endpoints), anyID) {
 			for _, api := range allAPIs {
 				filter := aggregateFilter(WithAPI(api), WithID(id))
@@ -128,11 +160,12 @@ func (c *ConnectionManager) Update(config *Parameters) error { //nolint:gocognit
 				endpointsKey := makeEndpointsKey(endpoints)
 				conn, connInCache := connCache[endpointsKey]
 				if !connInCache {
-					gateConfig, err := config.CreateOrdererConnectionParameters(orgParams, endpoints)
-					if err != nil {
-						return err
-					}
-					conn, err = openConnection(gateConfig)
+					var err error
+					conn, err = openConnection(&OrdererConnectionParameters{
+						Endpoints: endpoints,
+						TLS:       &orgTLSParams,
+						Retry:     cm.retry,
+					})
 					if err != nil {
 						closeConnection(connections)
 						return err
@@ -146,41 +179,41 @@ func (c *ConnectionManager) Update(config *Parameters) error { //nolint:gocognit
 	}
 
 	// We lock once we read internal members.
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	cm.lock.Lock()
+	defer cm.lock.Unlock()
 
 	// We increase the version early (before closing any connections, but after locking)
 	// to ensure the recovery stage knows about an update.
-	c.configVersion.Add(1)
-	closeConnection(c.connections)
-	c.connections = connections
-	c.endpoints = allOrgsEndpoints
+	cm.configVersion.Add(1)
+	closeConnection(cm.connections)
+	cm.connections = connections
+	cm.endpoints = allOrgsEndpoints
 	return nil
 }
 
 // GetConnection returns a connection given filters.
-func (c *ConnectionManager) GetConnection(filters ...ConnFilter) (*grpc.ClientConn, uint64) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	v := c.configVersion.Load()
-	if c.connections == nil {
+func (cm *ConnectionManager) GetConnection(filters ...ConnFilter) (*grpc.ClientConn, uint64) {
+	cm.lock.Lock()
+	defer cm.lock.Unlock()
+	v := cm.configVersion.Load()
+	if cm.connections == nil {
 		return nil, v
 	}
-	return c.connections[filterKey(filters...)], v
+	return cm.connections[filterKey(filters...)], v
 }
 
 // GetConnectionPerID returns a connection given filters per ID.
-func (c *ConnectionManager) GetConnectionPerID(filters ...ConnFilter) (map[uint32]*grpc.ClientConn, uint64) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+func (cm *ConnectionManager) GetConnectionPerID(filters ...ConnFilter) (map[uint32]*grpc.ClientConn, uint64) {
+	cm.lock.Lock()
+	defer cm.lock.Unlock()
 	ret := make(map[uint32]*grpc.ClientConn)
-	v := c.configVersion.Load()
-	if c.connections == nil {
+	v := cm.configVersion.Load()
+	if cm.connections == nil {
 		return ret, v
 	}
 	filter := aggregateFilter(filters...)
-	for _, id := range getAllIDs(c.endpoints) {
-		conn := c.connections[filterKey(filter, WithID(id))]
+	for _, id := range getAllIDs(cm.endpoints) {
+		conn := cm.connections[filterKey(filter, WithID(id))]
 		if conn != nil {
 			ret[id] = conn
 		}
@@ -215,17 +248,17 @@ func makeEndpointsKey(endpoint []*connection.Endpoint) string {
 }
 
 // CloseConnections closes all the connections.
-func (c *ConnectionManager) CloseConnections() {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	closeConnection(c.connections)
-	c.connections = nil
+func (cm *ConnectionManager) CloseConnections() {
+	cm.lock.Lock()
+	defer cm.lock.Unlock()
+	closeConnection(cm.connections)
+	cm.connections = nil
 }
 
 // IsStale checks if the given OrdererConnectionResiliencyManager is stale.
 // If nil is given, it returns true.
-func (c *ConnectionManager) IsStale(configVersion uint64) bool {
-	return c.configVersion.Load() != configVersion
+func (cm *ConnectionManager) IsStale(configVersion uint64) bool {
+	return cm.configVersion.Load() != configVersion
 }
 
 func closeConnection(connections map[string]*grpc.ClientConn) {

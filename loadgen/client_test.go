@@ -211,34 +211,28 @@ func TestLoadGenForSidecar(t *testing.T) {
 					for i := range ordererServers {
 						ordererServers[i] = preAllocatePorts(t, serverTLSConfig)
 					}
-					orgParams, err := ordererconn.OrganizationConfig{
-						Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
-						CACerts:   clientTLSConfig.CACertPaths,
-					}.ToParams(clientTLSConfig.Mode)
-					require.NoError(t, err)
 					// Start server under test
-					sidecarConf := &sidecar.Parameters{
-						CommonConfig: sidecar.CommonConfig{
-							Server:                        sidecarServerConf,
-							LastCommittedBlockSetInterval: 100 * time.Millisecond,
-							WaitingTxsLimit:               5000,
-							Committer: test.NewInsecureClientConfig(
-								&coordinatorServer.Configs[0].Endpoint,
-							),
-							Monitoring: defaultMonitoring(),
-							Ledger: sidecar.LedgerConfig{
-								Path: t.TempDir(),
-							},
+					sidecarConf := &sidecar.Config{
+						Server:                        sidecarServerConf,
+						LastCommittedBlockSetInterval: 100 * time.Millisecond,
+						WaitingTxsLimit:               5000,
+						Committer: test.NewInsecureClientConfig(
+							&coordinatorServer.Configs[0].Endpoint,
+						),
+						Monitoring: defaultMonitoring(),
+						Ledger: sidecar.LedgerConfig{
+							Path: t.TempDir(),
 						},
-						Orderer: ordererconn.Parameters{
-							CommonConfig: ordererconn.CommonConfig{
-								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
-								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
-								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
-								ConsensusType: ordererconn.Bft,
-							},
-							Organizations: []*ordererconn.OrganizationParameters{
-								orgParams,
+						Orderer: ordererconn.Config{
+							TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+							ConsensusType: ordererconn.Bft,
+							Organizations: []*ordererconn.OrganizationConfig{
+								{
+									Endpoints: ordererconn.NewEndpoints(0, "org", ordererServers...),
+									CACerts:   clientTLSConfig.CACertPaths,
+								},
 							},
 						},
 					}
@@ -277,25 +271,21 @@ func TestLoadGenForOrderer(t *testing.T) {
 
 					endpoints := ordererconn.NewEndpoints(0, "msp", ordererServer.Configs...)
 					sidecarConf := &sidecar.Config{
-						CommonConfig: sidecar.CommonConfig{
-							Server:                        connection.NewLocalHostServerWithTLS(serverTLSConfig),
-							LastCommittedBlockSetInterval: 100 * time.Millisecond,
-							WaitingTxsLimit:               5000,
-							Committer: test.NewInsecureClientConfig(
-								&coordinatorServer.Configs[0].Endpoint,
-							),
-							Monitoring: defaultMonitoring(),
-							Ledger: sidecar.LedgerConfig{
-								Path: t.TempDir(),
-							},
+						Server:                        connection.NewLocalHostServerWithTLS(serverTLSConfig),
+						LastCommittedBlockSetInterval: 100 * time.Millisecond,
+						WaitingTxsLimit:               5000,
+						Committer: test.NewInsecureClientConfig(
+							&coordinatorServer.Configs[0].Endpoint,
+						),
+						Monitoring: defaultMonitoring(),
+						Ledger: sidecar.LedgerConfig{
+							Path: t.TempDir(),
 						},
 						Orderer: ordererconn.Config{
-							CommonConfig: ordererconn.CommonConfig{
-								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
-								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
-								ConsensusType: ordererconn.Bft,
-								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
-							},
+							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+							ConsensusType: ordererconn.Bft,
+							TLS:           clientTLSConfig.ToOrdererTLSConfig(),
 							Organizations: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
@@ -306,9 +296,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					}
 
 					// Start sidecar.
-					sidecarParams, err := sidecarConf.ToParams()
-					require.NoError(t, err)
-					service, err := sidecar.New(sidecarParams)
+					service, err := sidecar.New(sidecarConf)
 					require.NoError(t, err)
 					t.Cleanup(service.Close)
 					test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)
@@ -369,12 +357,10 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 					// Start client
 					clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
 						Orderer: ordererconn.Config{
-							CommonConfig: ordererconn.CommonConfig{
-								ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
-								Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
-								ConsensusType: ordererconn.Bft,
-								TLS:           clientTLSConfig.ToOrdererTLSConfig(),
-							},
+							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
+							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
+							ConsensusType: ordererconn.Bft,
+							TLS:           clientTLSConfig.ToOrdererTLSConfig(),
 							Organizations: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,

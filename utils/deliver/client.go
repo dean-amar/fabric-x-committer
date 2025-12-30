@@ -21,7 +21,7 @@ import (
 type (
 	// Client is a collection of nodes and their connections.
 	Client struct {
-		config            *ordererconn.Parameters
+		config            *ordererconn.Config
 		connectionManager *ordererconn.ConnectionManager
 		signer            protoutil.Signer
 	}
@@ -30,7 +30,7 @@ type (
 var logger = logging.New("broadcast-deliver")
 
 // New creates a broadcast/deliver client. It must be closed to release all the associated connections.
-func New(config *ordererconn.Parameters) (*Client, error) {
+func New(config *ordererconn.Config) (*Client, error) {
 	if err := ordererconn.ValidateConfig(config); err != nil {
 		return nil, errors.Wrap(err, "error validating config")
 	}
@@ -40,9 +40,9 @@ func New(config *ordererconn.Parameters) (*Client, error) {
 		return nil, errors.Wrap(err, "error creating identity signer")
 	}
 
-	cm := &ordererconn.ConnectionManager{}
-	if err = cm.Update(config); err != nil {
-		return nil, errors.Wrap(err, "error creating connections")
+	cm, err := ordererconn.NewConnectionManager(config)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Client{
@@ -58,8 +58,8 @@ func (s *Client) CloseConnections() {
 }
 
 // UpdateConnections updates the connection config.
-func (s *Client) UpdateConnections(config *ordererconn.Parameters) error {
-	return s.connectionManager.Update(config)
+func (s *Client) UpdateConnections(orgParameters []*ordererconn.OrganizationParameters) error {
+	return s.connectionManager.Update(orgParameters)
 }
 
 // Deliver starts the block receiver. The call to Deliver blocks until an error occurs or the context is canceled.

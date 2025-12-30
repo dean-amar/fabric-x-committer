@@ -29,6 +29,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/deliver"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 )
 
 var logger = logging.New("sidecar")
@@ -45,7 +46,7 @@ type Service struct {
 	blockToBeCommitted chan *common.Block
 	committedBlock     chan *common.Block
 	statusQueue        chan []*committerpb.TxStatusEvent
-	config             *Parameters
+	config             *Config
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 }
@@ -53,12 +54,15 @@ type Service struct {
 // New creates a sidecar service.
 // We need to wrap this config just that instead of orderer with list of organizationParamereters,
 // this config needs to include an orderer config
-func New(c *Parameters) (*Service, error) {
+func New(c *Config) (*Service, error) {
 	logger.Info("Initializing new sidecar")
-	err := LoadBootstrapConfig(c)
+
+	orgParams, err := LoadBootstrapConfig(c.Bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load shared config: %w", err)
 	}
+
+	ordererconn.ReadOnlyEndpointsFromOrgParameters(c.Orderer.Organizations, orgParams)
 
 	// 1. Fetch blocks from the ordering service.
 	ordererClient, err := deliver.New(&c.Orderer)
@@ -211,12 +215,17 @@ func (s *Service) recoverCommittedBlocks(ctx context.Context) {
 
 func (s *Service) configUpdater(block *common.Block) {
 	logger.Infof("updating config from block: %d", block.Header.Number)
-	err := OverwriteConfigFromBlock(s.config, block)
+	orgParams, err := GetOrganizationsFromConfigBlock(block)
 	if err != nil {
 		logger.Warnf("failed to load config from block %d: %v", block.Header.Number, err)
 		return
 	}
-	err = s.ordererClient.UpdateConnections(&s.config.Orderer)
+	ordererconn.ReadOnlyEndpointsFromOrgParameters(s.config.Orderer.Organizations, orgParams)
+	orgParamsNew, err := s.config.Orderer.OrganizationConfigToParameters()
+	if err != nil {
+		logger.Warn(err)
+	}
+	err = s.ordererClient.UpdateConnections(orgParamsNew)
 	if err != nil {
 		logger.Warnf("failed to update config for block %d: %v", block.Header.Number, err)
 	}
@@ -278,11 +287,16 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal meta policy envelope: %w", err)
 	}
-	err = OverwriteConfigFromEnvelope(s.config, envelope)
+	orgParams, err := GetOrganizationParametersFromEnvelope(envelope)
 	if err != nil {
 		return err
 	}
-	err = s.ordererClient.UpdateConnections(&s.config.Orderer)
+	ordererconn.ReadOnlyEndpointsFromOrgParameters(s.config.Orderer.Organizations, orgParams)
+	orgParamsNew, err := s.config.Orderer.OrganizationConfigToParameters()
+	if err != nil {
+		return err
+	}
+	err = s.ordererClient.UpdateConnections(orgParamsNew)
 	return errors.Wrapf(err, "failed to update connections")
 }
 

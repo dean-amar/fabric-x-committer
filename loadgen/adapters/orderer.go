@@ -36,11 +36,7 @@ func NewOrdererAdapter(config *OrdererClientConfig, res *ClientResources) *Order
 
 // RunWorkload applies load on the sidecar.
 func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.StreamWithSetup) error {
-	ordererParams, err := c.config.Orderer.ToParams()
-	if err != nil {
-		return errors.Wrap(err, "could not start workload")
-	}
-	client, err := deliver.New(ordererParams)
+	client, err := deliver.New(&c.config.Orderer)
 	if err != nil {
 		return err
 	}
@@ -68,11 +64,7 @@ func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 
 	streams := make([]*test.BroadcastStream, c.config.BroadcastParallelism)
 	for i := range streams {
-		ordererParams, err = c.config.Orderer.ToParams()
-		if err != nil {
-			return errors.Wrap(err, "could not start workload")
-		}
-		streams[i], err = test.NewBroadcastStream(gCtx, ordererParams)
+		streams[i], err = test.NewBroadcastStream(gCtx, &c.config.Orderer)
 		if err != nil {
 			connection.CloseConnectionsLog(streams[:i]...)
 			return err
