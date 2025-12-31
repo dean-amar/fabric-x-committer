@@ -214,12 +214,12 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	c.Sidecar = newProcess(t, cmdSidecar, c.createSystemConfigWithServerTLS(t, s.Endpoints.Sidecar))
 
 	t.Log("Create clients")
-	c.CreateRuntimeClients(t)
+	c.CreateRuntimeClients(t.Context(), t)
 	return c
 }
 
 // CreateRuntimeClients create and set the necessary service's clients.
-func (c *CommitterRuntime) CreateRuntimeClients(t *testing.T) {
+func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.T) {
 	t.Helper()
 	endpoints := c.SystemConfig.Endpoints
 
@@ -236,7 +236,7 @@ func (c *CommitterRuntime) CreateRuntimeClients(t *testing.T) {
 	)
 
 	var err error
-	c.OrdererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
+	c.OrdererStream, err = test.NewBroadcastStream(ctx, &ordererconn.Config{
 		TLS:           test.ToOrdererTLSConfig(c.SystemConfig.ClientTLS),
 		ChannelID:     c.SystemConfig.Policy.ChannelID,
 		Identity:      c.SystemConfig.Policy.Identity,

@@ -107,7 +107,7 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 				),
 			}
 			runtime.SystemConfig.ClientTLS, _ = credsFactory.CreateClientCredentials(t, mode)
-			runtime.CreateRuntimeClients(t)
+			runtime.CreateRuntimeClients(ctx, t)
 			runtime.OpenNotificationStream(ctx, t)
 
 			// Adding namespace policy and creating transaction builder
