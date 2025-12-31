@@ -60,9 +60,9 @@ func New(c *Config) (*Service, error) {
 	}
 
 	// Temporary workaround.
-	// Once the config-block-with-crypto tool is added, we will call deliver.New(&c.Orderer, orgParams) directly.
+	// Once the config-block-with-crypto tool is added, we will call deliver.New(&c.Orderer, orgsMaterial) directly.
 	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
-	// LoadOrganizationsFromGenesisBlock currently returns OrganizationParameters with unknown root CAs.
+	// LoadOrganizationsFromGenesisBlock currently returns OrganizationMaterial with unknown root CAs.
 	c.Orderer.UpdateConfigFromOrganizationsMaterial(orgsMaterial)
 
 	// 1. Fetch blocks from the ordering service.
@@ -224,9 +224,9 @@ func (s *Service) configUpdater(block *common.Block) {
 
 	// Temporary workaround.
 	// Once the config-block-with-crypto tool is added, we will call
-	// s.ordererClient.UpdateConnections(orgParams) directly.
+	// s.ordererClient.UpdateConnections(orgsMaterial) directly.
 	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
-	// GetOrganizationsFromConfigBlock currently returns OrganizationParameters with unknown root CAs.
+	// GetOrganizationsFromConfigBlock currently returns OrganizationMaterial with unknown root CAs.
 	s.config.Orderer.UpdateConfigFromOrganizationsMaterial(orgsMaterial)
 	updatedOrgsMat, err := s.config.Orderer.OrganizationsConfigToMaterials()
 	if err != nil {
@@ -301,9 +301,9 @@ func (s *Service) recoverConfigTransactionFromStateDB(
 
 	// Temporary workaround.
 	// Once the config-block-with-crypto tool is added, we will call
-	// s.ordererClient.UpdateConnections(orgParams) directly.
+	// s.ordererClient.UpdateConnections(orgsMaterial) directly.
 	// For now, we apply this hack to preserve the root CAs loaded from the configuration.
-	// GetOrganizationsFromEnvelope currently returns OrganizationParameters with unknown root CAs.
+	// GetOrganizationsFromEnvelope currently returns OrganizationMaterial with unknown root CAs.
 	s.config.Orderer.UpdateConfigFromOrganizationsMaterial(orgsMaterial)
 	updatedOrgsMat, err := s.config.Orderer.OrganizationsConfigToMaterials()
 	if err != nil {

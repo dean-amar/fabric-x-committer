@@ -9,6 +9,7 @@ package sidecarclient
 import (
 	"context"
 	"errors"
+	"github.com/hyperledger/fabric-x-committer/utils/test"
 
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
@@ -49,7 +50,7 @@ type (
 // New instantiate a new sidecar client.
 func New(config *Parameters) (*Client, error) {
 	cm, err := ordererconn.NewConnectionManager(&ordererconn.Config{
-		TLS:   config.Client.TLS.ToOrdererTLSConfig(),
+		TLS:   test.ToOrdererTLSConfig(config.Client.TLS),
 		Retry: config.Client.Retry,
 		Organizations: []*ordererconn.OrganizationConfig{
 			{

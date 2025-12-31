@@ -74,8 +74,8 @@ type (
 		CACertPaths   []string `mapstructure:"ca-cert-paths"`
 	}
 
-	// OrdererTLSConfig is a restricted config (identity only) for orderer clients.
-	// It reuses the base fields but strictly excludes CA paths.
+	// OrdererTLSConfig is a restricted TLS config for orderer clients.
+	// It reuses the base fields but excludes CA paths.
 	OrdererTLSConfig struct {
 		BaseTLSConfig `mapstructure:",squash"`
 	}
@@ -88,7 +88,7 @@ type (
 		KeyPath  string `mapstructure:"key-path"`
 	}
 
-	// TLSMaterials holds the loaded runtime TLS material (certificate/key/CA certs).
+	// TLSMaterials holds the loaded runtime TLS material (certificate, key, CA certs).
 	TLSMaterials struct {
 		Mode    string
 		Cert    []byte
@@ -188,14 +188,6 @@ func buildCertPool(rootCAs [][]byte) (*x509.CertPool, error) {
 		}
 	}
 	return certPool, nil
-}
-
-// ToOrdererTLSConfig narrows a full TLSConfig down to an OrdererTLSConfig.
-// It effectively strips out the CA certificates.
-func (c TLSConfig) ToOrdererTLSConfig() OrdererTLSConfig {
-	return OrdererTLSConfig{
-		BaseTLSConfig: c.BaseTLSConfig,
-	}
 }
 
 // ToMaterials converts a TLSConfig with path fields into a struct that holds the actual bytes of the certificates.

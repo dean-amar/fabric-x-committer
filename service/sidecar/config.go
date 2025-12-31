@@ -65,7 +65,7 @@ const (
 	defaultBufferSize             = 100
 )
 
-// LoadOrganizationsFromGenesisBlock loads the bootstrap config according to the bootstrap method.
+// LoadOrganizationsFromGenesisBlock loads the genesis-block given bootstrap config.
 func LoadOrganizationsFromGenesisBlock(bootstrap Bootstrap) ([]*ordererconn.OrganizationMaterial, error) {
 	if bootstrap.GenesisBlockFilePath == "" {
 		return nil, nil
@@ -77,7 +77,7 @@ func LoadOrganizationsFromGenesisBlock(bootstrap Bootstrap) ([]*ordererconn.Orga
 	return GetOrganizationsFromConfigBlock(configBlock)
 }
 
-// GetOrganizationsFromConfigBlock overwrites the orderer connection with fields from a config block.
+// GetOrganizationsFromConfigBlock retrieve the organization materials from a config block.
 func GetOrganizationsFromConfigBlock(configBlock *common.Block) ([]*ordererconn.OrganizationMaterial, error) {
 	envelope, err := protoutil.ExtractEnvelope(configBlock, 0)
 	if err != nil {
@@ -86,7 +86,7 @@ func GetOrganizationsFromConfigBlock(configBlock *common.Block) ([]*ordererconn.
 	return GetOrganizationsFromEnvelope(envelope)
 }
 
-// GetOrganizationsFromEnvelope overwrites the orderer connection config with fields from a config transaction.
+// GetOrganizationsFromEnvelope retrieve the organization materials from a config transaction.
 // For now, it fetches the following:
 // - Orderer endpoints.
 // - RootCAs per organization.
@@ -95,7 +95,6 @@ func GetOrganizationsFromEnvelope(envelope *common.Envelope) ([]*ordererconn.Org
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create config bundle")
 	}
-
 	orgsMaterial, err := readOrganizationsFromBundle(bundle)
 	if err != nil {
 		return nil, err

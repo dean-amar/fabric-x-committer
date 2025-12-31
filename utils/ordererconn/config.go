@@ -18,7 +18,7 @@ import (
 
 type (
 	// Config defines the static configuration of the orderer client as loaded from YAML file.
-	// It supports connectivity to multiple organization's orderer.
+	// It supports connectivity to multiple organization's orderers.
 	Config struct {
 		ConsensusType string                      `mapstructure:"consensus-type"`
 		ChannelID     string                      `mapstructure:"channel-id"`
@@ -69,38 +69,6 @@ var (
 	ErrNoEndpoints           = errors.New("no endpoints")
 )
 
-// OrganizationsConfigToMaterials converts list of OrganizationConfig to OrganizationMaterial.
-func (c *Config) OrganizationsConfigToMaterials() ([]*OrganizationMaterial, error) {
-	organizationsMaterial := make([]*OrganizationMaterial, 0, len(c.Organizations))
-	for _, orgConfig := range c.Organizations {
-		orgMaterial, err := orgConfig.toMaterial(c.TLS.Mode)
-		if err != nil {
-			return nil, errors.Wrapf(err, "could not convert organization config into parameters")
-		}
-		organizationsMaterial = append(organizationsMaterial, orgMaterial)
-	}
-	return organizationsMaterial, nil
-}
-
-func (oc *OrganizationConfig) toMaterial(tlsMode string) (*OrganizationMaterial, error) {
-	orgParams := &OrganizationMaterial{
-		MspID:     oc.MspID,
-		Endpoints: oc.Endpoints,
-		CACerts:   make([][]byte, 0),
-	}
-	if tlsMode == connection.NoneTLSMode || tlsMode == connection.UnmentionedTLSMode {
-		return orgParams, nil
-	}
-	for _, caPath := range oc.CACerts {
-		caBytes, err := os.ReadFile(caPath)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to load CA certificate from %s", caBytes)
-		}
-		orgParams.CACerts = append(orgParams.CACerts, caBytes)
-	}
-	return orgParams, nil
-}
-
 // UpdateConfigFromOrganizationsMaterial is a temporary workaround.
 // Once the config-block-with-crypto tool is added, we will remove this function.
 // For now, it's saving the initialized root CAs we got from the config
@@ -128,28 +96,36 @@ func (c *Config) UpdateConfigFromOrganizationsMaterial(parameters []*Organizatio
 	}
 }
 
-// ValidateConfig validate the configuration.
-func ValidateConfig(c *Config) error {
-	if c.ConsensusType == "" {
-		c.ConsensusType = DefaultConsensus
+// OrganizationsConfigToMaterials converts list of OrganizationConfig to OrganizationMaterial.
+func (c *Config) OrganizationsConfigToMaterials() ([]*OrganizationMaterial, error) {
+	organizationsMaterial := make([]*OrganizationMaterial, 0, len(c.Organizations))
+	for _, orgConfig := range c.Organizations {
+		orgMaterial, err := orgConfig.toMaterial(c.TLS.Mode)
+		if err != nil {
+			return nil, errors.Wrapf(err, "could not convert organization config into parameters")
+		}
+		organizationsMaterial = append(organizationsMaterial, orgMaterial)
 	}
-	if c.ConsensusType != Bft && c.ConsensusType != Cft {
-		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
-	}
-	return ValidateOrganizationConfig(c.Organizations...)
+	return organizationsMaterial, nil
 }
 
-// ValidateOrganizationConfig validate the organization configuration.
-func ValidateOrganizationConfig(organizations ...*OrganizationConfig) error {
-	for _, org := range organizations {
-		if org == nil {
-			return ErrEmptyConnectionConfig
-		}
-		if err := validateEndpoints(org.Endpoints); err != nil {
-			return err
-		}
+func (oc *OrganizationConfig) toMaterial(tlsMode string) (*OrganizationMaterial, error) {
+	orgsMaterial := &OrganizationMaterial{
+		MspID:     oc.MspID,
+		Endpoints: oc.Endpoints,
+		CACerts:   make([][]byte, 0),
 	}
-	return nil
+	if tlsMode == connection.NoneTLSMode || tlsMode == connection.UnmentionedTLSMode {
+		return orgsMaterial, nil
+	}
+	for _, caPath := range oc.CACerts {
+		caBytes, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to load CA certificate from %s", caBytes)
+		}
+		orgsMaterial.CACerts = append(orgsMaterial.CACerts, caBytes)
+	}
+	return orgsMaterial, nil
 }
 
 // ValidateOrganizationParameters validate the organization parameters.
@@ -179,6 +155,17 @@ func validateEndpoints(endpoints []*commontypes.OrdererEndpoint) error {
 			return errors.Newf("endpoint [%s] specified multiple times: %s, %s", target, other, e.String())
 		}
 		uniqueEndpoints[target] = e.String()
+	}
+	return nil
+}
+
+// ValidateConsensusType verify and sets the consensus type in case of an unmentioned type.
+func ValidateConsensusType(c *Config) error {
+	if c.ConsensusType == "" {
+		c.ConsensusType = DefaultConsensus
+	}
+	if c.ConsensusType != Bft && c.ConsensusType != Cft {
+		return errors.Newf("unsupported orderer type %s", c.ConsensusType)
 	}
 	return nil
 }

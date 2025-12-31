@@ -227,7 +227,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	)
 
 	c.ordererStream, err = test.NewBroadcastStream(t.Context(), &ordererconn.Config{
-		TLS:           c.SystemConfig.ClientTLS.ToOrdererTLSConfig(),
+		TLS:           test.ToOrdererTLSConfig(c.SystemConfig.ClientTLS),
 		ChannelID:     s.Policy.ChannelID,
 		Identity:      s.Policy.Identity,
 		ConsensusType: ordererconn.Bft,

@@ -52,7 +52,7 @@ func TestBroadcastDeliver(t *testing.T) {
 			ordererService, servers, conf := makeConfig(t, serverTLSConfig, clientTLSConfig)
 
 			// Set the orderer client credentials.
-			conf.TLS = clientTLSConfig.ToOrdererTLSConfig()
+			conf.TLS = test.ToOrdererTLSConfig(clientTLSConfig)
 			allEndpoints := conf.Organizations[0].Endpoints
 			// We only take the bottom endpoints for now.
 			// Later we take the other endpoints and update the client.
@@ -226,7 +226,7 @@ func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
 		ChannelID:     channelForTest,
 		ConsensusType: ordererconn.Bft,
 		Retry:         &testGrpcRetryProfile,
-		TLS:           clientTLS.ToOrdererTLSConfig(),
+		TLS:           test.ToOrdererTLSConfig(clientTLS),
 		Organizations: []*ordererconn.OrganizationConfig{
 			{
 				CACerts: clientTLS.CACertPaths,

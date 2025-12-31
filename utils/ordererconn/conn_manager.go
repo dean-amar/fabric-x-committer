@@ -98,8 +98,8 @@ func aggregateFilter(filters ...ConnFilter) ConnFilter {
 }
 
 // NewConnectionManager constructs a ConnectionManager and initializes its connections.
-// It's orgMaterial provided, we are updating the config accordingly.
-// Else, we are using the config's organization.
+// If orgMaterial provided, we update the connection manager accordingly.
+// Else, we are using the organization config.
 func NewConnectionManager(config *Config, orgs []*OrganizationMaterial) (*ConnectionManager, error) {
 	var orgsMaterial []*OrganizationMaterial
 	if len(orgs) > 0 {

@@ -19,10 +19,8 @@ orderer-client:
           {{- end }}
     tls:
       mode: {{ .ClientTLS.Mode }}
-      key-path: {{ .ClientTLS.KeyPath }}
       cert-path: {{ .ClientTLS.CertPath }}
+      key-path: {{ .ClientTLS.KeyPath }}
     consensus-type: BFT
     channel-id: {{ .Policy.ChannelID }}
-
   broadcast-parallelism: 5
-

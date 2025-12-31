@@ -31,10 +31,8 @@ var logger = logging.New("broadcast-deliver")
 
 // New creates a broadcast/deliver client. It must be closed to release all the associated connections.
 func New(config *ordererconn.Config, orgsMaterial []*ordererconn.OrganizationMaterial) (*Client, error) {
-	if len(orgsMaterial) == 0 {
-		if err := ordererconn.ValidateConfig(config); err != nil {
-			return nil, errors.Wrap(err, "error validating config")
-		}
+	if err := ordererconn.ValidateConsensusType(config); err != nil {
+		return nil, err
 	}
 
 	signer, err := ordererconn.NewIdentitySigner(config.Identity)

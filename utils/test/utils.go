@@ -435,6 +435,14 @@ func MustCreateEndpoint(value string) *connection.Endpoint {
 	return endpoint
 }
 
+// ToOrdererTLSConfig narrows a full TLSConfig down to an OrdererTLSConfig.
+// It effectively strips out the CA certificates.
+func ToOrdererTLSConfig(c connection.TLSConfig) connection.OrdererTLSConfig {
+	return connection.OrdererTLSConfig{
+		BaseTLSConfig: c.BaseTLSConfig,
+	}
+}
+
 const (
 	// CreatorCertificate denotes Creator field in protoblocktx.Identity to contain x509 certificate.
 	CreatorCertificate = 0

@@ -31,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	testutils "github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
 var (
@@ -113,7 +114,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			Monitoring: newMonitoringConfig("", 2114),
 			Orderer: ordererconn.Config{
 				ChannelID: "mychannel",
-				TLS:       defaultClientTLSConfig.ToOrdererTLSConfig(),
+				TLS:       testutils.ToOrdererTLSConfig(defaultClientTLSConfig),
 				Organizations: []*ordererconn.OrganizationConfig{
 					{
 						MspID: "org0",
@@ -375,7 +376,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 					Orderer: ordererconn.Config{
 						ChannelID:     "mychannel",
 						ConsensusType: ordererconn.Bft,
-						TLS:           defaultClientTLSConfig.ToOrdererTLSConfig(),
+						TLS:           testutils.ToOrdererTLSConfig(defaultClientTLSConfig),
 						Organizations: []*ordererconn.OrganizationConfig{
 							{
 								MspID: "org0",

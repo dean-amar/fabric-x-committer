@@ -224,7 +224,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 							Path: t.TempDir(),
 						},
 						Orderer: ordererconn.Config{
-							TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+							TLS:           test.ToOrdererTLSConfig(clientTLSConfig),
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
@@ -285,7 +285,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
-							TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+							TLS:           test.ToOrdererTLSConfig(clientTLSConfig),
 							Organizations: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
@@ -360,7 +360,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 							ChannelID:     clientConf.LoadProfile.Transaction.Policy.ChannelID,
 							Identity:      clientConf.LoadProfile.Transaction.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
-							TLS:           clientTLSConfig.ToOrdererTLSConfig(),
+							TLS:           test.ToOrdererTLSConfig(clientTLSConfig),
 							Organizations: []*ordererconn.OrganizationConfig{
 								{
 									Endpoints: endpoints,
