@@ -59,13 +59,14 @@ func FailHandler(t *testing.T) {
 }
 
 // ServerToMultiClientConfig is used to create a multi client configuration from existing server(s).
-func ServerToMultiClientConfig(servers ...*connection.ServerConfig) *connection.MultiClientConfig {
+func ServerToMultiClientConfig(clientTLS connection.TLSConfig, servers ...*connection.ServerConfig) *connection.MultiClientConfig {
 	endpoints := make([]*connection.Endpoint, len(servers))
 	for i, server := range servers {
 		endpoints[i] = &server.Endpoint
 	}
 	return &connection.MultiClientConfig{
 		Endpoints: endpoints,
+		TLS:       clientTLS,
 	}
 }
 
@@ -112,11 +113,12 @@ func StartGrpcServersForTest(
 	t *testing.T,
 	numService int,
 	register func(*grpc.Server, int),
+	tlsConfig connection.TLSConfig,
 ) *GrpcServers {
 	t.Helper()
 	sc := make([]*connection.ServerConfig, numService)
 	for i := range sc {
-		sc[i] = connection.NewLocalHostServerWithTLS(InsecureTLSConfig)
+		sc[i] = connection.NewLocalHostServerWithTLS(tlsConfig)
 	}
 	return StartGrpcServersWithConfigForTest(ctx, t, sc, register)
 }

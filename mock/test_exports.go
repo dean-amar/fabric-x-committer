@@ -23,7 +23,7 @@ import (
 )
 
 // StartMockSVService starts a specified number of mock verifier service and register cancellation.
-func StartMockSVService(t *testing.T, numService int) (
+func StartMockSVService(t *testing.T, numService int, tlsConfig connection.TLSConfig) (
 	[]*SigVerifier, *test.GrpcServers,
 ) {
 	t.Helper()
@@ -35,7 +35,7 @@ func StartMockSVService(t *testing.T, numService int) (
 	sigVerServers := test.StartGrpcServersForTest(t.Context(), t, len(mockSigVer),
 		func(server *grpc.Server, index int) {
 			mockSigVer[index].RegisterService(server)
-		})
+		}, tlsConfig)
 	return mockSigVer, sigVerServers
 }
 
@@ -51,13 +51,13 @@ func StartMockSVServiceFromListWithConfig(
 
 // StartMockVCService starts a specified number of mock VC service using the same shared instance.
 // It is used for testing when multiple VC services are required to share the same state.
-func StartMockVCService(t *testing.T, numService int) (*VcService, *test.GrpcServers) {
+func StartMockVCService(t *testing.T, numService int, tlsConfig connection.TLSConfig) (*VcService, *test.GrpcServers) {
 	t.Helper()
 	sharedVC := NewMockVcService()
 
 	vcGrpc := test.StartGrpcServersForTest(t.Context(), t, numService, func(server *grpc.Server, _ int) {
 		sharedVC.RegisterService(server)
-	})
+	}, tlsConfig)
 	return sharedVC, vcGrpc
 }
 
@@ -72,14 +72,14 @@ func StartMockVCServiceFromListWithConfig(
 }
 
 // StartMockCoordinatorService starts a mock coordinator service and registers cancellation.
-func StartMockCoordinatorService(t *testing.T) (
+func StartMockCoordinatorService(t *testing.T, tlsConfig connection.TLSConfig) (
 	*Coordinator, *test.GrpcServers,
 ) {
 	t.Helper()
 	mockCoordinator := NewMockCoordinator()
 	coordinatorGrpc := test.StartGrpcServersForTest(t.Context(), t, 1, func(server *grpc.Server, _ int) {
 		mockCoordinator.RegisterService(server)
-	})
+	}, tlsConfig)
 	return mockCoordinator, coordinatorGrpc
 }
 
@@ -119,7 +119,7 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 	servers := test.StartGrpcServersForTest(
 		t.Context(), t, conf.NumService, func(server *grpc.Server, _ int) {
 			service.RegisterService(server)
-		},
+		}, conf.TLS,
 	)
 	return service, servers
 }
@@ -156,8 +156,8 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		OrdererServers: ordererServers,
 		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
 			holder.RegisterService(s)
-		}),
-		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil),
+		}, test.InsecureTLSConfig),
+		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, test.InsecureTLSConfig),
 	}
 }
 
