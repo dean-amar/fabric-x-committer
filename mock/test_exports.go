@@ -21,8 +21,8 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
-// StartMockSVService starts a specified number of mock verifier service and register cancellation.
-func StartMockSVService(t *testing.T, numService int) (
+// StartMockVerifierService starts a specified number of mock verifier service and register cancellation.
+func StartMockVerifierService(t *testing.T, numService int, tlsConfig connection.TLSConfig) (
 	[]*SigVerifier, *test.GrpcServers,
 ) {
 	t.Helper()
@@ -34,12 +34,12 @@ func StartMockSVService(t *testing.T, numService int) (
 	sigVerServers := test.StartGrpcServersForTest(t.Context(), t, len(mockSigVer),
 		func(server *grpc.Server, index int) {
 			mockSigVer[index].RegisterService(server)
-		}, test.InsecureTLSConfig)
+		}, tlsConfig)
 	return mockSigVer, sigVerServers
 }
 
-// StartMockSVServiceFromListWithConfig starts a specified number of mock verifier service.
-func StartMockSVServiceFromListWithConfig(
+// StartMockVerifierServiceFromListWithConfig starts a specified number of mock verifier service.
+func StartMockVerifierServiceFromListWithConfig(
 	t *testing.T, svs []*SigVerifier, sc []*connection.ServerConfig,
 ) *test.GrpcServers {
 	t.Helper()
@@ -50,13 +50,13 @@ func StartMockSVServiceFromListWithConfig(
 
 // StartMockVCService starts a specified number of mock VC service using the same shared instance.
 // It is used for testing when multiple VC services are required to share the same state.
-func StartMockVCService(t *testing.T, numService int) (*VcService, *test.GrpcServers) {
+func StartMockVCService(t *testing.T, numService int, tlsConfig connection.TLSConfig) (*VcService, *test.GrpcServers) {
 	t.Helper()
 	sharedVC := NewMockVcService()
 
 	vcGrpc := test.StartGrpcServersForTest(t.Context(), t, numService, func(server *grpc.Server, _ int) {
 		sharedVC.RegisterService(server)
-	}, test.InsecureTLSConfig)
+	}, tlsConfig)
 	return sharedVC, vcGrpc
 }
 
@@ -71,14 +71,14 @@ func StartMockVCServiceFromListWithConfig(
 }
 
 // StartMockCoordinatorService starts a mock coordinator service and registers cancellation.
-func StartMockCoordinatorService(t *testing.T) (
+func StartMockCoordinatorService(t *testing.T, tlsConfig connection.TLSConfig) (
 	*Coordinator, *test.GrpcServers,
 ) {
 	t.Helper()
 	mockCoordinator := NewMockCoordinator()
 	coordinatorGrpc := test.StartGrpcServersForTest(t.Context(), t, 1, func(server *grpc.Server, _ int) {
 		mockCoordinator.RegisterService(server)
-	}, test.InsecureTLSConfig)
+	}, tlsConfig)
 	return mockCoordinator, coordinatorGrpc
 }
 

@@ -43,7 +43,7 @@ type svMgrTestEnv struct {
 func newSvMgrTestEnv(t *testing.T, numSvService int, expectedEndErrorMsg ...byte) *svMgrTestEnv {
 	t.Helper()
 	expectedEndError := string(expectedEndErrorMsg)
-	svs, sc := mock.StartMockSVService(t, numSvService)
+	svs, sc := mock.StartMockVerifierService(t, numSvService, test.InsecureTLSConfig)
 
 	inputTxBatch := make(chan dependencygraph.TxNodeBatch, 10)
 	outputValidatedTxs := make(chan dependencygraph.TxNodeBatch, 10)
@@ -51,7 +51,7 @@ func newSvMgrTestEnv(t *testing.T, numSvService int, expectedEndErrorMsg ...byte
 	pm := newPolicyManager()
 	svm := newSignatureVerifierManager(
 		&signVerifierManagerConfig{
-			clientConfig:             test.ServerToMultiClientConfig(sc.Configs...),
+			clientConfig:             test.ServerToMultiClientConfig(test.InsecureTLSConfig, sc.Configs...),
 			incomingTxsForValidation: inputTxBatch,
 			outgoingValidatedTxs:     outputValidatedTxs,
 			metrics:                  newPerformanceMetrics(),
@@ -316,7 +316,7 @@ func TestSignatureVerifierManagerRecovery(t *testing.T) {
 	for _, sv := range env.mockSvService {
 		sv.MockFaultyNodeDropSize = 0
 	}
-	env.grpcServers = mock.StartMockSVServiceFromListWithConfig(
+	env.grpcServers = mock.StartMockVerifierServiceFromListWithConfig(
 		t, env.mockSvService, env.grpcServers.Configs,
 	)
 	env.requireConnectionMetrics(t, 0, connection.Connected, 1)
@@ -406,7 +406,7 @@ func TestSignatureVerifierManagerPolicyUpdateAndRecover(t *testing.T) {
 
 	t.Log("Clear policies and restart server")
 	env.mockSvService[0].ClearPolicies()
-	env.grpcServers.Servers[0] = mock.StartMockSVServiceFromListWithConfig(
+	env.grpcServers.Servers[0] = mock.StartMockVerifierServiceFromListWithConfig(
 		t, env.mockSvService[:1], env.grpcServers.Configs[:1],
 	).Servers[0]
 	env.requireConnectionMetrics(t, 0, connection.Connected, 1)
