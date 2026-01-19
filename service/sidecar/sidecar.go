@@ -70,11 +70,18 @@ func New(c *Config) (*Service, error) {
 		if bootErr != nil {
 			return nil, fmt.Errorf("failed to load organizations materials: %w", bootErr)
 		}
-		bootErr = ordererClient.UpdateConnections(orgsMaterial)
-		if bootErr != nil {
+		logger.Infof("number-of-materials: %v", len(orgsMaterial))
+		for _, material := range orgsMaterial {
+			for i, ep := range material.Endpoints {
+				logger.Infof("endpoint[%v]: %v", i, ep.String())
+			}
+		}
+		logger.Infof("updating-connections")
+		if bootErr = ordererClient.UpdateConnections(orgsMaterial); bootErr != nil {
 			return nil, bootErr
 		}
 	}
+	logger.Infof("finished-bootstrapping")
 
 	// 2. Relay the blocks to committer and receive the transaction status.
 	metrics := newPerformanceMetrics()

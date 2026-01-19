@@ -106,6 +106,8 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 		return connection.FilterStreamRPCError(service.Run(ctx))
 	}, service.WaitForReady)
 
+	// @TODO: read application config block
+
 	if len(conf.ServerConfigs) == conf.NumService {
 		return service, test.StartGrpcServersWithConfigForTest(
 			t.Context(),
