@@ -46,9 +46,7 @@ const (
 
 	defaultDBPort = "5433"
 
-	org0ClientPath = "ordererOrganizations/orderer-org-0/users/client@orderer-org-0.com/tls"
-
-	org0ServerPaths = "ordererOrganizations/orderer-org-0/orderers/consenter-org-0/tls"
+	org0ServerPaths = "ordererOrganizations/orderer-org-0/orderers/orderer-0-org-0/tls"
 )
 
 // enforcePostgresSSLAndReloadConfigScript enforces SSL-only client connections to a PostgreSQL
@@ -74,7 +72,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("policy: %v", c.LoadProfile.Policy)
 	c.LoadProfile.Policy.CryptoMaterialPath = t.TempDir()
-	c.LoadProfile.Policy.PeerOrganizationCount = 3
+	c.LoadProfile.Policy.PeerOrganizationCount = 1
 	configBlock, err := workload.CreateConfigBlock(&c.LoadProfile.Policy)
 	require.NoError(t, err)
 	require.NoError(t, configtxgen.WriteOutputBlock(configBlock, configBlockPath))

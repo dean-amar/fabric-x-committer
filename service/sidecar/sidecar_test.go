@@ -130,7 +130,7 @@ func newSpecialSidecarTestEnvWithTLS(
 	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t)
 
 	// creating orderer endpoint in advance.
-	ordererEp, err := connection.NewEndpoint("localhost:60007")
+	ordererEp, err := connection.NewEndpoint("127.0.0.1:60007")
 	require.NoError(t, err)
 	// creating policy-profile with this endpoint.
 	policy := &workload.PolicyProfile{
@@ -160,12 +160,12 @@ func newSpecialSidecarTestEnvWithTLS(
 	// note to myself: the tool, generates server.crt and server.key for the sidecar as well.
 	// we need to replace them when bootstrapping.
 
-	//org0ServerPaths := "ordererOrganizations/orderer-org-0/orderers/consenter-org-0/tls"
-	//ordererServerCreds := filepath.Join(policy.CryptoMaterialPath, org0ServerPaths)
-	//
-	//ordererTLSConfig.CertPath = filepath.Join(ordererServerCreds, "server.crt")
-	//ordererTLSConfig.KeyPath = filepath.Join(ordererServerCreds, "server.key")
-	//
+	org0ServerPaths := "ordererOrganizations/orderer-org-0/orderers/orderer-0-org-0/tls"
+	ordererServerCreds := filepath.Join(policy.CryptoMaterialPath, org0ServerPaths)
+
+	ordererTLSConfig.CertPath = filepath.Join(ordererServerCreds, "server.crt")
+	ordererTLSConfig.KeyPath = filepath.Join(ordererServerCreds, "server.key")
+
 	//// OPTIONAL: uncomment to manually inject the rootCA that created the above creds to the clientCredentials of the
 	//// sidecar -> orderer connection
 

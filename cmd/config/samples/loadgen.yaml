@@ -102,5 +102,5 @@ limit:
 logging:
   enabled: true
   development: false
-  level: INFO
+  level: DEBUG
   name: loadgen

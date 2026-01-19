@@ -40,6 +40,8 @@ require (
 	google.golang.org/protobuf v1.36.10
 )
 
+replace github.com/hyperledger/fabric-x-common => ../fabric-x-common
+
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/IBM/idemix v0.0.2-0.20240913182345-72941a5f41cd // indirect

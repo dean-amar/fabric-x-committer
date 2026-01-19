@@ -68,5 +68,5 @@ channel-buffer-size: 100
 logging:
   enabled: true
   development: false
-  level: INFO
+  level: DEBUG
   name: sidecar
