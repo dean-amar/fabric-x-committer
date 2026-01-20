@@ -127,7 +127,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 						startCommitterNodeWithReleaseImage(ctx, t, params.asNode(node))
 					}
 					// start the load generator node.
-					startLoadgenNodeWithReleaseImage(ctx, t, params.asNode(loadgenNode))
+					startLoadgenNodeWithReleaseImage(ctx, t, params.asNode(loadgenNode), ordererServerCreds)
 
 					monitorMetric(t,
 						getContainerMappedHostPort(
@@ -235,6 +235,7 @@ func startLoadgenNodeWithReleaseImage(
 	ctx context.Context,
 	t *testing.T,
 	params startNodeParameters,
+	rootCA string,
 ) {
 	t.Helper()
 
@@ -271,6 +272,7 @@ func startLoadgenNodeWithReleaseImage(
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
+				fmt.Sprintf("%s:/client-certs/orderer-ca-certificate.pem", filepath.Join(rootCA, "ca.crt")),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
