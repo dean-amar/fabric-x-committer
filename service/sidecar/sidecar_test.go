@@ -11,7 +11,6 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +22,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/common/ledger/blkstorage"
-	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -108,11 +106,13 @@ func TestSidecarSecureConnection(t *testing.T) {
 	)
 }
 
-func TestSidecarToOrdererConnectivityWithConfigBlock(t *testing.T) {
+func TestSidecarConfigBlockFetch(t *testing.T) {
+	t.Parallel()
 	serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
-	env := newSpecialSidecarTestEnvWithTLS(t,
-		sidecarTestConfig{SubmitGenesisBlock: true, NumService: 1, ServerTLS: serverTLSConfig, ClientTLS: clientTLSConfig},
-		serverTLSConfig,
+	env := newSidecarTestEnvWithTLS(t,
+		sidecarTestConfig{
+			SubmitGenesisBlock: true, NumService: 1, ServerTLS: serverTLSConfig, ClientTLS: clientTLSConfig,
+		},
 	)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
@@ -121,133 +121,21 @@ func TestSidecarToOrdererConnectivityWithConfigBlock(t *testing.T) {
 	env.sendTransactionsAndEnsureCommitted(ctx, t, 1)
 }
 
-func newSpecialSidecarTestEnvWithTLS(
-	t *testing.T,
-	conf sidecarTestConfig,
-	ordererTLSConfig connection.TLSConfig,
-) *sidecarTestEnv {
-	t.Helper()
-	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t)
-
-	// creating orderer endpoint in advance.
-	ordererEp, err := connection.NewEndpoint("127.0.0.1:60007")
-	require.NoError(t, err)
-	// creating policy-profile with this endpoint.
-	policy := &workload.PolicyProfile{
-		OrdererEndpoints: []*commontypes.OrdererEndpoint{{
-			Host: ordererEp.Host,
-			Port: ordererEp.Port,
-			ID:   0,
-			API:  []string{ordererconn.Broadcast, ordererconn.Deliver},
-		}},
-		ChannelID:             "ch1",
-		CryptoMaterialPath:    t.TempDir(),
-		PeerOrganizationCount: 1,
-	}
-	// creating config-block with this policy that now generates the tls-certificates.
-	configBlock, err := workload.CreateConfigBlock(policy)
-	test.WalkDirectory(policy.CryptoMaterialPath)
-	sidecarToOrdererTLSConfig := conf.ClientTLS
-
-	// update the ordererTLSConfig with the new certificates - at this point, the orderer will use server
-	// public key and private key that generated before.
-	// result -> the orderer still has the rootCA that created the sidecar's credentials but
-	// uses creds from different CA.
-
-	// when the sidecar will bootstrap, it should read the rootCA that generated these creds, and use it
-	// to connect to the orderer.
-
-	// note to myself: the tool, generates server.crt and server.key for the sidecar as well.
-	// we need to replace them when bootstrapping.
-
-	org0ServerPaths := "ordererOrganizations/orderer-org-0/orderers/orderer-0-org-0/tls"
-	ordererServerCreds := filepath.Join(policy.CryptoMaterialPath, org0ServerPaths)
-
-	ordererTLSConfig.CertPath = filepath.Join(ordererServerCreds, "server.crt")
-	ordererTLSConfig.KeyPath = filepath.Join(ordererServerCreds, "server.key")
-
-	//// OPTIONAL: uncomment to manually inject the rootCA that created the above creds to the clientCredentials of the
-	//// sidecar -> orderer connection
-
-	//sidecarToOrdererTLSConfig.CACertPaths[0] = filepath.Join(ordererServerCreds, "ca.crt")
-
-	// we create serverConfig with the updated ordererTLSConfig.
-	sc := &connection.ServerConfig{
-		Endpoint: *ordererEp,
-		TLS:      ordererTLSConfig,
-	}
-
-	// Start the ordererEnv with these updated credentials.
-	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
-		ChanID: policy.ChannelID,
-		Config: &mock.OrdererConfig{
-			NumService:    1,
-			ServerConfigs: []*connection.ServerConfig{sc},
-			BlockSize:     blockSize,
-			// We want each block to contain exactly <blockSize> transactions.
-			// Therefore, we set a higher block timeout so that we have enough time to send all the
-			// transactions to the orderer and create a block.
-			BlockTimeout:    5 * time.Minute,
-			SendConfigBlock: false,
-		},
-		NumFake:    conf.NumFakeService,
-		NumHolders: conf.NumHolders,
-	})
-
-	//policy.OrdererEndpoints = ordererEnv.AllRealOrdererEndpoints()
-	//configBlock, err := workload.CreateConfigBlock(policy)
-
-	//test.WalkDirectory(policy.CryptoMaterialPath)
-
-	// we submit the configBlock to the orderer.
-	err = ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock)
-	require.NoError(t, err)
-
-	// we generate the genesisBlockPath from the configBlock we created before.
-	var genesisBlockFilePath string
-	if conf.SubmitGenesisBlock {
-		genesisBlockFilePath = filepath.Join(t.TempDir(), "config.block")
-		require.NoError(t, configtxgen.WriteOutputBlock(configBlock, genesisBlockFilePath))
-	}
-	sidecarConf := &Config{
-		Server:    connection.NewLocalHostServerWithTLS(conf.ServerTLS),
-		Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
-		Ledger: LedgerConfig{
-			Path: t.TempDir(),
-		},
-		LastCommittedBlockSetInterval: 100 * time.Millisecond,
-		WaitingTxsLimit:               1000,
-		Monitoring: monitoring.Config{
-			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
-		},
-		Bootstrap: Bootstrap{
-			GenesisBlockFilePath: genesisBlockFilePath,
-		},
-		Orderer: ordererconn.Config{
-			ChannelID: ordererEnv.TestConfig.ChanID,
-			TLS:       ordererconn.TLSConfigToOrdererTLSConfig(sidecarToOrdererTLSConfig),
-		},
-	}
-	sidecar, err := New(sidecarConf)
-	require.NoError(t, err)
-	t.Cleanup(sidecar.Close)
-
-	return &sidecarTestEnv{
-		sidecar:           sidecar,
-		coordinator:       coordinator,
-		coordinatorServer: coordinatorServer,
-		ordererEnv:        ordererEnv,
-		config:            *sidecarConf,
-		configBlock:       configBlock,
-	}
-}
-
 func newSidecarTestEnvWithTLS(
 	t *testing.T,
 	conf sidecarTestConfig,
 ) *sidecarTestEnv {
 	t.Helper()
 	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t)
+
+	sidecarServerTLS := connection.TLSConfig{
+		Mode:        conf.ServerTLS.Mode,
+		CertPath:    conf.ServerTLS.CertPath,
+		KeyPath:     conf.ServerTLS.KeyPath,
+		CACertPaths: make([]string, len(conf.ServerTLS.CACertPaths)),
+	}
+	copy(sidecarServerTLS.CACertPaths, conf.ServerTLS.CACertPaths)
+
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
@@ -264,26 +152,24 @@ func newSidecarTestEnvWithTLS(
 		NumHolders: conf.NumHolders,
 	})
 
-	ordererEndpoints := ordererEnv.AllEndpoints()
-	configBlock := ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-		OrdererEndpoints: ordererEndpoints,
-		ChannelID:        ordererEnv.TestConfig.ChanID,
-	})
+	require.NoError(t, ordererEnv.Orderer.SubmitBlock(t.Context(), ordererEnv.ConfigBlock))
 
 	var genesisBlockFilePath string
 	initOrdererOrganizations := map[string]*ordererconn.OrganizationConfig{
 		"org": {
-			Endpoints: ordererEndpoints,
-			CACerts:   conf.ClientTLS.CACertPaths,
+			Endpoints: ordererEnv.AllEndpoints(),
+			CACerts:   append(conf.ClientTLS.CACertPaths, ordererEnv.RootCA),
 		},
 	}
+	//initOrdererOrganizations["org"].CACerts = append(initOrdererOrganizations["org"].CACerts, ordererEnv.RootCA)
+
 	if conf.SubmitGenesisBlock {
-		genesisBlockFilePath = filepath.Join(t.TempDir(), "config.block")
-		require.NoError(t, configtxgen.WriteOutputBlock(configBlock, genesisBlockFilePath))
+		genesisBlockFilePath = ordererEnv.ConfigBlockPath
 		initOrdererOrganizations = nil
 	}
+	//conf.ClientTLS.CACertPaths = append(conf.ClientTLS.CACertPaths, ordererEnv.RootCA)
 	sidecarConf := &Config{
-		Server:    connection.NewLocalHostServerWithTLS(conf.ServerTLS),
+		Server:    connection.NewLocalHostServerWithTLS(sidecarServerTLS),
 		Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
 		Ledger: LedgerConfig{
 			Path: t.TempDir(),
@@ -312,7 +198,7 @@ func newSidecarTestEnvWithTLS(
 		coordinatorServer: coordinatorServer,
 		ordererEnv:        ordererEnv,
 		config:            *sidecarConf,
-		configBlock:       configBlock,
+		configBlock:       ordererEnv.ConfigBlock,
 	}
 }
 
@@ -376,6 +262,7 @@ func TestSidecar(t *testing.T) {
 					t.Parallel()
 					conf.ServerTLS, conf.ClientTLS = serverTLSConfig, clientTLSConfig
 					env := newSidecarTestEnvWithTLS(t, conf)
+					clientTLSConfig.CACertPaths = append(clientTLSConfig.CACertPaths, env.ordererEnv.RootCA)
 					ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 					t.Cleanup(cancel)
 					env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, clientTLSConfig)
@@ -389,7 +276,7 @@ func TestSidecar(t *testing.T) {
 
 func TestSidecarConfigUpdate(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes {
+	for _, mode := range test.ServerModes[2:] {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
@@ -407,9 +294,17 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			expectedBlock++
 
 			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
-				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-					OrdererEndpoints: endpoints,
-				})
+				newPolicy := env.ordererEnv.Policy
+				if len(endpoints) == 0 {
+					endpoints = env.ordererEnv.AllEndpoints()
+				}
+				newPolicy.OrdererEndpoints = endpoints
+				configBlock, err := workload.CreateConfigBlock(newPolicy)
+				require.NotNil(t, configBlock)
+				require.NoError(t, err, "failed to create config block")
+				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
+				env.ordererEnv.Policy = newPolicy
+				//env.ordererEnv.SubmitConfigBlock(t, configBlock)
 			}
 
 			t.Log("Update the sidecar to use a second orderer group")

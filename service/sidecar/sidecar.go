@@ -80,8 +80,8 @@ func New(c *Config) (*Service, error) {
 		if bootErr = ordererClient.UpdateConnections(orgsMaterial); bootErr != nil {
 			return nil, bootErr
 		}
+		logger.Infof("finished-bootstrapping")
 	}
-	logger.Infof("finished-bootstrapping")
 
 	// 2. Relay the blocks to committer and receive the transaction status.
 	metrics := newPerformanceMetrics()

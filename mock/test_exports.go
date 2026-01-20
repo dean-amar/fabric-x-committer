@@ -8,6 +8,9 @@ package mock
 
 import (
 	"context"
+	"fmt"
+	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -97,7 +100,7 @@ func StartMockCoordinatorServiceFromListWithConfig(
 
 // StartMockOrderingServices starts a specified number of mock ordering service and register cancellation.
 func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
-	*Orderer, *test.GrpcServers,
+	*Orderer, *test.GrpcServers, string, string, *common.Block, *workload.PolicyProfile,
 ) {
 	t.Helper()
 	service, err := NewMockOrderer(conf)
@@ -108,31 +111,76 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 
 	// @TODO: read application config block
 
-	if len(conf.ServerConfigs) == conf.NumService {
-		return service, test.StartGrpcServersWithConfigForTest(
-			t.Context(),
-			t, conf.ServerConfigs, func(server *grpc.Server, _ int) {
-				service.RegisterService(server)
-			},
-		)
+	// create orderer servers with pre-allocated ports.
+	ordererServers := make([]*connection.ServerConfig, conf.NumService)
+	for i := range ordererServers {
+		ordererServers[i] = preAllocatePorts(t, conf.TLS)
+
+		t.Logf("orderer[%v]'s endpoints: %v", i, ordererServers[i].Endpoint)
 	}
 
-	servers := test.StartGrpcServersForTest(
-		t.Context(), t, conf.NumService, func(server *grpc.Server, _ int) {
+	if len(conf.ServerConfigs) == conf.NumService {
+		ordererServers = conf.ServerConfigs
+	}
+
+	// create policy with these endpoints.
+	policy := &workload.PolicyProfile{
+		// we generate all the orderers for the same msp-id.
+		OrdererEndpoints:      test.NewOrdererEndpoints(0, ordererServers...),
+		ChannelID:             "ch1",
+		CryptoMaterialPath:    t.TempDir(),
+		PeerOrganizationCount: 1,
+	}
+
+	configBlock, err := workload.CreateConfigBlock(policy)
+	require.NotNil(t, configBlock)
+	require.NoError(t, err, "failed to create config block")
+
+	genesisBlockFilePath := filepath.Join(t.TempDir(), "config.block")
+	require.NoError(t, configtxgen.WriteOutputBlock(configBlock, genesisBlockFilePath))
+
+	// updating the orderer sever-configs with the generated TLS credentials.
+	for i, ordererServer := range ordererServers {
+
+		certDir := filepath.Join(
+			policy.CryptoMaterialPath,
+			"ordererOrganizations", "orderer-org-0",
+			"orderers", fmt.Sprintf("orderer-%d-org-0", i),
+			"tls",
+		)
+
+		ordererServer.TLS.CertPath = filepath.Join(certDir, "server.crt")
+		ordererServer.TLS.KeyPath = filepath.Join(certDir, "server.key")
+
+		conf.TLS = ordererServer.TLS
+	}
+
+	servers := test.StartGrpcServersWithConfigForTest(
+		t.Context(),
+		t, ordererServers, func(server *grpc.Server, _ int) {
 			service.RegisterService(server)
-		}, conf.TLS,
+		},
 	)
-	return service, servers
+	return service, servers, genesisBlockFilePath, filepath.Join(filepath.Join(
+		policy.CryptoMaterialPath,
+		"ordererOrganizations", "orderer-org-0",
+		"orderers", fmt.Sprintf("orderer-%d-org-0", 0),
+		"tls",
+	), "ca.crt"), configBlock, policy
 }
 
 // OrdererTestEnv allows starting fake and holder services in addition to the regular mock orderer services.
 type OrdererTestEnv struct {
-	Orderer        *Orderer
-	Holder         *HoldingOrderer
-	OrdererServers *test.GrpcServers
-	FakeServers    *test.GrpcServers
-	HolderServers  *test.GrpcServers
-	TestConfig     *OrdererTestConfig
+	Orderer         *Orderer
+	Holder          *HoldingOrderer
+	OrdererServers  *test.GrpcServers
+	FakeServers     *test.GrpcServers
+	HolderServers   *test.GrpcServers
+	TestConfig      *OrdererTestConfig
+	ConfigBlockPath string
+	RootCA          string
+	ConfigBlock     *common.Block
+	Policy          *workload.PolicyProfile
 }
 
 // OrdererTestConfig describes the configuration for OrdererTestEnv.
@@ -147,7 +195,7 @@ type OrdererTestConfig struct {
 // NewOrdererTestEnv creates and starts a new OrdererTestEnv.
 func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 	t.Helper()
-	orderer, ordererServers := StartMockOrderingServices(t, conf.Config)
+	orderer, ordererServers, configBlockPath, newRootCA, configBlock, policy := StartMockOrderingServices(t, conf.Config)
 	holder := &HoldingOrderer{Orderer: orderer}
 	holder.Release()
 	return &OrdererTestEnv{
@@ -158,7 +206,11 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
 			holder.RegisterService(s)
 		}, conf.Config.TLS),
-		FakeServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, test.InsecureTLSConfig),
+		FakeServers:     test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, test.InsecureTLSConfig),
+		ConfigBlockPath: configBlockPath,
+		ConfigBlock:     configBlock,
+		RootCA:          newRootCA,
+		Policy:          policy,
 	}
 }
 
@@ -206,4 +258,15 @@ func (e *OrdererTestEnv) AllFakeEndpoints() []*commontypes.OrdererEndpoint {
 // AllHolderEndpoints returns a list of the holder orderer endpoints.
 func (e *OrdererTestEnv) AllHolderEndpoints() []*commontypes.OrdererEndpoint {
 	return test.NewOrdererEndpoints(0, e.HolderServers.Configs...)
+}
+
+func preAllocatePorts(t *testing.T, tlsConfig connection.TLSConfig) *connection.ServerConfig {
+	t.Helper()
+	server := connection.NewLocalHostServerWithTLS(tlsConfig)
+	listener, err := server.PreAllocateListener()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
+	return server
 }
