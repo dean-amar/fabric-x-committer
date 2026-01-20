@@ -42,7 +42,7 @@ orderer-client:
       cert-path: /client-certs/public-key.pem
       key-path: /client-certs/private-key.pem
       common-ca-cert-paths:
-        - /client-certs/orderer-ca-certificate.pem
+        - /client-certs/ca-certificate.pem
     consensus-type: BFT
     channel-id: mychannel
   # We set low values to reduce the CPU load during tests.
@@ -102,5 +102,5 @@ limit:
 logging:
   enabled: true
   development: false
-  level: DEBUG
+  level: INFO
   name: loadgen

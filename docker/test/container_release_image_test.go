@@ -82,15 +82,10 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	loadgenNode := "loadgen"
 	committerNodes := []string{"verifier", "vc", "query", "coordinator", "sidecar"}
 
-	WalkDirectory(c.LoadProfile.Policy.CryptoMaterialPath)
-
 	ordererServerCreds := filepath.Join(c.LoadProfile.Policy.CryptoMaterialPath, org0ServerPaths)
-	WalkDirectory(ordererServerCreds)
-	//ordererClientCreds := filepath.Join(c.LoadProfile.Policy.CryptoMaterialPath, org0ClientPath)
-	//WalkDirectory(ordererClientCreds)
 
 	credsFactory := test.NewCredentialsFactory(t)
-	for _, dbType := range []string{dbtest.PostgresDBType} {
+	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType}[:1] {
 		t.Run(fmt.Sprintf("database:%s", dbType), func(t *testing.T) {
 			t.Parallel()
 			for _, mode := range test.ServerModes[:1] {
@@ -104,11 +99,12 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 					})
 
 					params := startNodeParameters{
-						credsFactory:    credsFactory,
-						networkName:     networkName,
-						tlsMode:         mode,
-						configBlockPath: configBlockPath,
-						dbType:          dbType,
+						credsFactory:           credsFactory,
+						networkName:            networkName,
+						tlsMode:                mode,
+						configBlockPath:        configBlockPath,
+						dbType:                 dbType,
+						ordererServerCredsPath: ordererServerCreds,
 					}
 
 					for _, node := range append(committerNodes, dbNode, ordererNode, loadgenNode) {
@@ -121,13 +117,13 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 					// start a secured database node and return the db password.
 					params.dbPassword = startSecuredDatabaseNode(ctx, t, params.asNode(dbNode))
 					// start the orderer node.
-					startCommitterNodeWithTestImage(ctx, t, params.asNode(ordererNode), ordererServerCreds)
+					startCommitterNodeWithTestImage(ctx, t, params.asNode(ordererNode))
 					// start the committer nodes.
 					for _, node := range committerNodes {
 						startCommitterNodeWithReleaseImage(ctx, t, params.asNode(node))
 					}
 					// start the load generator node.
-					startLoadgenNodeWithReleaseImage(ctx, t, params.asNode(loadgenNode), ordererServerCreds)
+					startLoadgenNodeWithReleaseImage(ctx, t, params.asNode(loadgenNode))
 
 					monitorMetric(t,
 						getContainerMappedHostPort(
@@ -235,7 +231,6 @@ func startLoadgenNodeWithReleaseImage(
 	ctx context.Context,
 	t *testing.T,
 	params startNodeParameters,
-	rootCA string,
 ) {
 	t.Helper()
 
@@ -272,7 +267,9 @@ func startLoadgenNodeWithReleaseImage(
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
-				fmt.Sprintf("%s:/client-certs/orderer-ca-certificate.pem", filepath.Join(rootCA, "ca.crt")),
+				fmt.Sprintf("%s:/client-certs/ca-certificate.pem",
+					filepath.Join(params.ordererServerCredsPath, "ca.crt"),
+				),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
@@ -284,7 +281,6 @@ func startCommitterNodeWithTestImage(
 	ctx context.Context,
 	t *testing.T,
 	params startNodeParameters,
-	configBlockCredsPaths string,
 ) {
 	t.Helper()
 
@@ -300,10 +296,15 @@ func startCommitterNodeWithTestImage(
 		},
 		hostConfig: &container.HostConfig{
 			NetworkMode: container.NetworkMode(params.networkName),
-			Binds: assembleBindsForOrderer(t, params,
+			Binds: assembleBinds(t, params,
 				fmt.Sprintf("%s:/%s", params.configBlockPath, filepath.Join(containerConfigPath, genBlockFile)),
-				fmt.Sprintf("%s:/server-certs/public-key.pem", filepath.Join(configBlockCredsPaths, "server.crt")),
-				fmt.Sprintf("%s:/server-certs/private-key.pem", filepath.Join(configBlockCredsPaths, "server.key")),
+				// we mount them one by one because we already created a volume inside the container /server-certs.
+				fmt.Sprintf("%s:/server-certs/public-key.pem",
+					filepath.Join(params.ordererServerCredsPath, "server.crt"),
+				),
+				fmt.Sprintf("%s:/server-certs/private-key.pem",
+					filepath.Join(params.ordererServerCredsPath, "server.key"),
+				),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
