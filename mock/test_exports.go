@@ -142,9 +142,9 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 
 	servers := test.StartGrpcServersWithConfigForTest(
 		t.Context(),
-		t, ordererServers, func(server *grpc.Server, _ int) {
+		t, func(server *grpc.Server) {
 			service.RegisterService(server)
-		},
+		}, ordererServers...,
 	)
 	return service, servers, genesisBlockFilePath, filepath.Join(filepath.Join(
 		policy.CryptoMaterialPath,
@@ -188,7 +188,7 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 		Orderer:        orderer,
 		Holder:         holder,
 		OrdererServers: ordererServers,
-		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server, _ int) {
+		HolderServers: test.StartGrpcServersForTest(t.Context(), t, conf.NumHolders, func(s *grpc.Server) {
 			holder.RegisterService(s)
 		}, conf.Config.TLS),
 		FakeServers:     test.StartGrpcServersForTest(t.Context(), t, conf.NumFake, nil, test.InsecureTLSConfig),

@@ -9,10 +9,8 @@ package test
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
@@ -45,8 +43,6 @@ const (
 	containerPathForYugabytePassword = "/root/var/data/yugabyted_credentials.txt" //nolint:gosec
 
 	defaultDBPort = "5433"
-
-	org0ServerPaths = "ordererOrganizations/orderer-org-0/orderers/orderer-0-org-0/tls"
 )
 
 // enforcePostgresSSLAndReloadConfigScript enforces SSL-only client connections to a PostgreSQL
@@ -70,9 +66,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	v := config.NewViperWithLoadGenDefaults()
 	c, err := config.ReadLoadGenYamlAndSetupLogging(v, filepath.Join(localConfigPath, "loadgen.yaml"))
 	require.NoError(t, err)
-	t.Logf("policy: %v", c.LoadProfile.Policy)
 	c.LoadProfile.Policy.CryptoMaterialPath = t.TempDir()
-	c.LoadProfile.Policy.PeerOrganizationCount = 1
 	configBlock, err := workload.CreateConfigBlock(&c.LoadProfile.Policy)
 	require.NoError(t, err)
 	require.NoError(t, configtxgen.WriteOutputBlock(configBlock, configBlockPath))
@@ -82,13 +76,11 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	loadgenNode := "loadgen"
 	committerNodes := []string{"verifier", "vc", "query", "coordinator", "sidecar"}
 
-	ordererServerCreds := filepath.Join(c.LoadProfile.Policy.CryptoMaterialPath, org0ServerPaths)
-
 	credsFactory := test.NewCredentialsFactory(t)
-	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType}[:1] {
+	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType} {
 		t.Run(fmt.Sprintf("database:%s", dbType), func(t *testing.T) {
 			t.Parallel()
-			for _, mode := range test.ServerModes[:1] {
+			for _, mode := range test.ServerModes {
 				t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 					t.Parallel()
 					// Create an isolated network for each test with different tls mode.
@@ -99,12 +91,11 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 					})
 
 					params := startNodeParameters{
-						credsFactory:           credsFactory,
-						networkName:            networkName,
-						tlsMode:                mode,
-						configBlockPath:        configBlockPath,
-						dbType:                 dbType,
-						ordererServerCredsPath: ordererServerCreds,
+						credsFactory:    credsFactory,
+						networkName:     networkName,
+						tlsMode:         mode,
+						configBlockPath: configBlockPath,
+						dbType:          dbType,
 					}
 
 					for _, node := range append(committerNodes, dbNode, ordererNode, loadgenNode) {
@@ -221,7 +212,6 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, param
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
-				fmt.Sprintf("%s:/%s", params.configBlockPath, filepath.Join(containerConfigPath, genBlockFile)),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
@@ -271,9 +261,6 @@ func startLoadgenNodeWithReleaseImage(
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
-				fmt.Sprintf("%s:/client-certs/ca-certificate.pem",
-					filepath.Join(params.ordererServerCredsPath, "ca.crt"),
-				),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
@@ -302,13 +289,6 @@ func startCommitterNodeWithTestImage(
 			NetworkMode: container.NetworkMode(params.networkName),
 			Binds: assembleBinds(t, params,
 				fmt.Sprintf("%s:/%s", params.configBlockPath, filepath.Join(containerConfigPath, genBlockFile)),
-				// we mount them one by one because we already created a volume inside the container /server-certs.
-				fmt.Sprintf("%s:/server-certs/public-key.pem",
-					filepath.Join(params.ordererServerCredsPath, "server.crt"),
-				),
-				fmt.Sprintf("%s:/server-certs/private-key.pem",
-					filepath.Join(params.ordererServerCredsPath, "server.key"),
-				),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
@@ -321,46 +301,4 @@ func mustGetWD(t *testing.T) string {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 	return wd
-}
-
-func assembleBindsForOrderer(t *testing.T, params startNodeParameters, additionalBinds ...string) []string {
-	t.Helper()
-
-	_, serverCredsPath := params.credsFactory.CreateServerCredentials(t, params.tlsMode, params.node)
-	require.NotEmpty(t, serverCredsPath)
-	//_, clientCredsPath := params.credsFactory.CreateClientCredentials(t, params.tlsMode)
-	//require.NotEmpty(t, clientCredsPath)
-
-	return append([]string{
-		fmt.Sprintf("%s:/server-certs/ca-certificate.pem", filepath.Join(serverCredsPath, "ca-certificate.pem")),
-		//fmt.Sprintf("%s:/client-certs", clientCredsPath),
-	}, additionalBinds...)
-}
-
-func WalkDirectory(root string) {
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get the path relative to the root to determine depth
-		relPath, _ := filepath.Rel(root, path)
-
-		// If it's the root itself, just print the name
-		if relPath == "." {
-			fmt.Println(root)
-			return nil
-		}
-
-		// Calculate indentation based on the number of separators
-		depth := strings.Count(relPath, string(os.PathSeparator))
-		indent := strings.Repeat("│   ", depth)
-
-		fmt.Printf("%s├── %s\n", indent, d.Name())
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("Error walking the path %q: %v\n", root, err)
-	}
 }

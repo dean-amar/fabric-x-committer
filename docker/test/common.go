@@ -32,15 +32,14 @@ type (
 		name       string
 	}
 	startNodeParameters struct {
-		credsFactory           *test.CredentialsFactory
-		node                   string
-		networkName            string
-		tlsMode                string
-		configBlockPath        string
-		dbType                 string
-		dbPassword             string
-		ordererServerCredsPath string
-		cmd                    []string
+		credsFactory    *test.CredentialsFactory
+		node            string
+		networkName     string
+		tlsMode         string
+		configBlockPath string
+		dbType          string
+		dbPassword      string
+		cmd             []string
 	}
 )
 

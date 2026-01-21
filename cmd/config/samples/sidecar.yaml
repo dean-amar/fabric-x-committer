@@ -36,9 +36,6 @@ monitoring:
       requests-per-second: 0
       burst: 0
 
-bootstrap:
-  genesis-block-file-path: /root/config/sc-genesis-block.proto.bin
-
 orderer:
   channel-id: mychannel
   # Organizations map organization MSP IDs to their orderer connection details.
