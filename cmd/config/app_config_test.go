@@ -98,6 +98,9 @@ func TestReadConfigSidecar(t *testing.T) {
 					},
 				},
 			},
+			Bootstrap: sidecar.Bootstrap{
+				GenesisBlockFilePath: "/root/config/sc-genesis-block.proto.bin",
+			},
 			Monitoring: newMonitoringConfig("", 2114),
 			Orderer: ordererconn.Config{
 				ChannelID: "mychannel",
@@ -372,7 +375,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 							Mode:              defaultClientTLSConfig.Mode,
 							KeyPath:           defaultClientTLSConfig.KeyPath,
 							CertPath:          defaultClientTLSConfig.CertPath,
-							CommonCACertPaths: defaultClientTLSConfig.CACertPaths,
+							CommonCACertPaths: append(defaultClientTLSConfig.CACertPaths, "/client-certs/orderer-creds-ca.pem"),
 						},
 						Organizations: map[string]*ordererconn.OrganizationConfig{
 							"org0": {
