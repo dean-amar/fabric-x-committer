@@ -5,6 +5,7 @@
 server:
   endpoint: :4001
   tls:
+    # TLS configuration being built based on the tls mode chosen: none, tls, mtls.
     mode: mtls
     cert-path: /server-certs/public-key.pem
     key-path: /server-certs/private-key.pem
@@ -17,22 +18,40 @@ server:
     enforcement-policy:
       min-time: 60s
       permit-without-stream: false
+  # Rate limiting configuration for unary gRPC endpoints.
+  # Uses a token bucket algorithm to limit the number of requests per second.
+  rate-limit:
+    # Maximum number of requests per second allowed.
+    # Set to 0 to disable rate limiting.
+    requests-per-second: 0
+    # Maximum number of requests allowed in a single burst.
+    # When rate limiting is enabled (requests-per-second > 0):
+    #   - Must be greater than 0
+    #   - Must be less than or equal to requests-per-second
+    burst: 0
 monitoring:
   server:
     endpoint: :2114
+    rate-limit:
+      requests-per-second: 0
+      burst: 0
 
 bootstrap:
   genesis-block-file-path: /root/config/sc-genesis-block.proto.bin
 
 orderer:
   channel-id: mychannel
+  # Organizations map organization MSP IDs to their orderer connection details.
+  # It supports multi-organization deployments where each org has its own orderers and TLS root CAs.
   organizations:
     org0:
       endpoints:
         - id=0,broadcast,deliver,orderer:7050
       ca-cert-paths:
         - /client-certs/ca-certificate.pem
+  # Sidecar uses these TLS credentials when connecting to the orderers as a client.
   tls:
+    # TLS configuration being built based on the tls mode chosen: none, tls, mtls.
     mode: mtls
     cert-path: /client-certs/public-key.pem
     key-path: /client-certs/private-key.pem
@@ -51,6 +70,7 @@ orderer:
 committer:
   endpoint: coordinator:9001
   tls:
+    # TLS configuration being built based on the tls mode chosen: none, tls, mtls.
     mode: mtls
     cert-path: /client-certs/public-key.pem
     key-path: /client-certs/private-key.pem

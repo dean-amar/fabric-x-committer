@@ -43,7 +43,7 @@ type (
 		csStream               servicepb.Coordinator_BlockProcessingClient
 		streamCancel           context.CancelFunc
 		dbEnv                  *vc.DatabaseTestEnv
-		sigVerifiers           []*mock.SigVerifier
+		verifier               *mock.Verifier
 		sigVerifierGrpcServers *test.GrpcServers
 	}
 
@@ -81,7 +81,7 @@ func TestCoordinatorSecureConnection(t *testing.T) {
 
 func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEnv {
 	t.Helper()
-	svs, svServers := mock.StartMockSVService(t, tConfig.numSigService)
+	verifier, svServers := mock.StartMockVerifierService(t, tConfig.numSigService)
 
 	vcServerConfigs := make([]*connection.ServerConfig, 0, tConfig.numVcService)
 	var vcsTestEnv *vc.ValidatorAndCommitterServiceTestEnv
@@ -107,7 +107,7 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 		},
 		ChannelBufferSizePerGoroutine: 2000,
 		Monitoring: monitoring.Config{
-			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
+			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
 		},
 	}
 
@@ -115,7 +115,7 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 		coordinator:            NewCoordinatorService(c),
 		config:                 c,
 		dbEnv:                  dbEnv,
-		sigVerifiers:           svs,
+		verifier:               verifier,
 		sigVerifierGrpcServers: svServers,
 	}
 }
@@ -141,7 +141,7 @@ func (e *coordinatorTestEnv) startServiceWithCreds(
 ) {
 	t.Helper()
 	cs := e.coordinator
-	e.coordinator.config.Server = connection.NewLocalHostServerWithTLS(serverCreds)
+	e.coordinator.config.Server = connection.NewLocalHostServer(serverCreds)
 
 	test.RunServiceAndGrpcForTest(ctx, t, cs, e.coordinator.config.Server)
 }
@@ -163,21 +163,26 @@ func (e *coordinatorTestEnv) createNamespaces(t *testing.T, blkNum int, nsIDs ..
 	require.NoError(t, err)
 
 	blockNum := uint64(blkNum) //nolint:gosec // int -> uint64.
-	blk := &servicepb.CoordinatorBatch{}
-	blk.Txs = append(blk.Txs, &servicepb.TxWithRef{
-		Ref: committerpb.NewTxRef(uuid.NewString(), blockNum, 0),
-		Content: &applicationpb.Tx{
-			Namespaces: []*applicationpb.TxNamespace{{
-				NsId: committerpb.ConfigNamespaceID,
-				ReadWrites: []*applicationpb.ReadWrite{{
-					Key:   []byte(committerpb.ConfigKey),
-					Value: pBytes,
-				}},
-			}},
+	b0 := &servicepb.CoordinatorBatch{
+		Txs: []*servicepb.TxWithRef{
+			{
+				Ref: committerpb.NewTxRef(uuid.NewString(), blockNum, 0),
+				Content: &applicationpb.Tx{
+					Namespaces: []*applicationpb.TxNamespace{{
+						NsId: committerpb.ConfigNamespaceID,
+						ReadWrites: []*applicationpb.ReadWrite{{
+							Key:   []byte(committerpb.ConfigKey),
+							Value: pBytes,
+						}},
+					}},
+				},
+			},
 		},
-	})
+	}
+
+	b1 := &servicepb.CoordinatorBatch{}
 	for i, nsID := range nsIDs {
-		blk.Txs = append(blk.Txs, &servicepb.TxWithRef{
+		b1.Txs = append(b1.Txs, &servicepb.TxWithRef{
 			Ref: committerpb.NewTxRef(uuid.NewString(), blockNum, uint32(i+1)), //nolint:gosec // int -> uint32.
 			Content: &applicationpb.Tx{
 				Namespaces: []*applicationpb.TxNamespace{{
@@ -191,25 +196,28 @@ func (e *coordinatorTestEnv) createNamespaces(t *testing.T, blkNum int, nsIDs ..
 			},
 		})
 	}
-	for _, tx := range blk.Txs {
-		// The mock verifier verifies that len(tx.Namespace)==len(tx.Signatures)
-		tx.Content.Endorsements = make([]*applicationpb.Endorsements, len(tx.Content.Namespaces))
-	}
 
-	err = e.csStream.Send(blk)
-	require.NoError(t, err)
-	status := make([]*committerpb.TxStatus, 0, len(nsIDs)+1)
-	require.Eventually(t, func() bool {
-		txStatus, receiveErr := e.csStream.Recv()
-		require.NoError(t, receiveErr)
-		require.NotNil(t, txStatus)
-		require.NotNil(t, txStatus.Status)
-		status = append(status, txStatus.Status...)
-		return len(status) == len(nsIDs)+1
-	}, 2*time.Minute, 10*time.Millisecond)
+	for _, b := range []*servicepb.CoordinatorBatch{b0, b1} {
+		for _, tx := range b.Txs {
+			// The mock verifier verifies that len(tx.Namespace)==len(tx.Signatures)
+			tx.Content.Endorsements = make([]*applicationpb.Endorsements, len(tx.Content.Namespaces))
+		}
 
-	for _, s := range status {
-		require.Equal(t, committerpb.Status_COMMITTED.String(), s.Status.String())
+		err = e.csStream.Send(b)
+		require.NoError(t, err)
+		status := make([]*committerpb.TxStatus, 0, len(b.Txs))
+		require.Eventually(t, func() bool {
+			txStatus, receiveErr := e.csStream.Recv()
+			require.NoError(t, receiveErr)
+			require.NotNil(t, txStatus)
+			require.NotNil(t, txStatus.Status)
+			status = append(status, txStatus.Status...)
+			return len(status) == len(b.Txs)
+		}, 2*time.Minute, 10*time.Millisecond)
+
+		for _, s := range status {
+			require.Equal(t, committerpb.Status_COMMITTED.String(), s.Status.String())
+		}
 	}
 }
 
@@ -368,6 +376,23 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 	pBytes, err := proto.Marshal(policy.MakeECDSAThresholdRuleNsPolicy([]byte("publicKey")))
 	require.NoError(t, err)
 
+	b0 := &servicepb.CoordinatorBatch{
+		Txs: []*servicepb.TxWithRef{
+			{
+				Ref: committerpb.NewTxRef("config TX", 0, 0),
+				Content: &applicationpb.Tx{
+					Namespaces: []*applicationpb.TxNamespace{{
+						NsId: committerpb.ConfigNamespaceID,
+						ReadWrites: []*applicationpb.ReadWrite{{
+							Key:   []byte(committerpb.ConfigKey),
+							Value: []byte("config"),
+						}},
+					}},
+				},
+			},
+		},
+	}
+
 	// We send a block with a series of TXs with apparent conflicts, but all should be committed successfully if
 	// executed serially.
 	b1 := &servicepb.CoordinatorBatch{
@@ -470,24 +495,26 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 			},
 		},
 	}
-	for _, tx := range b1.Txs {
-		tx.Content.Endorsements = sigtest.CreateEndorsementsForThresholdRule([]byte("dummy"))
+
+	for _, b := range []*servicepb.CoordinatorBatch{b0, b1} {
+		for _, tx := range b.Txs {
+			tx.Content.Endorsements = sigtest.CreateEndorsementsForThresholdRule([]byte("dummy"))
+		}
+
+		expectedReceived := test.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) + len(b.Txs)
+
+		require.NoError(t, env.csStream.Send(b))
+		require.Eventually(t, func() bool {
+			return test.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) >= expectedReceived
+		}, time.Minute, 500*time.Millisecond)
+
+		status := env.receiveStatus(t, len(b.Txs))
+		for txID, txStatus := range status {
+			require.Equal(t, committerpb.Status_COMMITTED, txStatus.Status, txID)
+		}
+		test.RequireIntMetricValue(t, expectedReceived,
+			env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(committerpb.Status_COMMITTED.String()))
 	}
-
-	expectedReceived := test.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) + len(b1.Txs)
-
-	require.NoError(t, env.csStream.Send(b1))
-	require.Eventually(t, func() bool {
-		return test.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal) >= expectedReceived
-	}, time.Minute, 500*time.Millisecond)
-
-	status := env.receiveStatus(t, len(b1.Txs))
-	for txID, txStatus := range status {
-		require.Equal(t, committerpb.Status_COMMITTED, txStatus.Status, txID)
-	}
-	test.RequireIntMetricValue(t, expectedReceived, env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(
-		committerpb.Status_COMMITTED.String(),
-	))
 
 	res := env.dbEnv.FetchKeys(t, utNsID, [][]byte{mainKey, subKey})
 	mainValue, ok := res[string(mainKey)]
@@ -890,7 +917,8 @@ func TestWaitingTxsCount(t *testing.T) {
 		}, 1*time.Minute, 100*time.Millisecond))
 	}()
 
-	env.sigVerifiers[0].MockFaultyNodeDropSize = 2
+	verifierStreams := requireStreams(t, env.verifier, 1)
+	verifierStreams[0].MockFaultyNodeDropSize = 2
 	err := env.csStream.Send(b)
 	require.NoError(t, err)
 	isSuccess, ok := success.Read()
@@ -907,11 +935,11 @@ func TestWaitingTxsCount(t *testing.T) {
 		return test.CheckServerStopped(t, env.sigVerifierGrpcServers.Configs[0].Endpoint.Address())
 	}, 4*time.Second, 500*time.Millisecond)
 
-	env.sigVerifiers[0].MockFaultyNodeDropSize = 0
-	env.sigVerifierGrpcServers = mock.StartMockSVServiceFromListWithConfig(
+	verifierStreams[0].MockFaultyNodeDropSize = 0
+	env.sigVerifierGrpcServers = mock.StartMockVerifierServiceFromServerConfig(
 		t,
-		env.sigVerifiers,
-		env.sigVerifierGrpcServers.Configs,
+		env.verifier,
+		env.sigVerifierGrpcServers.Configs...,
 	)
 
 	actualTxsStatus := readTxStatus(t, env.csStream, txPerBlock)
@@ -943,12 +971,12 @@ func fakeConfigForTest(t *testing.T) *Config {
 	randomEndpoint, err := connection.NewEndpoint("random:1234")
 	require.NoError(t, err)
 	return &Config{
-		Server:             connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
+		Server:             connection.NewLocalHostServer(test.InsecureTLSConfig),
 		Verifier:           *test.NewTLSMultiClientConfig(test.InsecureTLSConfig, randomEndpoint),
 		ValidatorCommitter: *test.NewTLSMultiClientConfig(test.InsecureTLSConfig, randomEndpoint),
 		DependencyGraph:    &DependencyGraphConfig{},
 		Monitoring: monitoring.Config{
-			Server: connection.NewLocalHostServerWithTLS(test.InsecureTLSConfig),
+			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
 		},
 	}
 }

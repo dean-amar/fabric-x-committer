@@ -70,6 +70,7 @@ func NewViperWithQueryDefaults() *viper.Viper {
 	v.SetDefault("view-aggregation-window", 100*time.Millisecond)
 	v.SetDefault("max-aggregated-views", 1024)
 	v.SetDefault("max-view-timeout", 10*time.Second)
+	v.SetDefault("max-request-keys", 0) // 0 means no limit
 	return v
 }
 
@@ -83,6 +84,9 @@ func NewViperWithServiceDefault(servicePort, monitoringPort int) *viper.Viper {
 	v := NewViperWithLoggingDefault()
 	v.SetDefault("server.endpoint", &connection.Endpoint{Host: "localhost", Port: servicePort})
 	v.SetDefault("monitoring.server.endpoint", &connection.Endpoint{Host: "localhost", Port: monitoringPort})
+	// Rate limiting disabled by default (0 = disabled)
+	v.SetDefault("server.rate-limit", &connection.RateLimitConfig{})
+	v.SetDefault("monitoring.server.rate-limit", &connection.RateLimitConfig{})
 	return v
 }
 

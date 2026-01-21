@@ -116,32 +116,30 @@ func StartGrpcServersForTest(
 	ctx context.Context,
 	t *testing.T,
 	numService int,
-	register func(*grpc.Server, int),
+	register func(*grpc.Server),
 	serverCreds connection.TLSConfig,
 ) *GrpcServers {
 	t.Helper()
 	sc := make([]*connection.ServerConfig, numService)
 	for i := range sc {
-		sc[i] = connection.NewLocalHostServerWithTLS(serverCreds)
+		sc[i] = connection.NewLocalHostServer(serverCreds)
 	}
-	return StartGrpcServersWithConfigForTest(ctx, t, sc, register)
+	return StartGrpcServersWithConfigForTest(ctx, t, register, sc...)
 }
 
 // StartGrpcServersWithConfigForTest starts multiple GRPC servers with given configurations.
 func StartGrpcServersWithConfigForTest(
-	ctx context.Context, t *testing.T, sc []*connection.ServerConfig, register func(*grpc.Server, int),
+	ctx context.Context, t *testing.T, register func(*grpc.Server), sc ...*connection.ServerConfig,
 ) *GrpcServers {
 	t.Helper()
 	grpcServers := make([]*grpc.Server, len(sc))
+	if register == nil {
+		register = func(server *grpc.Server) {
+			healthgrpc.RegisterHealthServer(server, connection.DefaultHealthCheckService())
+		}
+	}
 	for i, s := range sc {
-		i := i
-		grpcServers[i] = RunGrpcServerForTest(ctx, t, s, func(server *grpc.Server) {
-			if register != nil {
-				register(server, i)
-			} else {
-				healthgrpc.RegisterHealthServer(server, connection.DefaultHealthCheckService())
-			}
-		})
+		grpcServers[i] = RunGrpcServerForTest(ctx, t, s, register)
 	}
 	return &GrpcServers{
 		Servers: grpcServers,
@@ -169,17 +167,15 @@ func RunServiceForTest(
 	tb.Cleanup(wg.Wait)
 	dCtx, cancel := context.WithCancel(ctx)
 	tb.Cleanup(cancel)
-	wg.Add(1)
 
 	// We extract caller information to ensure we have sufficient information for debugging.
 	pc, file, no, ok := runtime.Caller(1)
 	require.True(tb, ok)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer doneFlag.SignalReady()
 		// We use assert to prevent panicking for cleanup errors.
 		assert.NoErrorf(tb, service(dCtx), "called from %s:%d\n\t%s", file, no, runtime.FuncForPC(pc).Name())
-	}()
+	})
 
 	if waitFunc == nil {
 		return doneFlag
@@ -276,11 +272,11 @@ func NewSecuredConnectionWithRetry(
 	retry connection.RetryProfile,
 ) *grpc.ClientConn {
 	t.Helper()
-	tlsCreds, err := tlsConfig.ClientCredentials()
+	clientCreds, err := tlsConfig.ClientCredentials()
 	require.NoError(t, err)
 	conn, err := connection.NewConnection(connection.Parameters{
 		Address: endpoint.Address(),
-		Creds:   tlsCreds,
+		Creds:   clientCreds,
 		Retry:   &retry,
 	})
 	require.NoError(t, err)

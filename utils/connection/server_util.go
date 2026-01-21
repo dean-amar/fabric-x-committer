@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-const grpcProtocol = "tcp"
+const tcpProtocol = "tcp"
 
 type (
 	// Service describes the method that are required for a service to run.
@@ -40,8 +40,8 @@ var listenRetry = RetryProfile{
 	MaxElapsedTime:  2 * time.Minute,
 }
 
-// NewLocalHostServerWithTLS returns a default server config with endpoint "localhost:0" given server credentials.
-func NewLocalHostServerWithTLS(creds TLSConfig) *ServerConfig {
+// NewLocalHostServer returns a default server config with endpoint "localhost:0" given server credentials.
+func NewLocalHostServer(creds TLSConfig) *ServerConfig {
 	return &ServerConfig{
 		Endpoint: *NewLocalHost(),
 		TLS:      creds,
@@ -56,6 +56,15 @@ func (c *ServerConfig) GrpcServer() (*grpc.Server, error) {
 		return nil, errors.Wrapf(err, "failed loading the server's grpc credentials")
 	}
 	opts = append(opts, grpc.Creds(serverGrpcTransportCreds))
+
+	if err := c.RateLimit.Validate(); err != nil {
+		return nil, errors.Wrap(err, "invalid rate limit configuration")
+	}
+	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
+		opts = append(opts, grpc.UnaryInterceptor(RateLimitInterceptor(limiter)))
+		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
+			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
+	}
 
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
 		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
@@ -85,11 +94,11 @@ func (c *ServerConfig) Listener(ctx context.Context) (net.Listener, error) {
 	var err error
 	var listener net.Listener
 	if c.Endpoint.Port == 0 {
-		listener, err = net.Listen(grpcProtocol, c.Endpoint.Address())
+		listener, err = net.Listen(tcpProtocol, c.Endpoint.Address())
 	} else {
 		err = listenRetry.Execute(ctx, func() error {
 			var listenErr error
-			listener, listenErr = net.Listen(grpcProtocol, c.Endpoint.Address())
+			listener, listenErr = net.Listen(tcpProtocol, c.Endpoint.Address())
 			return listenErr
 		})
 	}
@@ -104,7 +113,7 @@ func (c *ServerConfig) Listener(ctx context.Context) (net.Listener, error) {
 	}
 	c.Endpoint.Port = tcpAddress.Port
 
-	logger.Infof("Listening on: %s://%s", grpcProtocol, c.Endpoint.String())
+	logger.Infof("Listening on: %s://%s", tcpProtocol, c.Endpoint.String())
 	return listener, nil
 }
 
