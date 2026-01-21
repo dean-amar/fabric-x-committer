@@ -42,15 +42,17 @@ type (
 		DB        DatabaseConfig
 
 		// Per service configurations.
-		BlockSize         uint64                  // orderer, loadgen
-		BlockTimeout      time.Duration           // orderer
-		ConfigBlockPath   string                  // orderer, sidecar, loadgen
-		LedgerPath        string                  // sidecar
-		Policy            *workload.PolicyProfile // loadgen
-		LoadGenBlockLimit uint64                  // loadgen
-		LoadGenTXLimit    uint64                  // loadgen
-		LoadGenWorkers    uint64                  // loadgen
-		Logging           *logging.Config         // for all
+		BlockSize         uint64                      // orderer, loadgen
+		BlockTimeout      time.Duration               // orderer
+		ConfigBlockPath   string                      // orderer, sidecar, loadgen
+		LedgerPath        string                      // sidecar
+		Policy            *workload.PolicyProfile     // loadgen
+		LoadGenBlockLimit uint64                      // loadgen
+		LoadGenTXLimit    uint64                      // loadgen
+		LoadGenWorkers    uint64                      // loadgen
+		Logging           *logging.Config             // for all
+		RateLimit         *connection.RateLimitConfig // query, sidecar
+		MaxRequestKeys    int                         // query
 	}
 
 	// SystemEndpoints represents the endpoints of the system.

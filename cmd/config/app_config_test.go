@@ -312,6 +312,7 @@ func TestReadConfigQuery(t *testing.T) {
 			ViewAggregationWindow: 100 * time.Millisecond,
 			MaxAggregatedViews:    1024,
 			MaxViewTimeout:        10 * time.Second,
+			MaxRequestKeys:        10000,
 		},
 	}}
 
@@ -346,7 +347,8 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
 		expectedConfig: &loadgen.ClientConfig{
-			Server: newServerConfigWithDefaultTLS(8001),
+			Server:     newServerConfigWithDefaultTLS(8001),
+			HTTPServer: newServerConfig("", 6997),
 			Monitoring: metrics.Config{
 				Config: newMonitoringConfig("", 2118),
 				Latency: metrics.LatencyConfig{
@@ -385,8 +387,12 @@ func TestReadConfigLoadGen(t *testing.T) {
 				},
 			},
 			LoadProfile: &workload.Profile{
-				Key:   workload.KeyProfile{Size: 32},
-				Block: workload.BlockProfile{Size: 500},
+				Key: workload.KeyProfile{Size: 32},
+				Block: workload.BlockProfile{
+					MaxSize:       500,
+					MinSize:       10,
+					PreferredRate: time.Second,
+				},
 				Transaction: workload.TransactionProfile{
 					ReadWriteCount: workload.NewConstantDistribution(2),
 				},
@@ -411,10 +417,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 				Workers: 1,
 			},
 			Stream: &workload.StreamOptions{
-				RateLimit: &workload.LimiterConfig{
-					Endpoint:     *newEndpoint("", 6997),
-					InitialLimit: 10_000,
-				},
+				RateLimit:   10_000,
 				BuffersSize: 10,
 				GenBatch:    10,
 			},

@@ -7,14 +7,29 @@ server:
   # The server's endpoint configuration
   endpoint: :7001
   tls:
+    # TLS configuration being built based on the tls mode chosen: none, tls, mtls.
     mode: mtls
     cert-path: /server-certs/public-key.pem
     key-path: /server-certs/private-key.pem
     ca-cert-paths:
       - /server-certs/ca-certificate.pem
+  # Rate limiting configuration for unary gRPC endpoints.
+  # Uses a token bucket algorithm to limit the number of requests per second.
+  rate-limit:
+    # Maximum number of requests per second allowed.
+    # Set to 0 to disable rate limiting.
+    requests-per-second: 0
+    # Maximum number of requests allowed in a single burst.
+    # When rate limiting is enabled (requests-per-second > 0):
+    #   - Must be greater than 0
+    #   - Must be less than or equal to requests-per-second
+    burst: 0
 monitoring:
   server:
     endpoint: :2117
+    rate-limit:
+      requests-per-second: 0
+      burst: 0
 
 database:
   endpoints:
@@ -24,6 +39,7 @@ database:
   password: "yugabyte" # The password for the database
   database: "yugabyte" # The database name
   tls:
+    # Database TLS configuration being built based on the tls mode chosen: none, tls.
     mode: tls
     ca-cert-path: /server-certs/ca-certificate.pem
   max-connections: 10 # The maximum size of the connection pool
@@ -73,6 +89,13 @@ max-batch-wait: 100ms            # A batch will execute once it waited this much
 view-aggregation-window: 100ms   # A new view will be created if the previous view was created before this much time.
 max-aggregated-views: 1024       # A new view will be created if the previous view aggregated this number of views.
 max-view-timeout: 10s            # A view will be closed if it was opened for longer than this time.
+
+# Maximum number of keys allowed in a single query request.
+# This applies to both GetRows (total keys across all namespaces) and
+# GetTransactionStatus (number of transaction IDs).
+# Large key sets can cause high latency, memory spikes, and potential timeouts.
+# Set to 0 to disable the limit (not recommended for production).
+max-request-keys: 10000
 
 logging:
   enabled: true
