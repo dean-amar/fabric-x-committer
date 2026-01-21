@@ -268,7 +268,7 @@ func startLoadgenNodeWithReleaseImage(
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
-				fmt.Sprintf("%s:/client-certs/ca-certificate.pem",
+				fmt.Sprintf("%s:/client-certs/orderer-creds-ca.pem",
 					filepath.Join(params.ordererServerCredsPath, "ca.crt"),
 				),
 			),
