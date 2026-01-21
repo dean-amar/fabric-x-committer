@@ -43,6 +43,8 @@ const (
 	containerPathForYugabytePassword = "/root/var/data/yugabyted_credentials.txt" //nolint:gosec
 
 	defaultDBPort = "5433"
+
+	org0ServerPaths = "ordererOrganizations/orderer-org-0/orderers/orderer-0-org-0/tls"
 )
 
 // enforcePostgresSSLAndReloadConfigScript enforces SSL-only client connections to a PostgreSQL
@@ -67,6 +69,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	c, err := config.ReadLoadGenYamlAndSetupLogging(v, filepath.Join(localConfigPath, "loadgen.yaml"))
 	require.NoError(t, err)
 	c.LoadProfile.Policy.CryptoMaterialPath = t.TempDir()
+	c.LoadProfile.Policy.PeerOrganizationCount = 1
 	configBlock, err := workload.CreateConfigBlock(&c.LoadProfile.Policy)
 	require.NoError(t, err)
 	require.NoError(t, configtxgen.WriteOutputBlock(configBlock, configBlockPath))
@@ -75,6 +78,8 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	ordererNode := "orderer"
 	loadgenNode := "loadgen"
 	committerNodes := []string{"verifier", "vc", "query", "coordinator", "sidecar"}
+
+	ordererServerCreds := filepath.Join(c.LoadProfile.Policy.CryptoMaterialPath, org0ServerPaths)
 
 	credsFactory := test.NewCredentialsFactory(t)
 	for _, dbType := range []string{dbtest.YugaDBType, dbtest.PostgresDBType} {
@@ -91,11 +96,12 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 					})
 
 					params := startNodeParameters{
-						credsFactory:    credsFactory,
-						networkName:     networkName,
-						tlsMode:         mode,
-						configBlockPath: configBlockPath,
-						dbType:          dbType,
+						credsFactory:           credsFactory,
+						networkName:            networkName,
+						tlsMode:                mode,
+						configBlockPath:        configBlockPath,
+						dbType:                 dbType,
+						ordererServerCredsPath: ordererServerCreds,
 					}
 
 					for _, node := range append(committerNodes, dbNode, ordererNode, loadgenNode) {
@@ -212,6 +218,7 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, param
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
+				fmt.Sprintf("%s:/%s", params.configBlockPath, filepath.Join(containerConfigPath, genBlockFile)),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
@@ -261,6 +268,9 @@ func startLoadgenNodeWithReleaseImage(
 				fmt.Sprintf("%s.yaml:/%s.yaml",
 					filepath.Join(mustGetWD(t), localConfigPath, params.node), configPath,
 				),
+				fmt.Sprintf("%s:/client-certs/ca-certificate.pem",
+					filepath.Join(params.ordererServerCredsPath, "ca.crt"),
+				),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
@@ -289,6 +299,13 @@ func startCommitterNodeWithTestImage(
 			NetworkMode: container.NetworkMode(params.networkName),
 			Binds: assembleBinds(t, params,
 				fmt.Sprintf("%s:/%s", params.configBlockPath, filepath.Join(containerConfigPath, genBlockFile)),
+				// we mount them one by one because we already created a volume inside the container /server-certs.
+				fmt.Sprintf("%s:/server-certs/public-key.pem",
+					filepath.Join(params.ordererServerCredsPath, "server.crt"),
+				),
+				fmt.Sprintf("%s:/server-certs/private-key.pem",
+					filepath.Join(params.ordererServerCredsPath, "server.key"),
+				),
 			),
 		},
 		name: assembleContainerName(params.node, params.tlsMode, params.dbType),
