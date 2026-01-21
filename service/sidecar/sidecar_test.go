@@ -57,6 +57,7 @@ type sidecarTestConfig struct {
 	NumFakeService     int
 	NumHolders         int
 	SubmitGenesisBlock bool
+	SetCommonRotCA     bool
 	ServerTLS          connection.TLSConfig
 	ClientTLS          connection.TLSConfig
 }
@@ -167,7 +168,9 @@ func newSidecarTestEnvWithTLS(
 		genesisBlockFilePath = ordererEnv.ConfigBlockPath
 		initOrdererOrganizations = nil
 	}
-	//conf.ClientTLS.CACertPaths = append(conf.ClientTLS.CACertPaths, ordererEnv.RootCA)
+	if conf.SetCommonRotCA {
+		conf.ClientTLS.CACertPaths = append(conf.ClientTLS.CACertPaths, ordererEnv.RootCA)
+	}
 	sidecarConf := &Config{
 		Server:    connection.NewLocalHostServer(sidecarServerTLS),
 		Committer: test.NewInsecureClientConfig(&coordinatorServer.Configs[0].Endpoint),
@@ -281,7 +284,8 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
 			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
-				NumService: 3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
+				SetCommonRotCA: true,
+				NumService:     3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			t.Cleanup(cancel)
@@ -294,17 +298,20 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			expectedBlock++
 
 			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
-				newPolicy := env.ordererEnv.Policy
-				if len(endpoints) == 0 {
-					endpoints = env.ordererEnv.AllEndpoints()
-				}
-				newPolicy.OrdererEndpoints = endpoints
-				configBlock, err := workload.CreateConfigBlock(newPolicy)
-				require.NotNil(t, configBlock)
-				require.NoError(t, err, "failed to create config block")
-				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
-				env.ordererEnv.Policy = newPolicy
-				//env.ordererEnv.SubmitConfigBlock(t, configBlock)
+				//newPolicy := env.ordererEnv.Policy
+				//if len(endpoints) == 0 {
+				//	endpoints = env.ordererEnv.AllEndpoints()
+				//}
+				//newPolicy.ChannelID = env.ordererEnv.TestConfig.ChanID
+				//newPolicy.OrdererEndpoints = endpoints
+				//configBlock, err := workload.CreateConfigBlock(newPolicy)
+				//require.NotNil(t, configBlock)
+				//require.NoError(t, err, "failed to create config block")
+				//require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
+				//env.ordererEnv.Policy = newPolicy
+				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
+					OrdererEndpoints: endpoints,
+				})
 			}
 
 			t.Log("Update the sidecar to use a second orderer group")
