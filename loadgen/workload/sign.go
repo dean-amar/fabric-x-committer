@@ -54,7 +54,7 @@ func NewTxEndorser(policy *PolicyProfile) *TxEndorser {
 	endorsers := make(map[string]*sigtest.NsEndorser, len(nsPolicies))
 	policies := make(map[string]*applicationpb.NamespacePolicy, len(nsPolicies))
 	for nsID, p := range nsPolicies {
-		endorsers[nsID], policies[nsID] = newPolicyEndorser(policy.CryptoMaterialPath, p)
+		endorsers[nsID], policies[nsID] = NewPolicyEndorser(policy.CryptoMaterialPath, p)
 	}
 
 	return &TxEndorser{
@@ -82,9 +82,9 @@ func (e *TxEndorser) Endorse(txID string, tx *applicationpb.Tx) {
 	}
 }
 
-// newPolicyEndorser creates a new [sigtest.NsEndorser] and its [applicationpb.NamespacePolicy]
+// NewPolicyEndorser creates a new [sigtest.NsEndorser] and its [applicationpb.NamespacePolicy]
 // given a workload profile and a seed.
-func newPolicyEndorser(cryptoPath string, profile *Policy) (*sigtest.NsEndorser, *applicationpb.NamespacePolicy) {
+func NewPolicyEndorser(cryptoPath string, profile *Policy) (*sigtest.NsEndorser, *applicationpb.NamespacePolicy) {
 	if profile == nil {
 		profile = &defaultPolicy
 	}

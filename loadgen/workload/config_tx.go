@@ -102,7 +102,7 @@ func prepareCryptoMaterial(policy *PolicyProfile) error {
 		return nil
 	}
 
-	_, metaPolicy := newPolicyEndorser(policy.CryptoMaterialPath, policy.NamespacePolicies[committerpb.MetaNamespaceID])
+	_, metaPolicy := NewPolicyEndorser(policy.CryptoMaterialPath, policy.NamespacePolicies[committerpb.MetaNamespaceID])
 	_, err = CreateDefaultConfigBlockWithCrypto(policy.CryptoMaterialPath, &ConfigBlock{
 		MetaNamespaceVerificationKey: metaPolicy.GetThresholdRule().GetPublicKey(),
 		OrdererEndpoints:             policy.OrdererEndpoints,

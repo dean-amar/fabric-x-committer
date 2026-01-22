@@ -52,8 +52,11 @@ func TestBroadcastDeliver(t *testing.T) {
 			// We use a short retry grpc-config to shorten the test time.
 			ordererService, servers, conf := makeConfig(t, serverTLSConfig, clientTLSConfig)
 
-			// Set the orderer client credentials.
-			conf.TLS = ordererconn.TLSConfigToOrdererTLSConfig(clientTLSConfig)
+			clientTLSConfig.CACertPaths = conf.TLS.CommonCACertPaths
+
+			//// Set the orderer client credentials.
+			//conf.TLS = ordererconn.TLSConfigToOrdererTLSConfig(clientTLSConfig)
+
 			allEndpoints := conf.Organizations["org"].Endpoints
 			// We only take the bottom endpoints for now.
 			// Later we take the other endpoints and update the client.
@@ -216,13 +219,15 @@ func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
 	instanceCount := idCount * serverPerID
 	t.Logf("Instance count: %d; idCount: %d", instanceCount, idCount)
 
-	ordererService, ordererServer, _, _, _, _ := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
+	ordererService, ordererServer, orderersRootCA, _ := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
 		NumService:      instanceCount,
 		TLS:             serverTLS,
 		BlockSize:       1,
 		SendConfigBlock: true,
 	})
 	require.Len(t, ordererServer.Servers, instanceCount)
+
+	clientTLS.CACertPaths = append(clientTLS.CACertPaths, orderersRootCA)
 
 	conf := ordererconn.Config{
 		ChannelID:     channelForTest,
@@ -231,6 +236,8 @@ func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
 		TLS:           ordererconn.TLSConfigToOrdererTLSConfig(clientTLS),
 		Organizations: map[string]*ordererconn.OrganizationConfig{
 			"org": {
+				//// setting manually the orderers Root CA.
+				//CACerts: append(clientTLS.CACertPaths, orderersRootCA),
 				CACerts: clientTLS.CACertPaths,
 			},
 		},
