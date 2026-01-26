@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -102,7 +103,10 @@ func RunGrpcServerForTest(
 	go func() {
 		defer wg.Done()
 		// We use assert to prevent panicking for cleanup errors.
-		assert.NoError(tb, server.Serve(listener))
+		err := server.Serve(listener)
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			assert.NoError(tb, err)
+		}
 	}()
 
 	_ = context.AfterFunc(ctx, func() {

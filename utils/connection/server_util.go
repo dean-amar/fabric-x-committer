@@ -88,7 +88,9 @@ func (c *ServerConfig) GrpcServer() (*grpc.Server, error) {
 // If the port is predefined, it will retry to bind to the port until successful or until the context ends.
 func (c *ServerConfig) Listener(ctx context.Context) (net.Listener, error) {
 	if c.preAllocatedListener != nil {
-		return c.preAllocatedListener, nil
+		l := c.preAllocatedListener
+		c.preAllocatedListener = nil
+		return l, nil
 	}
 
 	var err error

@@ -273,7 +273,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					clientConf := DefaultClientConf(t)
 					clientConf.Limit = limit
 					// Start dependencies
-					orderer, ordererServer, _, _ := mock.StartMockOrderingServices(
+					orderer, ordererServer, ordererRootCA, _ := mock.StartMockOrderingServices(
 						t, &mock.OrdererConfig{NumService: 3, TLS: serverTLSConfig, BlockSize: 100},
 					)
 					_, coordinatorServer := mock.StartMockCoordinatorService(t)
@@ -298,7 +298,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 							Organizations: map[string]*ordererconn.OrganizationConfig{
 								"org": {
 									Endpoints: endpoints,
-									CACerts:   clientTLSConfig.CACertPaths,
+									CACerts:   append(clientTLSConfig.CACertPaths, ordererRootCA),
 								},
 							},
 						},

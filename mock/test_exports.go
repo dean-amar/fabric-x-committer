@@ -115,7 +115,7 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 	require.NoError(t, err, "failed to create config block")
 	require.NotNil(t, service.ConfigBlock)
 
-	// start the orderer service after changing the config-block.
+	// start the orderer service after updating the config-block.
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
 		return connection.FilterStreamRPCError(service.Run(ctx))
 	}, service.WaitForReady)

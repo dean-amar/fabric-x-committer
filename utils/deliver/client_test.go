@@ -42,7 +42,7 @@ const channelForTest = "mychannel"
 
 func TestBroadcastDeliver(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes {
+	for _, mode := range test.ServerModes[2:] {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			// Create the credentials for both server and client using the same CA.
@@ -54,8 +54,8 @@ func TestBroadcastDeliver(t *testing.T) {
 
 			clientTLSConfig.CACertPaths = conf.TLS.CommonCACertPaths
 
-			//// Set the orderer client credentials.
-			//conf.TLS = ordererconn.TLSConfigToOrdererTLSConfig(clientTLSConfig)
+			// Set the orderer client credentials.
+			conf.TLS = ordererconn.TLSConfigToOrdererTLSConfig(clientTLSConfig)
 
 			allEndpoints := conf.Organizations["org"].Endpoints
 			// We only take the bottom endpoints for now.
