@@ -38,7 +38,7 @@ func TestConfigUpdate(t *testing.T) {
 	})
 	ordererServers := make([]*connection.ServerConfig, len(c.SystemConfig.Endpoints.Orderer))
 	for i, e := range c.SystemConfig.Endpoints.Orderer {
-		ordererServers[i] = &connection.ServerConfig{Endpoint: *e.Server}
+		ordererServers[i] = &connection.ServerConfig{Endpoint: *e.Server, TLS: c.SystemConfig.ServiceTLS}
 	}
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
