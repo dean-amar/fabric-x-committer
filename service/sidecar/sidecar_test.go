@@ -254,11 +254,11 @@ func TestSidecar(t *testing.T) {
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
 			for _, conf := range []sidecarTestConfig{
 				{SubmitGenesisBlock: false},
-				//{SubmitGenesisBlock: true},
-				//{
-				//	SubmitGenesisBlock: true,
-				//	NumFakeService:     3,
-				//},
+				{SubmitGenesisBlock: true},
+				{
+					SubmitGenesisBlock: true,
+					NumFakeService:     3,
+				},
 			} {
 				t.Run(conf.String(), func(t *testing.T) {
 					t.Parallel()
@@ -278,13 +278,13 @@ func TestSidecar(t *testing.T) {
 
 func TestSidecarConfigUpdate(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes[2:] {
+	for _, mode := range test.ServerModes {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
 			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
-				SetCommonRotCA: true,
-				NumService:     3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
+				//SetCommonRotCA: true,
+				NumService: 3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			t.Cleanup(cancel)

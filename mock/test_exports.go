@@ -111,29 +111,29 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 		PeerOrganizationCount: 1,
 	}
 
-	//service.ConfigBlock, err = workload.CreateConfigBlock(policy)
-	//require.NoError(t, err, "failed to create config block")
-	//require.NotNil(t, service.ConfigBlock)
+	service.ConfigBlock, err = workload.CreateConfigBlock(policy)
+	require.NoError(t, err, "failed to create config block")
+	require.NotNil(t, service.ConfigBlock)
 
 	// start the orderer service after updating the config-block.
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
 		return connection.FilterStreamRPCError(service.Run(ctx))
 	}, service.WaitForReady)
 
-	//// updating the orderer sever-configs with the generated TLS credentials.
-	//for i, ordererServer := range ordererServers {
-	//
-	//	certDir := filepath.Join(
-	//		policy.CryptoMaterialPath,
-	//		"ordererOrganizations", "orderer-org-0",
-	//		"orderers", fmt.Sprintf("orderer-%d-org-0", i),
-	//		"tls",
-	//	)
-	//
-	//	// override cert and key paths.
-	//	ordererServer.TLS.CertPath = filepath.Join(certDir, "server.crt")
-	//	ordererServer.TLS.KeyPath = filepath.Join(certDir, "server.key")
-	//}
+	// updating the orderer sever-configs with the generated TLS credentials.
+	for i, ordererServer := range ordererServers {
+
+		certDir := filepath.Join(
+			policy.CryptoMaterialPath,
+			"ordererOrganizations", "orderer-org-0",
+			"orderers", fmt.Sprintf("orderer-%d-org-0", i),
+			"tls",
+		)
+
+		// override cert and key paths.
+		ordererServer.TLS.CertPath = filepath.Join(certDir, "server.crt")
+		ordererServer.TLS.KeyPath = filepath.Join(certDir, "server.key")
+	}
 
 	servers := test.StartGrpcServersWithConfigForTest(
 		t.Context(),
