@@ -65,6 +65,7 @@ func NewOrganizationsMaterialsFromEnvelope(envelope *common.Envelope) ([]*Organi
 		return nil, errors.Wrap(err, "failed to create config bundle")
 	}
 	ordererCfg, ok := bundle.OrdererConfig()
+
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}

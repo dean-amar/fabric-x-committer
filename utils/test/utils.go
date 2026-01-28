@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"google.golang.org/protobuf/proto"
 	"io/fs"
 	"maps"
 	"net"
@@ -17,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +40,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
+	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 )
 
 var (
@@ -485,4 +489,110 @@ func WalkDirectory(root string) {
 	if err != nil {
 		fmt.Printf("Error walking the path %q: %v\n", root, err)
 	}
+}
+
+// PatchOrdererOrgEndpointsInConfigBlock updates /Channel/Orderer/<orgID>/Endpoints (cb.OrdererAddresses)
+// If orgID == "", it picks the first existing orderer org group (sorted by name) for determinism.
+func PatchOrdererOrgEndpointsInConfigBlock(block *common.Block, orgID string, addresses []string) (*common.Block, error) {
+	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
+		return nil, fmt.Errorf("invalid block: empty data")
+	}
+
+	out := proto.Clone(block).(*common.Block)
+
+	// Envelope -> Payload -> ConfigEnvelope
+	env := &common.Envelope{}
+	if err := proto.Unmarshal(out.Data.Data[0], env); err != nil {
+		return nil, fmt.Errorf("unmarshal envelope: %w", err)
+	}
+	pl := &common.Payload{}
+	if err := proto.Unmarshal(env.Payload, pl); err != nil {
+		return nil, fmt.Errorf("unmarshal payload: %w", err)
+	}
+	cfgEnv := &common.ConfigEnvelope{}
+	if err := proto.Unmarshal(pl.Data, cfgEnv); err != nil {
+		return nil, fmt.Errorf("unmarshal config envelope: %w", err)
+	}
+	if cfgEnv.Config == nil || cfgEnv.Config.ChannelGroup == nil {
+		return nil, fmt.Errorf("missing config/channel group")
+	}
+
+	ch := cfgEnv.Config.ChannelGroup
+	ordererGrp, ok := ch.Groups["Orderer"]
+	if !ok || ordererGrp == nil {
+		return nil, fmt.Errorf(`missing group "/Channel/Orderer"`)
+	}
+	if ordererGrp.Groups == nil || len(ordererGrp.Groups) == 0 {
+		return nil, fmt.Errorf(`"/Channel/Orderer" has no org groups`)
+	}
+
+	// Pick orgID if not provided.
+	if orgID == "" {
+		keys := make([]string, 0, len(ordererGrp.Groups))
+		for k := range ordererGrp.Groups {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		orgID = keys[0]
+	}
+
+	orgGrp, ok := ordererGrp.Groups[orgID]
+	if !ok || orgGrp == nil {
+		return nil, fmt.Errorf(`missing group "/Channel/Orderer/%s" (existing: %v)`, orgID, mapKeys(ordererGrp.Groups))
+	}
+
+	// Marshal the new endpoints as cb.OrdererAddresses.
+	addrs := &common.OrdererAddresses{Addresses: addresses}
+	addrsBytes, err := proto.Marshal(addrs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal OrdererAddresses: %w", err)
+	}
+
+	if orgGrp.Values == nil {
+		orgGrp.Values = map[string]*common.ConfigValue{}
+	}
+	cv := orgGrp.Values["Endpoints"]
+	if cv == nil {
+		cv = &common.ConfigValue{ModPolicy: "Admins"} // fine for tests
+		orgGrp.Values["Endpoints"] = cv
+	}
+	cv.Value = addrsBytes
+
+	// Re-wrap.
+	newCfgEnvBytes, err := proto.Marshal(cfgEnv)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config envelope: %w", err)
+	}
+	pl.Data = newCfgEnvBytes
+
+	newPayloadBytes, err := proto.Marshal(pl)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+	env.Payload = newPayloadBytes
+
+	newEnvBytes, err := proto.Marshal(env)
+	if err != nil {
+		return nil, fmt.Errorf("marshal envelope: %w", err)
+	}
+	out.Data.Data[0] = newEnvBytes
+
+	return out, nil
+}
+
+func mapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func EndpointsToStrings(eps []*commontypes.OrdererEndpoint) []string {
+	out := make([]string, 0, len(eps))
+	for _, ep := range eps {
+		out = append(out, ep.String())
+	}
+	return out
 }

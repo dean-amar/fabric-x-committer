@@ -283,7 +283,6 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
 			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
-				//SetCommonRotCA: true,
 				NumService: 3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -297,6 +296,16 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			expectedBlock++
 
 			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
+				t.Logf("submitting eps: %v", endpoints)
+
+				patched, err := test.PatchOrdererOrgEndpointsInConfigBlock(
+					env.ordererEnv.Orderer.ConfigBlock,
+					"", // auto-detect orgID from the block
+					test.EndpointsToStrings(endpoints),
+				)
+				require.NoError(t, err)
+				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), patched))
+
 				//_, metaPolicy := workload.NewPolicyEndorser(env.ordererEnv.Policy.CryptoMaterialPath, env.ordererEnv.Policy.NamespacePolicies[committerpb.MetaNamespaceID])
 				//configBlock, err := workload.CreateDefaultConfigBlockWithCrypto(env.ordererEnv.Policy.CryptoMaterialPath, &workload.ConfigBlock{
 				//	MetaNamespaceVerificationKey: metaPolicy.GetThresholdRule().GetPublicKey(),
@@ -304,12 +313,13 @@ func TestSidecarConfigUpdate(t *testing.T) {
 				//	ChannelID:                    env.ordererEnv.Policy.ChannelID,
 				//	PeerOrganizationCount:        env.ordererEnv.Policy.PeerOrganizationCount,
 				//})
+				//workload.CreateConfigBlock(env.ordererEnv.Policy)
 				//require.NoError(t, err)
 				//require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
-
-				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-					OrdererEndpoints: endpoints,
-				})
+				//
+				//env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
+				//	OrdererEndpoints: endpoints,
+				//})
 			}
 
 			t.Log("Update the sidecar to use a second orderer group")
@@ -330,7 +340,8 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				t.Fatal("context deadline exceeded")
-			case <-env.committedBlock:
+			case b := <-env.committedBlock:
+				t.Logf("data-length: %v", len(b.Data.Data))
 				t.Fatal("the sidecar cannot receive blocks since its orderer holds them")
 			case <-time.After(expectedProcessingTime):
 				t.Log("Fantastic")
@@ -863,15 +874,4 @@ func TestSidecarRecoveryUpdatesOrdererEndpointsBeforeLedgerRecovery(t *testing.T
 
 	t.Log("9. Verify normal operation continues with recovered state")
 	env.sendTransactionsAndEnsureCommitted(newCtx, t, 11)
-}
-
-func DeepCopyTLSConfig(toCopy connection.TLSConfig) connection.TLSConfig {
-	sidecarServerTLS := connection.TLSConfig{
-		Mode:        toCopy.Mode,
-		CertPath:    toCopy.CertPath,
-		KeyPath:     toCopy.KeyPath,
-		CACertPaths: make([]string, len(toCopy.CACertPaths)),
-	}
-	copy(sidecarServerTLS.CACertPaths, toCopy.CACertPaths)
-	return sidecarServerTLS
 }
