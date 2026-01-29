@@ -224,7 +224,7 @@ func makeConfig(t *testing.T, serverTLS, clientTLS connection.TLSConfig) (
 		TLS:             serverTLS,
 		BlockSize:       1,
 		SendConfigBlock: true,
-	})
+	}, nil)
 	require.Len(t, ordererServer.Servers, instanceCount)
 
 	clientTLS.CACertPaths = append(clientTLS.CACertPaths, orderersRootCA)

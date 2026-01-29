@@ -274,7 +274,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					clientConf.Limit = limit
 					// Start dependencies
 					orderer, ordererServer, ordererRootCA, _ := mock.StartMockOrderingServices(
-						t, &mock.OrdererConfig{NumService: 3, TLS: serverTLSConfig, BlockSize: 100},
+						t, &mock.OrdererConfig{NumService: 3, TLS: serverTLSConfig, BlockSize: 100}, nil,
 					)
 					_, coordinatorServer := mock.StartMockCoordinatorService(t)
 
@@ -347,7 +347,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 						NumService: 3,
 						TLS:        serverTLSConfig,
 						BlockSize:  int(clientConf.LoadProfile.Block.MaxSize), //nolint:gosec // uint64 -> int.
-					})
+					}, nil)
 
 					endpoints := test.NewOrdererEndpoints(0, ordererServer.Configs...)
 
