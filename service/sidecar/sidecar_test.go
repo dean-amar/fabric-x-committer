@@ -305,21 +305,6 @@ func TestSidecarConfigUpdate(t *testing.T) {
 				)
 				require.NoError(t, err)
 				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), patched))
-
-				//_, metaPolicy := workload.NewPolicyEndorser(env.ordererEnv.Policy.CryptoMaterialPath, env.ordererEnv.Policy.NamespacePolicies[committerpb.MetaNamespaceID])
-				//configBlock, err := workload.CreateDefaultConfigBlockWithCrypto(env.ordererEnv.Policy.CryptoMaterialPath, &workload.ConfigBlock{
-				//	MetaNamespaceVerificationKey: metaPolicy.GetThresholdRule().GetPublicKey(),
-				//	OrdererEndpoints:             endpoints,
-				//	ChannelID:                    env.ordererEnv.Policy.ChannelID,
-				//	PeerOrganizationCount:        env.ordererEnv.Policy.PeerOrganizationCount,
-				//})
-				//workload.CreateConfigBlock(env.ordererEnv.Policy)
-				//require.NoError(t, err)
-				//require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
-				//
-				//env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-				//	OrdererEndpoints: endpoints,
-				//})
 			}
 
 			t.Log("Update the sidecar to use a second orderer group")

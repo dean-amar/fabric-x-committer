@@ -83,7 +83,7 @@ func StartMockCoordinatorServiceFromServerConfig(
 }
 
 // StartMockOrderingServices starts a specified number of mock ordering service and register cancellation.
-func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
+func StartMockOrderingServices(t *testing.T, conf *OrdererConfig, policy *workload.PolicyProfile) (
 	*Orderer, *test.GrpcServers, string, *workload.PolicyProfile,
 ) {
 	t.Helper()
@@ -102,13 +102,17 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 		ordererServers = conf.ServerConfigs
 	}
 
-	// create policy with these endpoints.
-	policy := &workload.PolicyProfile{
-		// we generate all the orderers for with the same msp-id.
-		OrdererEndpoints:      test.NewOrdererEndpoints(0, ordererServers...),
-		ChannelID:             "ch1",
-		CryptoMaterialPath:    t.TempDir(),
-		PeerOrganizationCount: 1,
+	if policy == nil {
+		policy = &workload.PolicyProfile{
+			// create policy with these endpoints.
+			// we generate all the orderers for with the same msp-id.
+			OrdererEndpoints:      test.NewOrdererEndpoints(0, ordererServers...),
+			ChannelID:             "ch1",
+			CryptoMaterialPath:    t.TempDir(),
+			PeerOrganizationCount: 1,
+		}
+	} else {
+		policy.OrdererEndpoints = test.NewOrdererEndpoints(0, ordererServers...)
 	}
 
 	service.ConfigBlock, err = workload.CreateConfigBlock(policy)
@@ -173,12 +177,13 @@ type OrdererTestConfig struct {
 	NumFake                      int
 	NumHolders                   int
 	MetaNamespaceVerificationKey []byte
+	Policy                       *workload.PolicyProfile
 }
 
 // NewOrdererTestEnv creates and starts a new OrdererTestEnv.
 func NewOrdererTestEnv(t *testing.T, conf *OrdererTestConfig) *OrdererTestEnv {
 	t.Helper()
-	orderer, ordererServers, newRootCA, policy := StartMockOrderingServices(t, conf.Config)
+	orderer, ordererServers, newRootCA, policy := StartMockOrderingServices(t, conf.Config, conf.Policy)
 	holder := &HoldingOrderer{Orderer: orderer}
 	holder.Release()
 	return &OrdererTestEnv{

@@ -538,7 +538,7 @@ func PatchOrdererOrgEndpointsInConfigBlock(block *common.Block, orgID string, ad
 
 	orgGrp, ok := ordererGrp.Groups[orgID]
 	if !ok || orgGrp == nil {
-		return nil, fmt.Errorf(`missing group "/Channel/Orderer/%s" (existing: %v)`, orgID, mapKeys(ordererGrp.Groups))
+		return nil, fmt.Errorf(`missing group "/Channel/Orderer/%s" (existing: %v)`, orgID, MapKeys(ordererGrp.Groups))
 	}
 
 	// Marshal the new endpoints as cb.OrdererAddresses.
@@ -580,7 +580,7 @@ func PatchOrdererOrgEndpointsInConfigBlock(block *common.Block, orgID string, ad
 	return out, nil
 }
 
-func mapKeys[V any](m map[string]V) []string {
+func MapKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
