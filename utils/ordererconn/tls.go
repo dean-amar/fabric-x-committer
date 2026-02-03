@@ -65,13 +65,11 @@ func NewOrganizationsMaterialsFromEnvelope(envelope *common.Envelope) ([]*Organi
 		return nil, errors.Wrap(err, "failed to create config bundle")
 	}
 	ordererCfg, ok := bundle.OrdererConfig()
-
 	if !ok {
 		return nil, errors.New("could not find orderer config")
 	}
 	organizationMaterials := make([]*OrganizationMaterial, 0, len(ordererCfg.Organizations()))
 	for orgID, org := range ordererCfg.Organizations() {
-		logger.Infof("reading-material-for-org: %v", org.Name())
 		var endpoints []*commontypes.OrdererEndpoint
 		endpointsStr := org.Endpoints()
 		for _, eStr := range endpointsStr {
@@ -81,11 +79,6 @@ func NewOrganizationsMaterialsFromEnvelope(envelope *common.Envelope) ([]*Organi
 			}
 			e.MspID = orgID
 			endpoints = append(endpoints, e)
-		}
-		rootCAs := org.MSP().GetTLSRootCerts()
-		logger.Infof("number-of-rootCAs-%v; number-of-endpoints: %v", len(rootCAs), len(endpoints))
-		for i, ep := range endpoints {
-			logger.Infof("endpoint[%v]: %v", i, ep.String())
 		}
 		organizationMaterials = append(organizationMaterials, &OrganizationMaterial{
 			MspID:     orgID,

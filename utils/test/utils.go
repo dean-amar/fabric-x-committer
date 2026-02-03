@@ -12,11 +12,8 @@ import (
 	"fmt"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"google.golang.org/protobuf/proto"
-	"io/fs"
 	"maps"
 	"net"
-	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -461,34 +458,6 @@ func NewOrdererEndpoints(id uint32, configs ...*connection.ServerConfig) []*type
 		}
 	}
 	return ordererEndpoints
-}
-
-func WalkDirectory(root string) {
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get the path relative to the root to determine depth
-		relPath, _ := filepath.Rel(root, path)
-
-		// If it's the root itself, just print the name
-		if relPath == "." {
-			fmt.Println(root)
-			return nil
-		}
-
-		// Calculate indentation based on the number of separators
-		depth := strings.Count(relPath, string(os.PathSeparator))
-		indent := strings.Repeat("│   ", depth)
-
-		fmt.Printf("%s├── %s\n", indent, d.Name())
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("Error walking the path %q: %v\n", root, err)
-	}
 }
 
 // PatchOrdererOrgEndpointsInConfigBlock updates /Channel/Orderer/<orgID>/Endpoints (cb.OrdererAddresses)

@@ -42,7 +42,7 @@ const channelForTest = "mychannel"
 
 func TestBroadcastDeliver(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes[2:] {
+	for _, mode := range test.ServerModes {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			// Create the credentials for both server and client using the same CA.

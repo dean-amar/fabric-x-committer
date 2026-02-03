@@ -11,7 +11,6 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"fmt"
-	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +23,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/common/ledger/blkstorage"
+	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -325,8 +325,7 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				t.Fatal("context deadline exceeded")
-			case b := <-env.committedBlock:
-				t.Logf("data-length: %v", len(b.Data.Data))
+			case <-env.committedBlock:
 				t.Fatal("the sidecar cannot receive blocks since its orderer holds them")
 			case <-time.After(expectedProcessingTime):
 				t.Log("Fantastic")
