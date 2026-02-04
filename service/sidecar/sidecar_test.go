@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/common/ledger/blkstorage"
-	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -55,12 +55,15 @@ type sidecarTestEnv struct {
 }
 
 type sidecarTestConfig struct {
-	NumService         int
-	NumFakeService     int
-	NumHolders         int
-	SubmitGenesisBlock bool
-	ServerTLS          connection.TLSConfig
-	ClientTLS          connection.TLSConfig
+	NumService           int
+	NumFakeService       int
+	NumHolders           int
+	SubmitGenesisBlock   bool
+	OrdererServerConfigs []*connection.ServerConfig
+	ConfigBlockPath      string
+	ConfigBlock          *common.Block
+	ServerTLS            connection.TLSConfig
+	ClientTLS            connection.TLSConfig
 }
 
 const (
@@ -108,6 +111,32 @@ func TestSidecarSecureConnection(t *testing.T) {
 	)
 }
 
+func TestSidecarConfigBlockFetch(t *testing.T) {
+	t.Parallel()
+	numService := 1
+	serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
+
+	orderersServerConfigs, _, configBlockPath, configBlock := createOrdererServerConfigsWithCrypto(t, numService, serverTLSConfig)
+
+	env := newSidecarTestEnvWithTLS(t,
+		sidecarTestConfig{
+			SubmitGenesisBlock:   true,
+			OrdererServerConfigs: orderersServerConfigs,
+			NumService:           numService,
+			ServerTLS:            serverTLSConfig,
+			ClientTLS:            clientTLSConfig,
+			ConfigBlockPath:      configBlockPath,
+			ConfigBlock:          configBlock,
+		},
+	)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, clientTLSConfig)
+	env.requireBlock(ctx, t, 0)
+	env.sendTransactionsAndEnsureCommitted(ctx, t, 1)
+}
+
 func newSidecarTestEnvWithTLS(
 	t *testing.T,
 	conf sidecarTestConfig,
@@ -117,13 +146,15 @@ func newSidecarTestEnvWithTLS(
 	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
-			NumService: conf.NumService,
-			TLS:        conf.ServerTLS,
-			BlockSize:  blockSize,
+			NumService:    conf.NumService,
+			ServerConfigs: conf.OrdererServerConfigs,
+			TLS:           conf.ServerTLS,
+			BlockSize:     blockSize,
 			// We want each block to contain exactly <blockSize> transactions.
 			// Therefore, we set a higher block timeout so that we have enough time to send all the
 			// transactions to the orderer and create a block.
 			BlockTimeout:    5 * time.Minute,
+			ConfigBlockPath: conf.ConfigBlockPath,
 			SendConfigBlock: false,
 		},
 		NumFake:    conf.NumFakeService,
@@ -131,12 +162,16 @@ func newSidecarTestEnvWithTLS(
 	})
 
 	ordererEndpoints := ordererEnv.AllEndpoints()
-	configBlock := ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-		OrdererEndpoints: ordererEndpoints,
-		ChannelID:        ordererEnv.TestConfig.ChanID,
-	})
 
-	var genesisBlockFilePath string
+	if conf.ConfigBlock == nil {
+		conf.ConfigBlock = ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
+			OrdererEndpoints: ordererEndpoints,
+			ChannelID:        ordererEnv.TestConfig.ChanID,
+		})
+	} else {
+		require.NoError(t, ordererEnv.Orderer.SubmitBlock(t.Context(), conf.ConfigBlock))
+	}
+
 	initOrdererOrganizations := map[string]*ordererconn.OrganizationConfig{
 		"org": {
 			Endpoints: ordererEndpoints,
@@ -144,8 +179,6 @@ func newSidecarTestEnvWithTLS(
 		},
 	}
 	if conf.SubmitGenesisBlock {
-		genesisBlockFilePath = filepath.Join(t.TempDir(), "config.block")
-		require.NoError(t, configtxgen.WriteOutputBlock(configBlock, genesisBlockFilePath))
 		initOrdererOrganizations = nil
 	}
 	sidecarConf := &Config{
@@ -160,7 +193,7 @@ func newSidecarTestEnvWithTLS(
 			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
 		},
 		Bootstrap: Bootstrap{
-			GenesisBlockFilePath: genesisBlockFilePath,
+			GenesisBlockFilePath: conf.ConfigBlockPath,
 		},
 		Orderer: ordererconn.Config{
 			ChannelID:     ordererEnv.TestConfig.ChanID,
@@ -178,7 +211,7 @@ func newSidecarTestEnvWithTLS(
 		coordinatorServer: coordinatorServer,
 		ordererEnv:        ordererEnv,
 		config:            *sidecarConf,
-		configBlock:       configBlock,
+		configBlock:       conf.ConfigBlock,
 	}
 }
 
@@ -259,8 +292,17 @@ func TestSidecarConfigUpdate(t *testing.T) {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
+			numService := 3
+			orderersServerConfigs, _, configBlockPath, configBlock := createOrdererServerConfigsWithCrypto(t, numService, serverTLSConfig)
 			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
-				NumService: 3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
+				SubmitGenesisBlock:   true,
+				OrdererServerConfigs: orderersServerConfigs,
+				NumService:           numService,
+				NumHolders:           3,
+				ServerTLS:            serverTLSConfig,
+				ClientTLS:            clientTLSConfig,
+				ConfigBlockPath:      configBlockPath,
+				ConfigBlock:          configBlock,
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			t.Cleanup(cancel)
@@ -273,9 +315,14 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			expectedBlock++
 
 			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
-				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-					OrdererEndpoints: endpoints,
-				})
+				t.Logf("submitting eps: %v", endpoints)
+				patched, err := PatchOrdererOrgEndpointsInConfigBlock(
+					configBlock,
+					"", // auto-detect orgID from the block
+					EndpointsToStrings(endpoints),
+				)
+				require.NoError(t, err)
+				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), patched))
 			}
 
 			t.Log("Update the sidecar to use a second orderer group")
@@ -829,4 +876,172 @@ func TestSidecarRecoveryUpdatesOrdererEndpointsBeforeLedgerRecovery(t *testing.T
 
 	t.Log("9. Verify normal operation continues with recovered state")
 	env.sendTransactionsAndEnsureCommitted(newCtx, t, 11)
+}
+
+func createOrdererServerConfigsWithCrypto(
+	t *testing.T, numberOfOrderers int, originalTLSConfig connection.TLSConfig,
+) ([]*connection.ServerConfig, string, string, *common.Block) {
+	t.Helper()
+
+	// we pre-allocate orderer server configs with ports.
+	ordererServers := make([]*connection.ServerConfig, numberOfOrderers)
+	for i := range ordererServers {
+		ordererServers[i] = preAllocatePorts(t, originalTLSConfig)
+	}
+
+	// create a policy profile for generating crypto material with the given orderer endpoints.
+	policy := &workload.PolicyProfile{
+		// create policy with these endpoints.
+		// we generate all the orderers for with the same msp-id.
+		OrdererEndpoints:      test.NewOrdererEndpoints(0, ordererServers...),
+		ChannelID:             "ch1",
+		CryptoMaterialPath:    t.TempDir(),
+		PeerOrganizationCount: 1,
+	}
+
+	configBlock, err := workload.CreateConfigBlock(policy)
+	require.NoError(t, err)
+	//require.NoError(t, workload.PrepareCryptoMaterial(policy))
+
+	// update the orderer server configs with generated crypto material.
+	for i, ordererServer := range ordererServers {
+
+		certDir := filepath.Join(
+			policy.CryptoMaterialPath,
+			"ordererOrganizations", "orderer-org-0",
+			"orderers", fmt.Sprintf("orderer-%d-org-0", i),
+			"tls",
+		)
+
+		// override cert and key paths.
+		ordererServer.TLS.CertPath = filepath.Join(certDir, "server.crt")
+		ordererServer.TLS.KeyPath = filepath.Join(certDir, "server.key")
+	}
+
+	// path to the root CA certs for orderers.
+	orderersCertsRootCA := filepath.Join(filepath.Join(
+		policy.CryptoMaterialPath,
+		"ordererOrganizations", "orderer-org-0",
+		"orderers", fmt.Sprintf("orderer-%d-org-0", 0),
+		"tls",
+	), "ca.crt")
+
+	return ordererServers, orderersCertsRootCA, filepath.Join(policy.CryptoMaterialPath, "config-block.pb.bin"), configBlock
+}
+
+func preAllocatePorts(t *testing.T, tlsConfig connection.TLSConfig) *connection.ServerConfig {
+	t.Helper()
+	server := connection.NewLocalHostServer(tlsConfig)
+	listener, err := server.PreAllocateListener()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
+	return server
+}
+
+// PatchOrdererOrgEndpointsInConfigBlock updates /Channel/Orderer/<orgID>/Endpoints (cb.OrdererAddresses)
+// If orgID == "", it picks the first existing orderer org group (sorted by name) for determinism.
+func PatchOrdererOrgEndpointsInConfigBlock(block *common.Block, orgID string, addresses []string) (*common.Block, error) {
+	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
+		return nil, fmt.Errorf("invalid block: empty data")
+	}
+
+	out := proto.Clone(block).(*common.Block)
+
+	// Envelope -> Payload -> ConfigEnvelope
+	env := &common.Envelope{}
+	if err := proto.Unmarshal(out.Data.Data[0], env); err != nil {
+		return nil, fmt.Errorf("unmarshal envelope: %w", err)
+	}
+	pl := &common.Payload{}
+	if err := proto.Unmarshal(env.Payload, pl); err != nil {
+		return nil, fmt.Errorf("unmarshal payload: %w", err)
+	}
+	cfgEnv := &common.ConfigEnvelope{}
+	if err := proto.Unmarshal(pl.Data, cfgEnv); err != nil {
+		return nil, fmt.Errorf("unmarshal config envelope: %w", err)
+	}
+	if cfgEnv.Config == nil || cfgEnv.Config.ChannelGroup == nil {
+		return nil, fmt.Errorf("missing config/channel group")
+	}
+
+	ch := cfgEnv.Config.ChannelGroup
+	ordererGrp, ok := ch.Groups["Orderer"]
+	if !ok || ordererGrp == nil {
+		return nil, fmt.Errorf(`missing group "/Channel/Orderer"`)
+	}
+	if ordererGrp.Groups == nil || len(ordererGrp.Groups) == 0 {
+		return nil, fmt.Errorf(`"/Channel/Orderer" has no org groups`)
+	}
+
+	// Pick orgID if not provided.
+	if orgID == "" {
+		keys := make([]string, 0, len(ordererGrp.Groups))
+		for k := range ordererGrp.Groups {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		orgID = keys[0]
+	}
+
+	orgGrp, ok := ordererGrp.Groups[orgID]
+	if !ok || orgGrp == nil {
+		return nil, fmt.Errorf(`missing group "/Channel/Orderer/%s" (existing: %v)`, orgID, MapKeys(ordererGrp.Groups))
+	}
+
+	// Marshal the new endpoints as cb.OrdererAddresses.
+	addrs := &common.OrdererAddresses{Addresses: addresses}
+	addrsBytes, err := proto.Marshal(addrs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal OrdererAddresses: %w", err)
+	}
+
+	if orgGrp.Values == nil {
+		orgGrp.Values = map[string]*common.ConfigValue{}
+	}
+	cv := orgGrp.Values["Endpoints"]
+	if cv == nil {
+		cv = &common.ConfigValue{ModPolicy: "Admins"} // fine for tests
+		orgGrp.Values["Endpoints"] = cv
+	}
+	cv.Value = addrsBytes
+
+	// Re-wrap.
+	newCfgEnvBytes, err := proto.Marshal(cfgEnv)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config envelope: %w", err)
+	}
+	pl.Data = newCfgEnvBytes
+
+	newPayloadBytes, err := proto.Marshal(pl)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+	env.Payload = newPayloadBytes
+
+	newEnvBytes, err := proto.Marshal(env)
+	if err != nil {
+		return nil, fmt.Errorf("marshal envelope: %w", err)
+	}
+	out.Data.Data[0] = newEnvBytes
+
+	return out, nil
+}
+
+func MapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func EndpointsToStrings(eps []*commontypes.OrdererEndpoint) []string {
+	out := make([]string, 0, len(eps))
+	for _, ep := range eps {
+		out = append(out, ep.String())
+	}
+	return out
 }
