@@ -135,10 +135,15 @@ func newSidecarTestEnvWithTLS(
 	})
 
 	ordererEndpoints := ordererEnv.AllEndpoints()
-	configBlock := ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
+	configBlockTemp := ordererEnv.CreateConfigBlock(t, &workload.ConfigBlock{
 		OrdererEndpoints: ordererEndpoints,
 		ChannelID:        ordererEnv.TestConfig.ChanID,
 	})
+
+	configBlock := test.PatchOrdererOrgRootCAs(t, configBlockTemp, conf.ClientTLS.CACertPaths)
+	require.NoError(t, ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
+
+	ordererEnv.Orderer.ConfigBlock = configBlock
 
 	var genesisBlockFilePath string
 	initOrdererOrganizations := map[string]*ordererconn.OrganizationConfig{
@@ -277,9 +282,14 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			expectedBlock++
 
 			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
-				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-					OrdererEndpoints: endpoints,
-				})
+				t.Logf("submitting eps: %v", endpoints)
+				patched := test.PatchOrdererOrgEndpointsInConfigBlock(
+					t,
+					env.ordererEnv.Orderer.ConfigBlock,
+					"", // auto-detect orgID from the block
+					test.EndpointsToStrings(endpoints),
+				)
+				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), patched))
 			}
 
 			t.Log("Update the sidecar to use a second orderer group")

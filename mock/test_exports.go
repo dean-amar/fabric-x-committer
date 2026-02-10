@@ -166,6 +166,26 @@ func (e *OrdererTestEnv) SubmitConfigBlock(t *testing.T, conf *workload.ConfigBl
 	return configBlock
 }
 
+// CreateConfigBlock creates a config block.
+func (e *OrdererTestEnv) CreateConfigBlock(t *testing.T, conf *workload.ConfigBlock) *common.Block {
+	t.Helper()
+	if conf == nil {
+		conf = &workload.ConfigBlock{}
+	}
+	if conf.ChannelID == "" {
+		conf.ChannelID = e.TestConfig.ChanID
+	}
+	if len(conf.OrdererEndpoints) == 0 {
+		conf.OrdererEndpoints = e.AllEndpoints()
+	}
+	if conf.MetaNamespaceVerificationKey == nil {
+		conf.MetaNamespaceVerificationKey = e.TestConfig.MetaNamespaceVerificationKey
+	}
+	configBlock, err := workload.CreateDefaultConfigBlock(conf)
+	require.NoError(t, err)
+	return configBlock
+}
+
 // AllEndpoints returns a list of all the endpoints (real, fake, and holders).
 func (e *OrdererTestEnv) AllEndpoints() []*commontypes.OrdererEndpoint {
 	return slices.Concat(

@@ -53,12 +53,12 @@ type (
 	// Orderer supports running multiple mock-orderer services which mocks a consortium.
 	Orderer struct {
 		config      *OrdererConfig
-		configBlock *common.Block
 		inEnvs      chan *common.Envelope
 		inBlocks    chan *common.Block
 		cutBlock    chan any
 		cache       *blockCache
 		healthcheck *health.Server
+		ConfigBlock *common.Block
 	}
 
 	// HoldingOrderer allows holding a block.
@@ -139,7 +139,7 @@ func NewMockOrderer(config *OrdererConfig) (*Orderer, error) {
 	numServices := max(config.TestServerParameters.NumService, len(config.ServerConfigs))
 	return &Orderer{
 		config:      config,
-		configBlock: configBlock,
+		ConfigBlock: configBlock,
 		inEnvs:      make(chan *common.Envelope, numServices*config.BlockSize*config.OutBlockCapacity),
 		inBlocks:    make(chan *common.Block, config.BlockSize*config.OutBlockCapacity),
 		cutBlock:    make(chan any),
@@ -287,7 +287,7 @@ func (o *Orderer) Run(ctx context.Context) error {
 
 	// Submit the config block.
 	if o.config.SendConfigBlock {
-		sendBlock(o.configBlock)
+		sendBlock(o.ConfigBlock)
 	}
 
 	data := make([][]byte, 0, o.config.BlockSize)

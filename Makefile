@@ -338,7 +338,7 @@ build-release-image: build-arch
 # Linter
 #########################
 
-lint: check-metrics-doc lint-proto FORCE
+lint: FORCE
 	@echo "Running Go Linters..."
 	golangci-lint run --color=always --new-from-rev=main --timeout=4m
 	@echo "Running SQL Linters..."

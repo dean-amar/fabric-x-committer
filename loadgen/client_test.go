@@ -334,6 +334,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					clientConf.LoadProfile.Policy.OrdererEndpoints = endpoints
 					configBlock, err := workload.CreateConfigBlock(&clientConf.LoadProfile.Policy)
 					require.NoError(t, err)
+					configBlock = test.PatchOrdererOrgRootCAs(t, configBlock, clientTLSConfig.CACertPaths)
 					err = orderer.SubmitBlock(t.Context(), configBlock)
 					require.NoError(t, err)
 
@@ -379,6 +380,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 					clientConf.LoadProfile.Policy.OrdererEndpoints = endpoints
 					configBlock, err := workload.CreateConfigBlock(&clientConf.LoadProfile.Policy)
 					require.NoError(t, err)
+					configBlock = test.PatchOrdererOrgRootCAs(t, configBlock, clientTLSConfig.CACertPaths)
 					err = orderer.SubmitBlock(t.Context(), configBlock)
 					require.NoError(t, err)
 
