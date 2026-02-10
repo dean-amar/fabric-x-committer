@@ -88,6 +88,76 @@ func (c *sidecarTestConfig) String() string {
 	return "default"
 }
 
+func TestSidecarUpdate(t *testing.T) {
+	t.Parallel()
+	for _, mode := range test.ServerModes[:1] {
+		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
+			t.Parallel()
+			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
+			numService := 3
+			orderersServerConfigs, _, configBlockPath, configBlock := createOrdererServerConfigsWithCrypto(t, numService, serverTLSConfig)
+			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
+				SubmitGenesisBlock:   true,
+				OrdererServerConfigs: orderersServerConfigs,
+				NumService:           numService,
+				NumHolders:           3,
+				ServerTLS:            serverTLSConfig,
+				ClientTLS:            clientTLSConfig,
+				ConfigBlockPath:      configBlockPath,
+				ConfigBlock:          configBlock,
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			t.Cleanup(cancel)
+			env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, clientTLSConfig)
+			env.requireBlock(ctx, t, 0)
+
+			t.Log("Sanity check")
+			expectedBlock := uint64(1)
+			env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
+			expectedBlock++
+
+			orderersServerConfigs2, _, configBlockPath2, configBlock2 := createOrdererServerConfigsWithCrypto(t, numService, serverTLSConfig)
+
+			testConfig := &mock.OrdererTestConfig{
+				ChanID: "ch1",
+				Config: &mock.OrdererConfig{
+					NumService:    numService,
+					ServerConfigs: orderersServerConfigs2,
+					TLS:           serverTLSConfig,
+					BlockSize:     blockSize,
+					// We want each block to contain exactly <blockSize> transactions.
+					// Therefore, we set a higher block timeout so that we have enough time to send all the
+					// transactions to the orderer and create a block.
+					BlockTimeout:    5 * time.Minute,
+					ConfigBlockPath: configBlockPath2,
+					SendConfigBlock: false,
+				},
+			}
+
+			servers := test.StartGrpcServersWithConfigForTest(t.Context(), t, env.ordererEnv.Orderer.RegisterService,
+				orderersServerConfigs2...,
+			)
+
+			ordererTestEnv := &mock.OrdererTestEnv{
+				TestConfig:     testConfig,
+				Orderer:        env.ordererEnv.Orderer,
+				OrdererServers: servers,
+			}
+
+			require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock2))
+
+			env.ordererEnv = ordererTestEnv
+
+			env.requireBlock(ctx, t, expectedBlock)
+
+			expectedBlock++
+			t.Log("Expected Data Block: ", expectedBlock)
+
+			env.sendTransactionsAndEnsureCommitted(ctx, t, expectedBlock)
+		})
+	}
+}
+
 func TestSidecarSecureConnection(t *testing.T) {
 	t.Parallel()
 	test.RunSecureConnectionTest(t,
