@@ -11,14 +11,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/hyperledger/fabric-protos-go-apiv2/msp"
 	"github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
@@ -28,11 +32,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/logging"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
+	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 )
 
 var (
@@ -459,4 +465,313 @@ func NewOrdererEndpoints(id uint32, configs ...*connection.ServerConfig) []*type
 		}
 	}
 	return ordererEndpoints
+}
+
+// PatchOrdererOrgEndpointsInConfigBlock updates the endpoints for specific organizations
+// in the config block.
+//
+// Logic:
+// 1. Groups the provided endpoints by their Organization ID.
+// 2. Iterates through existing Orderer organizations in the block.
+// 3. If an organization exists in the input: Updates its endpoints (Values["Endpoints"]).
+// 4. If an organization does NOT exist in the input: Removes the organization entirely.
+//
+//nolint:funlen,gocognit // Function is complex due to protobuf unpacking/packing
+func PatchOrdererOrgEndpointsInConfigBlock(
+	t *testing.T,
+	block *common.Block,
+	endpoints []*commontypes.OrdererEndpoint,
+) *common.Block {
+	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
+		return nil
+	}
+
+	// 1. Group new endpoints by Organization ID
+	// Map: OrgName -> []AddressString
+	newOrgEndpoints := make(map[string][]string)
+	for _, ep := range endpoints {
+		// Convert uint32 ID to the standard Fabric Org Name string (e.g., "orderer-org-0")
+		// If your config uses just "0" or "1", change this to: fmt.Sprintf("%d", ep.ID)
+		orgName := fmt.Sprintf("orderer-org-%d", ep.ID)
+		newOrgEndpoints[orgName] = append(newOrgEndpoints[orgName], ep.String())
+	}
+
+	out := proto.Clone(block).(*common.Block)
+
+	// 2. Unpack the onion: Envelope -> Payload -> ConfigEnvelope
+	env := &common.Envelope{}
+	require.NoError(t, proto.Unmarshal(out.Data.Data[0], env), "unmarshal envelope")
+
+	pl := &common.Payload{}
+	require.NoError(t, proto.Unmarshal(env.Payload, pl), "unmarshal payload")
+
+	cfgEnv := &common.ConfigEnvelope{}
+	require.NoError(t, proto.Unmarshal(pl.Data, cfgEnv), "unmarshal config envelope")
+
+	if cfgEnv.Config == nil || cfgEnv.Config.ChannelGroup == nil {
+		t.Log("missing config/channel group")
+		return nil
+	}
+
+	ch := cfgEnv.Config.ChannelGroup
+	ordererGrp, ok := ch.Groups["Orderer"]
+	if !ok || ordererGrp == nil {
+		t.Log(`missing group "/Channel/Orderer"`)
+		return nil
+	}
+
+	require.Greater(t, len(ordererGrp.Groups), 0, `"/Channel/Orderer" has no org groups`)
+
+	// 3. Iterate over existing organizations in the config block
+	// We use a separate slice of keys to iterate safely while modifying the map
+	existingOrgNames := make([]string, 0, len(ordererGrp.Groups))
+	for k := range ordererGrp.Groups {
+		existingOrgNames = append(existingOrgNames, k)
+	}
+
+	for _, orgName := range existingOrgNames {
+		newAddresses, shouldKeep := newOrgEndpoints[orgName]
+
+		if !shouldKeep {
+			// CASE A: Organization is not in the new input list -> REMOVE IT
+			delete(ordererGrp.Groups, orgName)
+			continue
+		}
+
+		// CASE B: Organization exists in input -> UPDATE ENDPOINTS
+		orgGrp := ordererGrp.Groups[orgName]
+
+		// Marshal the new endpoints as cb.OrdererAddresses
+		addrs := &common.OrdererAddresses{Addresses: newAddresses}
+		addrsBytes, err := proto.Marshal(addrs)
+		require.NoError(t, err)
+
+		if orgGrp.Values == nil {
+			orgGrp.Values = map[string]*common.ConfigValue{}
+		}
+
+		// Update or Create the "Endpoints" value
+		cv := orgGrp.Values["Endpoints"]
+		if cv == nil {
+			cv = &common.ConfigValue{ModPolicy: "Admins"}
+			orgGrp.Values["Endpoints"] = cv
+		}
+		cv.Value = addrsBytes
+
+		// Note: We deliberately do NOT touch orgGrp.Values["MSP"],
+		// so RootCAs and identities remain preserved.
+	}
+
+	// 4. Re-wrap everything
+	newCfgEnvBytes, err := proto.Marshal(cfgEnv)
+	require.NoError(t, err, "marshal config envelope")
+	pl.Data = newCfgEnvBytes
+
+	newPayloadBytes, err := proto.Marshal(pl)
+	require.NoError(t, err, "marshal payload")
+	env.Payload = newPayloadBytes
+
+	newEnvBytes, err := proto.Marshal(env)
+	require.NoError(t, err, "marshal envelope")
+	out.Data.Data[0] = newEnvBytes
+
+	return out
+}
+
+//// PatchOrdererOrgEndpointsInConfigBlock updates /Channel/Orderer/<orgID>/Endpoints (cb.OrdererAddresses)
+//// If orgID == "", it picks the first existing orderer org group (sorted by name) for determinism.
+////
+////nolint:my-linter // this function is only used for testing and is easier to read with more arguments.
+//func PatchOrdererOrgEndpointsInConfigBlock(
+//	t *testing.T, block *common.Block, orgID string, addresses []string) *common.Block {
+//	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
+//		return nil
+//	}
+//
+//	out := proto.Clone(block).(*common.Block)
+//
+//	// Envelope -> Payload -> ConfigEnvelope
+//	env := &common.Envelope{}
+//	require.NoError(t, proto.Unmarshal(out.Data.Data[0], env), "unmarshal envelope")
+//
+//	pl := &common.Payload{}
+//	require.NoError(t, proto.Unmarshal(env.Payload, pl), "unmarshal payload")
+//
+//	cfgEnv := &common.ConfigEnvelope{}
+//	require.NoError(t, proto.Unmarshal(pl.Data, cfgEnv), "unmarshal config envelope")
+//
+//	if cfgEnv.Config == nil || cfgEnv.Config.ChannelGroup == nil {
+//		t.Log("missing config/channel group")
+//		return nil
+//	}
+//
+//	ch := cfgEnv.Config.ChannelGroup
+//	ordererGrp, ok := ch.Groups["Orderer"]
+//	if !ok || ordererGrp == nil {
+//		t.Log(`missing group "/Channel/Orderer"`)
+//		return nil
+//	}
+//
+//	require.Greater(t, len(ordererGrp.Groups), 0, `"/Channel/Orderer" has no org groups`)
+//
+//	// Pick orgID if not provided.
+//	if orgID == "" {
+//		keys := make([]string, 0, len(ordererGrp.Groups))
+//		for k := range ordererGrp.Groups {
+//			keys = append(keys, k)
+//		}
+//		sort.Strings(keys)
+//		orgID = keys[0]
+//	}
+//
+//	orgGrp, ok := ordererGrp.Groups[orgID]
+//	require.True(t, ok)
+//	require.NotNil(t, orgGrp,
+//		`missing group "/Channel/Orderer/%s" (existing: %v)`, orgID, MapKeys(ordererGrp.Groups))
+//
+//	// Marshal the new endpoints as cb.OrdererAddresses.
+//	addrs := &common.OrdererAddresses{Addresses: addresses}
+//	addrsBytes, err := proto.Marshal(addrs)
+//	require.NoError(t, err)
+//
+//	if orgGrp.Values == nil {
+//		orgGrp.Values = map[string]*common.ConfigValue{}
+//	}
+//	cv := orgGrp.Values["Endpoints"]
+//	if cv == nil {
+//		cv = &common.ConfigValue{ModPolicy: "Admins"} // fine for tests
+//		orgGrp.Values["Endpoints"] = cv
+//	}
+//	cv.Value = addrsBytes
+//
+//	// Re-wrap.
+//	newCfgEnvBytes, err := proto.Marshal(cfgEnv)
+//	require.NoError(t, err, "marshal config envelope")
+//	pl.Data = newCfgEnvBytes
+//
+//	newPayloadBytes, err := proto.Marshal(pl)
+//	require.NoError(t, err, "marshal payload")
+//	env.Payload = newPayloadBytes
+//
+//	newEnvBytes, err := proto.Marshal(env)
+//	require.NoError(t, err, "marshal envelope")
+//	out.Data.Data[0] = newEnvBytes
+//
+//	return out
+//}
+
+// MapKeys returns the sorted keys of a map.
+func MapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// EndpointsToStrings converts a list of OrdererEndpoint to a list of their string representations (host:port).
+func EndpointsToStrings(eps []*commontypes.OrdererEndpoint) []string {
+	out := make([]string, 0, len(eps))
+	for _, ep := range eps {
+		out = append(out, ep.String())
+	}
+	return out
+}
+
+// PatchOrdererOrgRootCAs updates ONLY the TlsRootCerts (used for connection verification).
+// It does NOT modify RootCerts (used for identity/signature verification), preventing
+// "identity is not valid" errors on startup.
+func PatchOrdererOrgRootCAs(t *testing.T, block *common.Block, tlsRootCAPaths []string) *common.Block { //nolint:all
+	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
+		return nil
+	}
+
+	// 1. Read the new TLS Root CA certificates
+	var newTLSRootCerts [][]byte
+	for _, path := range tlsRootCAPaths {
+		certBytes, err := os.ReadFile(path)
+		require.NoError(t, err)
+		newTLSRootCerts = append(newTLSRootCerts, certBytes)
+	}
+
+	// If no certs provided, return original block
+	if len(newTLSRootCerts) == 0 {
+		return block
+	}
+
+	out := proto.Clone(block).(*common.Block)
+	require.NotNil(t, out)
+	// 2. Unpack the Config Onion
+	env := &common.Envelope{}
+	require.NoError(t, proto.Unmarshal(out.Data.Data[0], env))
+	pl := &common.Payload{}
+	require.NoError(t, proto.Unmarshal(env.Payload, pl))
+	cfgEnv := &common.ConfigEnvelope{}
+	require.NoError(t, proto.Unmarshal(pl.Data, cfgEnv))
+
+	if cfgEnv.Config == nil || cfgEnv.Config.ChannelGroup == nil {
+		t.Log("missing config/channel group")
+		return nil
+	}
+
+	// 3. Locate /Channel/Orderer group
+	channelGroup := cfgEnv.Config.ChannelGroup
+	ordererGroup, ok := channelGroup.Groups["Orderer"]
+	if !ok || ordererGroup == nil {
+		t.Log(`missing group "/Channel/Orderer"`)
+		return nil
+	}
+
+	// 4. Iterate over all Orderer Organizations
+	for orgName, orgGroup := range ordererGroup.Groups {
+		if orgGroup.Values == nil {
+			continue
+		}
+		mspVal, ok := orgGroup.Values["MSP"]
+		if !ok || mspVal == nil {
+			continue
+		}
+
+		mspConfig := &msp.MSPConfig{}
+
+		require.NoError(t, proto.Unmarshal(mspVal.Value, mspConfig),
+			"unmarshal MSPConfig for org %s", orgName)
+
+		// Type 0 is FABRIC (X.509)
+		if mspConfig.Type != 0 {
+			continue
+		}
+
+		fabricConfig := &msp.FabricMSPConfig{}
+		require.NoError(t, proto.Unmarshal(mspConfig.Config, fabricConfig),
+			"unmarshal FabricMSPConfig for org %s", orgName)
+
+		fabricConfig.TlsRootCerts = append(fabricConfig.TlsRootCerts, newTLSRootCerts...)
+
+		// 5. Repack
+		newFabricConfigBytes, err := proto.Marshal(fabricConfig)
+		require.NoError(t, err, "marshal FabricMSPConfig for org %s", orgName)
+
+		mspConfig.Config = newFabricConfigBytes
+		newMspConfigBytes, err := proto.Marshal(mspConfig)
+		require.NoError(t, err, "marshal MSPConfig for org %s", orgName)
+
+		mspVal.Value = newMspConfigBytes
+	}
+
+	// 6. Re-wrap Envelope
+	newCfgEnvBytes, err := proto.Marshal(cfgEnv)
+	require.NoError(t, err, "marshal config envelope")
+	pl.Data = newCfgEnvBytes
+
+	newPayloadBytes, err := proto.Marshal(pl)
+	require.NoError(t, err, "marshal payload")
+	env.Payload = newPayloadBytes
+
+	newEnvBytes, err := proto.Marshal(env)
+	require.NoError(t, err, "marshal envelope")
+	out.Data.Data[0] = newEnvBytes
+
+	return out
 }

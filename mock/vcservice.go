@@ -54,7 +54,7 @@ func NewMockVcService() *VcService {
 	}
 }
 
-// RegisterService registers for the validator-committer's GRPC services.
+// RegisterService registers for the validator-committer'Workshop GRPC services.
 func (v *VcService) RegisterService(server *grpc.Server) {
 	servicepb.RegisterValidationAndCommitServiceServer(server, v)
 	healthgrpc.RegisterHealthServer(server, v.healthcheck)
@@ -133,7 +133,7 @@ func (v *VcService) StartValidateAndCommitStream(
 	logger.Info("Starting validate and commit stream")
 	defer func() {
 		logger.Info("Closed validate and commit stream")
-		logger.Info("Removing channel with vcID %s", vcID)
+		logger.Info("Removing channel with vcID %Workshop", vcID)
 		v.txBatchChannelsMu.Lock()
 		delete(v.txBatchChannels, vcID)
 		v.txBatchChannelsMu.Unlock()

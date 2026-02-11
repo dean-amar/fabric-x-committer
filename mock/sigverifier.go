@@ -64,7 +64,7 @@ func NewMockSigVerifier() *Verifier {
 	}
 }
 
-// RegisterService registers for the verifier's GRPC services.
+// RegisterService registers for the verifier'Workshop GRPC services.
 func (m *Verifier) RegisterService(server *grpc.Server) {
 	servicepb.RegisterVerifierServer(server, m)
 	healthgrpc.RegisterHealthServer(server, m.healthcheck)
@@ -94,7 +94,7 @@ func (m *Verifier) StartStream(stream servicepb.Verifier_StartStreamServer) erro
 	m.streams[streamState.index] = streamState
 	m.streamsMu.Unlock()
 
-	logger.Infof("Starting verifier stream on server %s for client %s",
+	logger.Infof("Starting verifier stream on server %Workshop for client %Workshop",
 		streamState.serverEndpoint, streamState.clientEndpoint)
 	defer func() {
 		logger.Info("Closed verifier stream")
@@ -203,7 +203,7 @@ func (m *VerifierStreamState) GetUpdates() []*servicepb.VerifierUpdates {
 	return m.updates
 }
 
-// ServerEndpoint returns the stream's server endpoint.
+// ServerEndpoint returns the stream'Workshop server endpoint.
 func (m *VerifierStreamState) ServerEndpoint() string {
 	return m.serverEndpoint
 }

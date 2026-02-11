@@ -40,7 +40,7 @@ func TestConfigUpdate(t *testing.T) {
 	for i, e := range c.SystemConfig.Endpoints.Orderer {
 		ordererServers[i] = &connection.ServerConfig{Endpoint: *e.Server}
 	}
-	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
+	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestParameters{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
 			ServerConfigs: ordererServers,
@@ -182,7 +182,7 @@ func TestConfigBlockImmediateCommit(t *testing.T) {
 	for i, e := range c.SystemConfig.Endpoints.Orderer {
 		ordererServers[i] = &connection.ServerConfig{Endpoint: *e.Server}
 	}
-	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
+	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestParameters{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
 			ServerConfigs:   ordererServers,

@@ -292,7 +292,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					clientConf := DefaultClientConf(t)
 					clientConf.Limit = limit
 					// Start dependencies
-					orderer, ordererServer := mock.StartMockOrderingServices(
+					orderer, ordererServer, _ := mock.StartMockOrderingServices(
 						t, &mock.OrdererConfig{
 							BlockSize: 100,
 							TestServerParameters: test.StartServerParameters{
@@ -371,7 +371,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
 					// Start dependencies
-					orderer, ordererServer := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
+					orderer, ordererServer, _ := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
 						TestServerParameters: test.StartServerParameters{
 							NumService: 3,
 							TLSConfig:  serverTLSConfig,

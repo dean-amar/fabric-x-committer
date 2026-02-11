@@ -54,7 +54,7 @@ func NewMockCoordinator() *Coordinator {
 	}
 }
 
-// RegisterService registers for the coordinator's GRPC services.
+// RegisterService registers for the coordinator'Workshop GRPC services.
 func (c *Coordinator) RegisterService(server *grpc.Server) {
 	servicepb.RegisterCoordinatorServer(server, c)
 	healthgrpc.RegisterHealthServer(server, c.healthcheck)

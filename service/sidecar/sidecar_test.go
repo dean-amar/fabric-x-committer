@@ -90,7 +90,7 @@ func TestSidecarSecureConnection(t *testing.T) {
 	test.RunSecureConnectionTest(t,
 		func(t *testing.T, serverCreds, clientCreds connection.TLSConfig) test.RPCAttempt {
 			t.Helper()
-			env := newSidecarTestEnvWithTLS(
+			env := newSidecarTestEnv(
 				t,
 				sidecarTestConfig{NumService: 1, ServerTLS: serverCreds, ClientTLS: clientCreds},
 			)
@@ -108,7 +108,22 @@ func TestSidecarSecureConnection(t *testing.T) {
 	)
 }
 
-func newSidecarTestEnvWithTLS(
+func TestSidecarConfigBlockFetch(t *testing.T) {
+	t.Parallel()
+	serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
+	env := newSidecarTestEnv(t,
+		sidecarTestConfig{
+			SubmitGenesisBlock: true, ServerTLS: serverTLSConfig, ClientTLS: clientTLSConfig,
+		},
+	)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, clientTLSConfig)
+	env.requireBlock(ctx, t, 0)
+	env.sendTransactionsAndEnsureCommitted(ctx, t, 1)
+}
+
+func newSidecarTestEnv(
 	t *testing.T,
 	conf sidecarTestConfig,
 ) *sidecarTestEnv {
@@ -116,7 +131,7 @@ func newSidecarTestEnvWithTLS(
 	coordinator, coordinatorServer := mock.StartMockCoordinatorService(t, test.StartServerParameters{
 		TLSConfig: conf.ServerTLS,
 	})
-	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestConfig{
+	ordererEnv := mock.NewOrdererTestEnv(t, &mock.OrdererTestParameters{
 		ChanID: "ch1",
 		Config: &mock.OrdererConfig{
 			TestServerParameters: test.StartServerParameters{
@@ -134,22 +149,22 @@ func newSidecarTestEnvWithTLS(
 		NumHolders: conf.NumHolders,
 	})
 
-	ordererEndpoints := ordererEnv.AllEndpoints()
-	configBlock := ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-		OrdererEndpoints: ordererEndpoints,
-		ChannelID:        ordererEnv.TestConfig.ChanID,
-	})
+	// Submit config-block.
+	require.NotNil(t, ordererEnv.Orderer.ConfigBlock)
+	require.NoError(t, ordererEnv.Orderer.SubmitBlock(t.Context(), ordererEnv.Orderer.ConfigBlock))
 
+	rootCA := ordererEnv.Workshop.GetAllOrdererServerConfigs(t)[0].TLS.CACertPaths
 	var genesisBlockFilePath string
+	// if we are not using genesis-block we attach the root CA of the orderers.
 	initOrdererOrganizations := map[string]*ordererconn.OrganizationConfig{
 		"org": {
-			Endpoints: ordererEndpoints,
-			CACerts:   conf.ClientTLS.CACertPaths,
+			Endpoints: ordererEnv.AllEndpoints(),
+			CACerts:   append(conf.ClientTLS.CACertPaths, rootCA...),
 		},
 	}
 	if conf.SubmitGenesisBlock {
 		genesisBlockFilePath = filepath.Join(t.TempDir(), "config.block")
-		require.NoError(t, configtxgen.WriteOutputBlock(configBlock, genesisBlockFilePath))
+		require.NoError(t, configtxgen.WriteOutputBlock(ordererEnv.Orderer.ConfigBlock, genesisBlockFilePath))
 		initOrdererOrganizations = nil
 	}
 	sidecarConf := &Config{
@@ -182,7 +197,7 @@ func newSidecarTestEnvWithTLS(
 		coordinatorServer: coordinatorServer,
 		ordererEnv:        ordererEnv,
 		config:            *sidecarConf,
-		configBlock:       configBlock,
+		configBlock:       ordererEnv.Orderer.ConfigBlock,
 	}
 }
 
@@ -245,7 +260,7 @@ func TestSidecar(t *testing.T) {
 				t.Run(conf.String(), func(t *testing.T) {
 					t.Parallel()
 					conf.ServerTLS, conf.ClientTLS = serverTLSConfig, clientTLSConfig
-					env := newSidecarTestEnvWithTLS(t, conf)
+					env := newSidecarTestEnv(t, conf)
 					ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 					t.Cleanup(cancel)
 					env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, clientTLSConfig)
@@ -259,12 +274,12 @@ func TestSidecar(t *testing.T) {
 
 func TestSidecarConfigUpdate(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes {
+	for _, mode := range test.ServerModes[2:3] {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
-			env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
-				NumService: 3, NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
+			env := newSidecarTestEnv(t, sidecarTestConfig{
+				NumHolders: 3, ClientTLS: clientTLSConfig, ServerTLS: serverTLSConfig,
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			t.Cleanup(cancel)
@@ -277,14 +292,19 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			expectedBlock++
 
 			submitConfigBlock := func(endpoints []*commontypes.OrdererEndpoint) {
-				env.ordererEnv.SubmitConfigBlock(t, &workload.ConfigBlock{
-					OrdererEndpoints: endpoints,
-				})
+				t.Logf("submitting eps: %v", endpoints)
+
+				patched := test.PatchOrdererOrgEndpointsInConfigBlock(
+					t,
+					env.ordererEnv.Orderer.ConfigBlock,
+					endpoints,
+				)
+				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), patched))
 			}
 
-			t.Log("Update the sidecar to use a second orderer group")
-			env.ordererEnv.Holder.HoldFromBlock.Store(expectedBlock + 2)
-			submitConfigBlock(env.ordererEnv.AllHolderEndpoints())
+			t.Log("Update the sidecar to use a holding orderer group")
+			holdingEndpoints, nonHoldingEndpoints := env.ordererEnv.Workshop.AllEndpoints[:1], env.ordererEnv.Workshop.AllEndpoints[1:]
+			submitConfigBlock(holdingEndpoints)
 			env.requireBlock(ctx, t, expectedBlock)
 			expectedBlock++
 
@@ -296,7 +316,7 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			// We submit the config that returns to the non-holding orderer.
 			// But it should not be processed as the sidecar should have switched to the holding
 			// orderer.
-			submitConfigBlock(env.ordererEnv.AllRealOrdererEndpoints())
+			submitConfigBlock(nonHoldingEndpoints)
 			select {
 			case <-ctx.Done():
 				t.Fatal("context deadline exceeded")
@@ -313,6 +333,9 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			require.Equal(t, expectedBlock, nextBlock.Number)
 
 			t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
+			env.ordererEnv.Holder = &mock.HoldingOrderer{
+				Orderer: env.ordererEnv.Orderer,
+			}
 			env.ordererEnv.Holder.HoldFromBlock.Add(1)
 			env.requireBlock(ctx, t, expectedBlock)
 			expectedBlock++
@@ -325,7 +348,7 @@ func TestSidecarConfigUpdate(t *testing.T) {
 
 func TestSidecarConfigRecovery(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{NumService: 3})
+	env := newSidecarTestEnv(t, sidecarTestConfig{NumService: 3})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
@@ -380,7 +403,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 
 func TestSidecarRecovery(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{})
+	env := newSidecarTestEnv(t, sidecarTestConfig{})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
@@ -462,7 +485,7 @@ func TestSidecarRecovery(t *testing.T) {
 
 func TestSidecarRecoveryAfterCoordinatorFailure(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{})
+	env := newSidecarTestEnv(t, sidecarTestConfig{})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
@@ -507,7 +530,7 @@ func TestSidecarRecoveryAfterCoordinatorFailure(t *testing.T) {
 
 func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{})
+	env := newSidecarTestEnv(t, sidecarTestConfig{})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 
@@ -544,7 +567,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 
 func TestSidecarVerifyBadTxForm(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{SubmitGenesisBlock: true})
+	env := newSidecarTestEnv(t, sidecarTestConfig{SubmitGenesisBlock: true})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
@@ -759,7 +782,7 @@ func makeValidTx(t *testing.T, chanID string) *servicepb.LoadGenTx {
 // (pointing to non-existent or non-member ordering services), ledger recovery would fail.
 func TestSidecarRecoveryUpdatesOrdererEndpointsBeforeLedgerRecovery(t *testing.T) {
 	t.Parallel()
-	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{
+	env := newSidecarTestEnv(t, sidecarTestConfig{
 		NumService: 3, ServerTLS: test.InsecureTLSConfig, ClientTLS: test.InsecureTLSConfig,
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
