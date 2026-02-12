@@ -112,6 +112,7 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
 		return connection.FilterStreamRPCError(service.Run(ctx))
 	}, service.WaitForReady)
+
 	// updating the orderer sever-configs with the generated TLS credentials.
 	for mspID, serverConfigs := range ordererSplit.ServerConfigPerID {
 		for i, ordererServer := range serverConfigs {
@@ -127,6 +128,13 @@ func StartMockOrderingServices(t *testing.T, conf *OrdererConfig) (
 			ordererServer.TLS.CertPath = filepath.Join(certDir, "server.crt")
 			ordererServer.TLS.KeyPath = filepath.Join(certDir, "server.key")
 		}
+
+		ordererSplit.MspIDToRootCAsPaths[mspID] = append(ordererSplit.MspIDToRootCAsPaths[mspID], filepath.Join(
+			policy.CryptoMaterialPath,
+			cryptogen.OrdererOrganizationsDir, fmt.Sprintf("orderer-org-%d", mspID),
+			cryptogen.OrdererNodesDir, fmt.Sprintf("orderer-0-org-%d", mspID),
+			cryptogen.TLSDir, "ca.crt",
+		))
 	}
 
 	return service, test.StartGrpcServersWithConfigForTest(
@@ -164,21 +172,19 @@ type OrdererServersParameters struct {
 // OrdererServers describes the Orderer'Workshop server config and endpoints.
 type OrdererServers struct {
 	OrdererServersParameters
-	InstanceCount     int
-	AllServerConfig   []*connection.ServerConfig
-	ServerConfigPerID map[uint32][]*connection.ServerConfig
-	AllEndpoints      []*commontypes.OrdererEndpoint
-	EndpointsPerID    map[uint32][]*commontypes.OrdererEndpoint
+	InstanceCount       int
+	AllServerConfig     []*connection.ServerConfig
+	ServerConfigPerID   map[uint32][]*connection.ServerConfig
+	AllEndpoints        []*commontypes.OrdererEndpoint
+	EndpointsPerID      map[uint32][]*commontypes.OrdererEndpoint
+	MspIDToRootCAsPaths map[uint32][]string
 }
 
 func (o *OrdererServers) GetAllOrdererServerConfigs(t *testing.T) []*connection.ServerConfig {
 	t.Helper()
 	allServerConfigs := make([]*connection.ServerConfig, 0, o.InstanceCount)
-	for msp, configs := range o.ServerConfigPerID {
-		for i, config := range configs {
-			t.Logf("Orderer Server Config for MSP %d, Server %d: %+v\n", msp, i, config)
-			allServerConfigs = append(allServerConfigs, config)
-		}
+	for _, configs := range o.ServerConfigPerID {
+		allServerConfigs = append(allServerConfigs, configs...)
 	}
 	return allServerConfigs
 }
@@ -223,6 +229,7 @@ func AllocateOrdererServers(t *testing.T, p *OrdererServersParameters) *OrdererS
 		ServerConfigPerID:        scPerID,
 		AllEndpoints:             allEndpoints,
 		EndpointsPerID:           endpointsPerID,
+		MspIDToRootCAsPaths:      make(map[uint32][]string),
 	}
 }
 
@@ -232,7 +239,9 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestParameters) *OrdererTestEn
 	orderer, ordererServers, ordererSplit := StartMockOrderingServices(t, conf.Config)
 	holder := &HoldingOrderer{Orderer: orderer}
 	holder.Release()
-	t.Logf("ORDERERHOLDERTLS: %v", ordererSplit.GetAllOrdererServerConfigs(t)[0].TLS)
+	t.Logf("ALL ORDERER CONFIGS: %v, %v, %v, %v", ordererSplit.GetAllOrdererServerConfigs(t)[0].TLS, ordererSplit.GetAllOrdererServerConfigs(t)[1].TLS, ordererSplit.GetAllOrdererServerConfigs(t)[2].TLS, ordererSplit.GetAllOrdererServerConfigs(t)[3].TLS)
+	holderTLS := ordererSplit.GetAllOrdererServerConfigs(t)[0].TLS
+	t.Logf("ORDERERHOLDERTLS: %v", holderTLS)
 	return &OrdererTestEnv{
 		TestConfig:     conf,
 		Orderer:        orderer,
@@ -242,7 +251,7 @@ func NewOrdererTestEnv(t *testing.T, conf *OrdererTestParameters) *OrdererTestEn
 		HolderServers: test.StartGrpcServersForTest(
 			t.Context(), t, test.StartServerParameters{
 				NumService: conf.NumHolders,
-				TLSConfig:  ordererSplit.GetAllOrdererServerConfigs(t)[0].TLS,
+				TLSConfig:  holderTLS,
 				// use the same TLS config as the orderer servers to simplify the setup. In real case, they can be different.
 				// The test only verifies the connectivity and basic interactions between holder and orderer, so it is fine to use the same TLS config.
 				// If needed, we can also generate separate TLS config for holder servers.

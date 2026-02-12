@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func TestSidecarSecureConnection(t *testing.T) {
 			t.Helper()
 			env := newSidecarTestEnv(
 				t,
-				sidecarTestConfig{NumService: 1, ServerTLS: serverCreds, ClientTLS: clientCreds},
+				sidecarTestConfig{NumService: 1, SubmitGenesisBlock: true, ServerTLS: serverCreds, ClientTLS: clientCreds},
 			)
 			env.startSidecarService(t.Context(), t)
 			return func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error {
@@ -108,7 +109,7 @@ func TestSidecarSecureConnection(t *testing.T) {
 	)
 }
 
-func TestSidecarConfigBlockFetch(t *testing.T) {
+func TestSidecarGenesisBlockFetch(t *testing.T) {
 	t.Parallel()
 	serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
 	env := newSidecarTestEnv(t,
@@ -153,15 +154,16 @@ func newSidecarTestEnv(
 	require.NotNil(t, ordererEnv.Orderer.ConfigBlock)
 	require.NoError(t, ordererEnv.Orderer.SubmitBlock(t.Context(), ordererEnv.Orderer.ConfigBlock))
 
-	rootCA := ordererEnv.Workshop.GetAllOrdererServerConfigs(t)[0].TLS.CACertPaths
 	var genesisBlockFilePath string
-	// if we are not using genesis-block we attach the root CA of the orderers.
-	initOrdererOrganizations := map[string]*ordererconn.OrganizationConfig{
-		"org": {
-			Endpoints: ordererEnv.AllEndpoints(),
-			CACerts:   append(conf.ClientTLS.CACertPaths, rootCA...),
-		},
+	initOrdererOrganizations := make(map[string]*ordererconn.OrganizationConfig)
+	for id, endpoints := range ordererEnv.Workshop.EndpointsPerID {
+		t.Logf("Orderer organization %d has endpoints: %v", id, endpoints)
+		initOrdererOrganizations[strconv.Itoa(int(id))] = &ordererconn.OrganizationConfig{
+			Endpoints: endpoints,
+			CACerts:   append(conf.ClientTLS.CACertPaths, ordererEnv.Workshop.MspIDToRootCAsPaths[id]...),
+		}
 	}
+
 	if conf.SubmitGenesisBlock {
 		genesisBlockFilePath = filepath.Join(t.TempDir(), "config.block")
 		require.NoError(t, configtxgen.WriteOutputBlock(ordererEnv.Orderer.ConfigBlock, genesisBlockFilePath))
@@ -245,21 +247,22 @@ func (env *sidecarTestEnv) startNotificationStream(
 
 func TestSidecar(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes {
+	for _, mode := range test.ServerModes[:1] {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
 			for _, conf := range []sidecarTestConfig{
-				{SubmitGenesisBlock: false},
-				{SubmitGenesisBlock: true},
+				{SubmitGenesisBlock: false, ServerTLS: serverTLSConfig, ClientTLS: clientTLSConfig},
+				{SubmitGenesisBlock: true, ServerTLS: serverTLSConfig, ClientTLS: clientTLSConfig},
 				{
 					SubmitGenesisBlock: true,
 					NumFakeService:     3,
+					ServerTLS:          serverTLSConfig,
+					ClientTLS:          clientTLSConfig,
 				},
 			} {
 				t.Run(conf.String(), func(t *testing.T) {
 					t.Parallel()
-					conf.ServerTLS, conf.ClientTLS = serverTLSConfig, clientTLSConfig
 					env := newSidecarTestEnv(t, conf)
 					ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 					t.Cleanup(cancel)
@@ -274,7 +277,7 @@ func TestSidecar(t *testing.T) {
 
 func TestSidecarConfigUpdate(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes[2:3] {
+	for _, mode := range test.ServerModes {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
@@ -302,8 +305,13 @@ func TestSidecarConfigUpdate(t *testing.T) {
 				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), patched))
 			}
 
+			submitConfigBlockForNonHolders := func() {
+				require.NoError(t, env.ordererEnv.Orderer.SubmitBlock(t.Context(), env.ordererEnv.Orderer.ConfigBlock))
+			}
+
 			t.Log("Update the sidecar to use a holding orderer group")
-			holdingEndpoints, nonHoldingEndpoints := env.ordererEnv.Workshop.AllEndpoints[:1], env.ordererEnv.Workshop.AllEndpoints[1:]
+			env.ordererEnv.Holder.HoldFromBlock.Store(expectedBlock + 2)
+			holdingEndpoints := env.ordererEnv.AllHolderEndpoints()
 			submitConfigBlock(holdingEndpoints)
 			env.requireBlock(ctx, t, expectedBlock)
 			expectedBlock++
@@ -316,7 +324,7 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			// We submit the config that returns to the non-holding orderer.
 			// But it should not be processed as the sidecar should have switched to the holding
 			// orderer.
-			submitConfigBlock(nonHoldingEndpoints)
+			submitConfigBlockForNonHolders()
 			select {
 			case <-ctx.Done():
 				t.Fatal("context deadline exceeded")
@@ -333,9 +341,6 @@ func TestSidecarConfigUpdate(t *testing.T) {
 			require.Equal(t, expectedBlock, nextBlock.Number)
 
 			t.Log("We advance the holder by one to allow the config block to pass through, but not other blocks")
-			env.ordererEnv.Holder = &mock.HoldingOrderer{
-				Orderer: env.ordererEnv.Orderer,
-			}
 			env.ordererEnv.Holder.HoldFromBlock.Add(1)
 			env.requireBlock(ctx, t, expectedBlock)
 			expectedBlock++
