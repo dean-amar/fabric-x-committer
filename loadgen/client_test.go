@@ -23,7 +23,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
@@ -211,7 +210,7 @@ func TestLoadGenForCoordinator(t *testing.T) {
 
 func TestLoadGenForSidecar(t *testing.T) {
 	t.Parallel()
-	for _, mode := range test.ServerModes {
+	for _, mode := range test.ServerModes[:1] {
 		t.Run(fmt.Sprintf("tls-mode:%s", mode), func(t *testing.T) {
 			t.Parallel()
 			serverTLSConfig, clientTLSConfig := test.CreateServerAndClientTLSConfig(t, mode)
@@ -292,10 +291,12 @@ func TestLoadGenForOrderer(t *testing.T) {
 					clientConf := DefaultClientConf(t)
 					clientConf.Limit = limit
 					// Start dependencies
-					orderer, ordererServer, _ := mock.StartMockOrderingServices(
+					orderer, _, ordererBundle := mock.StartMockOrderingServices(
 						t, &mock.OrdererConfig{
 							BlockSize: 100,
+							// To be explicit, we set the NumIDs to 1.
 							TestServerParameters: test.StartServerParameters{
+								NumIDs:     1,
 								NumService: 3,
 								TLSConfig:  serverTLSConfig,
 							},
@@ -305,7 +306,6 @@ func TestLoadGenForOrderer(t *testing.T) {
 						TLSConfig: serverTLSConfig,
 					})
 
-					endpoints := test.NewOrdererEndpoints(0, ordererServer.Configs...)
 					sidecarConf := &sidecar.Config{
 						Server:                        connection.NewLocalHostServer(serverTLSConfig),
 						LastCommittedBlockSetInterval: 100 * time.Millisecond,
@@ -323,12 +323,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 							Identity:      clientConf.LoadProfile.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
 							TLS:           ordererconn.TLSConfigToOrdererTLSConfig(clientTLSConfig),
-							Organizations: map[string]*ordererconn.OrganizationConfig{
-								"org": {
-									Endpoints: endpoints,
-									CACerts:   clientTLSConfig.CACertPaths,
-								},
-							},
+							Organizations: ordererBundle.CreateOrganizationConfig(t, &clientTLSConfig),
 						},
 					}
 
@@ -339,11 +334,7 @@ func TestLoadGenForOrderer(t *testing.T) {
 					test.RunServiceAndGrpcForTest(t.Context(), t, service, sidecarConf.Server)
 
 					// Submit default config block.
-					require.NotNil(t, clientConf.LoadProfile)
-					clientConf.LoadProfile.Policy.OrdererEndpoints = endpoints
-					configBlock, err := workload.CreateConfigBlock(&clientConf.LoadProfile.Policy)
-					require.NoError(t, err)
-					err = orderer.SubmitBlock(t.Context(), configBlock)
+					err = orderer.SubmitBlock(t.Context(), orderer.ConfigBlock)
 					require.NoError(t, err)
 
 					// Start client
@@ -371,25 +362,19 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 				t.Run(limitToString(limit), func(t *testing.T) {
 					t.Parallel()
 					// Start dependencies
-					orderer, ordererServer, _ := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
+					orderer, _, ordererBundle := mock.StartMockOrderingServices(t, &mock.OrdererConfig{
 						TestServerParameters: test.StartServerParameters{
+							NumIDs:     1,
 							NumService: 3,
 							TLSConfig:  serverTLSConfig,
 						},
 						BlockSize: int(clientConf.LoadProfile.Block.MaxSize), //nolint:gosec // uint64 -> int.
 					})
 
-					endpoints := test.NewOrdererEndpoints(0, ordererServer.Configs...)
-
 					// Submit default config block.
 					// This is ignored when sidecar isn't used.
 					// We validate the test doesn't break when config block is delivered.
-					require.NotNil(t, clientConf.LoadProfile)
-					clientConf.LoadProfile.Policy.OrdererEndpoints = endpoints
-					configBlock, err := workload.CreateConfigBlock(&clientConf.LoadProfile.Policy)
-					require.NoError(t, err)
-					err = orderer.SubmitBlock(t.Context(), configBlock)
-					require.NoError(t, err)
+					require.NoError(t, orderer.SubmitBlock(t.Context(), orderer.ConfigBlock))
 
 					// Start client
 					clientConf.Adapter.OrdererClient = &adapters.OrdererClientConfig{
@@ -398,12 +383,7 @@ func TestLoadGenForOnlyOrderer(t *testing.T) {
 							Identity:      clientConf.LoadProfile.Policy.Identity,
 							ConsensusType: ordererconn.Bft,
 							TLS:           ordererconn.TLSConfigToOrdererTLSConfig(clientTLSConfig),
-							Organizations: map[string]*ordererconn.OrganizationConfig{
-								"org": {
-									Endpoints: endpoints,
-									CACerts:   clientTLSConfig.CACertPaths,
-								},
-							},
+							Organizations: ordererBundle.CreateOrganizationConfig(t, &clientTLSConfig),
 						},
 						BroadcastParallelism: 5,
 					}

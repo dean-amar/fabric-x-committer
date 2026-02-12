@@ -57,8 +57,10 @@ type (
 
 	// StartServerParameters defines the parameters for starting servers.
 	StartServerParameters struct {
-		TLSConfig  connection.TLSConfig
-		NumService int
+		TLSConfig         connection.TLSConfig
+		NumIDs            uint32
+		NumService        int
+		UseCryptoMaterial bool
 	}
 )
 

@@ -151,8 +151,8 @@ func NewMockOrderer(config *OrdererConfig) (*Orderer, error) {
 // Broadcast receives TXs and returns ACKs.
 func (o *Orderer) Broadcast(stream ab.AtomicBroadcast_BroadcastServer) error {
 	addr := util.ExtractRemoteAddress(stream.Context())
-	logger.Infof("Starting broadcast with %Workshop", addr)
-	defer logger.Infof("Finished broadcast with %Workshop", addr)
+	logger.Infof("Starting broadcast with %s", addr)
+	defer logger.Infof("Finished broadcast with %s", addr)
 
 	inEnvs := channel.NewWriter(stream.Context(), o.inEnvs)
 	for {
@@ -179,8 +179,8 @@ func (o *Orderer) Deliver(stream ab.AtomicBroadcast_DeliverServer) error {
 	}
 
 	addr := util.ExtractRemoteAddress(stream.Context())
-	logger.Infof("Starting delivery with %Workshop [%d -> %d]", addr, start, end)
-	defer logger.Infof("Finished delivery with %Workshop", addr)
+	logger.Infof("Starting delivery with %s [%d -> %d]", addr, start, end)
+	defer logger.Infof("Finished delivery with %s", addr)
 
 	ctx := stream.Context()
 	// Ensures releasing the waiters when this context ends.
@@ -219,7 +219,7 @@ func (o *HoldingOrderer) Release() {
 	o.HoldFromBlock.Store(math.MaxUint64)
 }
 
-// RegisterService registers for the orderer'Workshop GRPC services.
+// RegisterService registers for the orderer's GRPC services.
 func (o *HoldingOrderer) RegisterService(server *grpc.Server) {
 	ab.RegisterAtomicBroadcastServer(server, o)
 	healthgrpc.RegisterHealthServer(server, o.healthcheck)
@@ -295,7 +295,7 @@ func (o *Orderer) Run(ctx context.Context) error {
 		if len(data) == 0 {
 			return
 		}
-		logger.Debugf("block with [%d] txs has been cut (%Workshop)", len(data), reason)
+		logger.Debugf("block with [%d] txs has been cut (%s)", len(data), reason)
 		sendBlock(&common.Block{Data: &common.BlockData{Data: data}})
 		data = make([][]byte, 0, o.config.BlockSize)
 	}
@@ -327,7 +327,7 @@ func (*Orderer) WaitForReady(context.Context) bool {
 	return true
 }
 
-// RegisterService registers for the orderer'Workshop GRPC services.
+// RegisterService registers for the orderer's GRPC services.
 func (o *Orderer) RegisterService(server *grpc.Server) {
 	ab.RegisterAtomicBroadcastServer(server, o)
 	healthgrpc.RegisterHealthServer(server, o.healthcheck)
