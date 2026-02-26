@@ -29,6 +29,7 @@ type OrganizationMaterial struct {
 // NewOrganizationsMaterials reads the organizations' materials.
 func NewOrganizationsMaterials(orgs map[string]*OrganizationConfig, tlsMode string) ([]*OrganizationMaterial, error) {
 	organizationsMaterial := make([]*OrganizationMaterial, 0, len(orgs))
+
 	for mspID, orgConfig := range orgs {
 		orgsMaterial := &OrganizationMaterial{
 			MspID:     mspID,
