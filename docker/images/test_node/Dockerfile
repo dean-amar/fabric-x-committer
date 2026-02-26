@@ -44,6 +44,22 @@ RUN chmod a+x ${BINS_PATH}/*
 # This includes private keys, public keys, TLS keys, etc.
 RUN ${BINS_PATH}/loadgen make-material -c "${CONFIGS_PATH}/loadgen.yaml"
 
+# Create symbolic links for TLS certificates
+# Server certificates: Use peer-org-0's sidecar node certificates (for application services)
+# Client certificates: Use peer-org-0's client certificates
+RUN PEER_ORG_PATH="${MATERIAL_PATH}/peerOrganizations/peer-org-0" && \
+    SERVER_TLS_PATH="${PEER_ORG_PATH}/peers/sidecar-peer-org-0/tls" && \
+    CLIENT_TLS_PATH="${PEER_ORG_PATH}/users/client@peer-org-0.com/tls" && \
+    ORDERER_TLS_PATH="${MATERIAL_PATH}/ordererOrganizations/orderer-org-0/orderers/orderer-0-org-0/tls" && \
+    mkdir -p /server-certs /client-certs && \
+    ln -s "${SERVER_TLS_PATH}/server.crt" /server-certs/public-key.pem && \
+    ln -s "${SERVER_TLS_PATH}/server.key" /server-certs/private-key.pem && \
+    ln -s "${SERVER_TLS_PATH}/ca.crt" /server-certs/ca-certificate.pem && \
+    ln -s "${CLIENT_TLS_PATH}/client.crt" /client-certs/public-key.pem && \
+    ln -s "${CLIENT_TLS_PATH}/client.key" /client-certs/private-key.pem && \
+    ln -s "${CLIENT_TLS_PATH}/ca.crt" /client-certs/ca-certificate.pem && \
+    ln -s "${ORDERER_TLS_PATH}/ca.crt" /client-certs/orderer-ca-certificate.pem
+
 # Expose ports
 EXPOSE 7050 4001 2114 7001 2117 2110
 
