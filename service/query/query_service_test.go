@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"strings"
 	"testing"
 	"time"
@@ -534,7 +535,9 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		Server:                connection.NewLocalHostServer(opts.serverTLS),
 		MaxRequestKeys:        opts.maxRequestKeys,
 		Database:              dbConf,
-		Monitoring:            connection.NewLocalHostServer(test.InsecureTLSConfig),
+		Monitoring: &monitoring.Config{
+			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
+		},
 	}
 
 	qs := NewQueryService(config)

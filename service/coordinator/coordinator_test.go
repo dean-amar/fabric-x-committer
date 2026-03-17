@@ -123,7 +123,9 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 			WaitingTxsLimit:           10,
 		},
 		ChannelBufferSizePerGoroutine: 2000,
-		Monitoring:                    connection.NewLocalHostServer(test.InsecureTLSConfig),
+		Monitoring: &monitoring.Config{
+			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
+		},
 	}
 
 	return &coordinatorTestEnv{
@@ -1000,7 +1002,9 @@ func fakeConfigForTest(t *testing.T) *Config {
 		Verifier:           *test.NewTLSMultiClientConfig(test.InsecureTLSConfig, randomEndpoint),
 		ValidatorCommitter: *test.NewTLSMultiClientConfig(test.InsecureTLSConfig, randomEndpoint),
 		DependencyGraph:    &DependencyGraphConfig{},
-		Monitoring:         connection.NewLocalHostServer(test.InsecureTLSConfig),
+		Monitoring: &monitoring.Config{
+			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
+		},
 	}
 }
 

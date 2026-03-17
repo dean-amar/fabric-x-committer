@@ -127,7 +127,7 @@ func (vc *ValidatorCommitterService) Run(ctx context.Context) error {
 
 	g.Go(func() error {
 		logger.Info("Starting Prometheus monitoring server")
-		_ = vc.metrics.StartPrometheusServer(
+		_ = vc.metrics.StartPrometheusServerWithConfig(
 			eCtx, vc.config.Monitoring, vc.monitorQueues,
 		)
 		// We don't return error here to avoid stopping the service due to monitoring error.

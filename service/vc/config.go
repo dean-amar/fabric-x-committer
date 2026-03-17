@@ -11,6 +11,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/dbconn"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 // Config is the configuration for the validator-committer service.
@@ -18,7 +19,7 @@ type Config struct {
 	Server         *connection.ServerConfig `mapstructure:"server"`
 	Database       *DatabaseConfig          `mapstructure:"database"`
 	ResourceLimits *ResourceLimitsConfig    `mapstructure:"resource-limits"`
-	Monitoring     *connection.ServerConfig `mapstructure:"monitoring"`
+	Monitoring     *monitoring.Config       `mapstructure:"monitoring"`
 }
 
 // DatabaseConfig is the configuration for the database.

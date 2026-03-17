@@ -559,7 +559,9 @@ func defaultConfigWithTLS(tlsConfig connection.TLSConfig) *Config {
 			Parallelism:       3,
 			ChannelBufferSize: 1,
 		},
-		Monitoring: connection.NewLocalHostServer(test.InsecureTLSConfig),
+		Monitoring: &monitoring.Config{
+			Server: connection.NewLocalHostServer(test.InsecureTLSConfig),
+		},
 	}
 }
 

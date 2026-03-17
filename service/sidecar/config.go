@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererconn"
 )
 
@@ -20,7 +21,7 @@ type (
 	// It may contain the orderer endpoint from which the sidecar pulls blocks.
 	Config struct {
 		Server                        *connection.ServerConfig  `mapstructure:"server"`
-		Monitoring                    *connection.ServerConfig  `mapstructure:"monitoring"`
+		Monitoring                    *monitoring.Config        `mapstructure:"monitoring"`
 		Committer                     *connection.ClientConfig  `mapstructure:"committer"`
 		Orderer                       ordererconn.Config        `mapstructure:"orderer"`
 		Ledger                        LedgerConfig              `mapstructure:"ledger"`

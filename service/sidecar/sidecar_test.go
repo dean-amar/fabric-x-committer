@@ -162,7 +162,9 @@ func newSidecarTestEnvWithTLS(
 		},
 		LastCommittedBlockSetInterval: 100 * time.Millisecond,
 		WaitingTxsLimit:               1000,
-		Monitoring:                    connection.NewLocalHostServer(conf.ServerTLS),
+		Monitoring: &monitoring.Config{
+			Server: connection.NewLocalHostServer(conf.ServerTLS),
+		},
 		Bootstrap: Bootstrap{
 			GenesisBlockFilePath: genesisBlockFilePath,
 		},
