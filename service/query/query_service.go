@@ -107,8 +107,15 @@ func (q *Service) Run(ctx context.Context) error {
 	}
 	q.ready.SignalReady()
 
-	_ = q.metrics.StartPrometheusServerWithConfig(ctx, q.config.Monitoring)
-	// We don't use the error here as we avoid stopping the service due to monitoring error.
+	go func() {
+		if q.config.Monitoring.Retry == nil {
+			_ = q.metrics.StartPrometheusServer(ctx, q.config.Monitoring.Server)
+		} else {
+			_ = q.config.Monitoring.Retry.Execute(ctx, func() error {
+				return q.metrics.StartPrometheusServer(ctx, q.config.Monitoring.Server)
+			})
+		}
+	}()
 	<-ctx.Done()
 	return nil
 }

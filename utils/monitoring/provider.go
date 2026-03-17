@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,12 +29,6 @@ const (
 	httpScheme     = "http://"
 	metricsSubPath = "/metrics"
 	pprofSubPath   = "/debug/pprof/"
-
-	// Default retry configuration for Prometheus server startup
-	defaultPrometheusRetryInitialInterval = 500 * time.Millisecond
-	defaultPrometheusRetryMaxInterval     = 5 * time.Second
-	defaultPrometheusRetryMaxElapsedTime  = 30 * time.Second
-	defaultPrometheusRetryMultiplier      = 2.0
 )
 
 // Config holds the configuration for the monitoring provider.
@@ -57,84 +50,10 @@ func NewProvider() *Provider {
 	return &Provider{registry: prometheus.NewRegistry()}
 }
 
-// StartPrometheusServer starts a prometheus server with a default retry mechanism.
+// StartPrometheusServer starts a prometheus server.
 // It also starts the given monitoring methods. Their context will cancel once the server is cancelled.
 // This method returns once the server is shutdown and all monitoring methods returns.
-// The server will retry startup with exponential backoff for up to 30 seconds by default.
-// Deprecated: Use StartPrometheusServerWithConfig instead for configurable retry behavior.
 func (p *Provider) StartPrometheusServer(
-	ctx context.Context, serverConfig *connection.ServerConfig, monitor ...func(context.Context),
-) error {
-	// Use default retry profile for Prometheus server startup
-	defaultRetry := &connection.RetryProfile{
-		InitialInterval: defaultPrometheusRetryInitialInterval,
-		MaxInterval:     defaultPrometheusRetryMaxInterval,
-		MaxElapsedTime:  defaultPrometheusRetryMaxElapsedTime,
-		Multiplier:      defaultPrometheusRetryMultiplier,
-	}
-	return p.StartPrometheusServerWithRetry(ctx, serverConfig, defaultRetry, monitor...)
-}
-
-// StartPrometheusServerWithConfig starts a prometheus server using the provided configuration.
-// It also starts the given monitoring methods. Their context will cancel once the server is cancelled.
-// This method returns once the server is shutdown and all monitoring methods returns.
-// If config.Retry is nil, a default retry profile will be used.
-func (p *Provider) StartPrometheusServerWithConfig(
-	ctx context.Context, config *Config, monitor ...func(context.Context),
-) error {
-	if config == nil || config.Server == nil {
-		return errors.New("monitoring config and server config are required")
-	}
-
-	retry := config.Retry
-	if retry == nil {
-		// Use default retry profile if not specified
-		retry = &connection.RetryProfile{
-			InitialInterval: defaultPrometheusRetryInitialInterval,
-			MaxInterval:     defaultPrometheusRetryMaxInterval,
-			MaxElapsedTime:  defaultPrometheusRetryMaxElapsedTime,
-			Multiplier:      defaultPrometheusRetryMultiplier,
-		}
-	}
-
-	return p.StartPrometheusServerWithRetry(ctx, config.Server, retry, monitor...)
-}
-
-// StartPrometheusServerWithRetry starts a prometheus server with configurable retry mechanism.
-// It also starts the given monitoring methods. Their context will cancel once the server is cancelled.
-// This method returns once the server is shutdown and all monitoring methods returns.
-// If retryProfile is nil, the server will attempt to start only once without retries.
-func (p *Provider) StartPrometheusServerWithRetry(
-	ctx context.Context, serverConfig *connection.ServerConfig, retryProfile *connection.RetryProfile, monitor ...func(context.Context),
-) error {
-	var serverStartErr error
-
-	startOperation := func() error {
-		serverStartErr = p.startPrometheusServerOnce(ctx, serverConfig, monitor...)
-		if serverStartErr != nil {
-			logger.Warnf("Failed to start prometheus server: %v", serverStartErr)
-			return serverStartErr
-		}
-		return nil
-	}
-
-	// If no retry profile is provided, attempt to start the server once
-	if retryProfile == nil {
-		return startOperation()
-	}
-
-	// Use retry mechanism with exponential backoff
-	b := retryProfile.NewBackoff()
-	retryErr := backoff.Retry(startOperation, backoff.WithContext(b, ctx))
-	if retryErr != nil {
-		return errors.Wrap(serverStartErr, "failed to start prometheus server after retries")
-	}
-
-	return nil
-}
-
-// startPrometheusServerOnce attempts to start the prometheus server once without retries.
-func (p *Provider) startPrometheusServerOnce(
 	ctx context.Context, serverConfig *connection.ServerConfig, monitor ...func(context.Context),
 ) error {
 	logger.Debugf("Creating prometheus server with secure mode: %v", serverConfig.TLS.Mode)

@@ -127,12 +127,12 @@ func (vc *ValidatorCommitterService) Run(ctx context.Context) error {
 
 	g.Go(func() error {
 		logger.Info("Starting Prometheus monitoring server")
-		_ = vc.metrics.StartPrometheusServerWithConfig(
-			eCtx, vc.config.Monitoring, vc.monitorQueues,
-		)
-		// We don't return error here to avoid stopping the service due to monitoring error.
-		// But we use the errgroup to ensure the method returns only when the server exits.
-		return nil
+		if vc.config.Monitoring.Retry == nil {
+			return vc.metrics.StartPrometheusServer(eCtx, vc.config.Monitoring.Server, vc.monitorQueues)
+		}
+		return vc.config.Monitoring.Retry.Execute(eCtx, func() error {
+			return vc.metrics.StartPrometheusServer(eCtx, vc.config.Monitoring.Server, vc.monitorQueues)
+		})
 	})
 
 	g.Go(func() error {

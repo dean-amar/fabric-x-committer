@@ -51,9 +51,19 @@ func New(config *Config) *Server {
 
 // Run the verifier background service.
 func (s *Server) Run(ctx context.Context) error {
-	_ = s.metrics.Provider.StartPrometheusServerWithConfig(ctx, s.config.Monitoring)
-	// We don't return error here to avoid stopping the service due to monitoring error.
-	// But we use the errgroup to ensure the method returns only when the server exits.
+	go func() {
+		var err error
+		if s.config.Monitoring.Retry == nil {
+			err = s.metrics.Provider.StartPrometheusServer(ctx, s.config.Monitoring.Server)
+		} else {
+			err = s.config.Monitoring.Retry.Execute(ctx, func() error {
+				return s.metrics.Provider.StartPrometheusServer(ctx, s.config.Monitoring.Server)
+			})
+		}
+		if err != nil {
+			logger.Warnf("Prometheus server stopped with error: %v", err)
+		}
+	}()
 	return nil
 }
 

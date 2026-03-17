@@ -117,9 +117,18 @@ func (*Service) WaitForReady(context.Context) bool {
 func (s *Service) Run(ctx context.Context) error {
 	pCtx, pCancel := context.WithCancel(ctx)
 	defer pCancel()
-	// similar to other services, when the prometheus server returns an error, we do not terminate the service.
 	go func() {
-		_ = s.metrics.StartPrometheusServerWithConfig(pCtx, s.config.Monitoring, s.monitorQueues)
+		var err error
+		if s.config.Monitoring.Retry == nil {
+			err = s.metrics.StartPrometheusServer(pCtx, s.config.Monitoring.Server, s.monitorQueues)
+		} else {
+			err = s.config.Monitoring.Retry.Execute(pCtx, func() error {
+				return s.metrics.StartPrometheusServer(pCtx, s.config.Monitoring.Server, s.monitorQueues)
+			})
+		}
+		if err != nil {
+			logger.Warnf("Prometheus server stopped with error: %v", err)
+		}
 	}()
 
 	logger.Infof("Create coordinator client and connect to %s", s.config.Committer.Endpoint)

@@ -134,32 +134,6 @@ func (c *ServerConfig) PreAllocateListener() (net.Listener, error) {
 	return listener, nil
 }
 
-// RunGrpcServer runs a server and returns error if failed.
-func RunGrpcServer(
-	ctx context.Context,
-	serverConfig *ServerConfig,
-	register func(server *grpc.Server),
-) error {
-	listener, err := serverConfig.Listener(ctx)
-	if err != nil {
-		return err
-	}
-	server, err := serverConfig.GrpcServer()
-	if err != nil {
-		return errors.Wrapf(err, "failed creating grpc server")
-	}
-	register(server)
-
-	g, gCtx := errgroup.WithContext(ctx)
-	logger.Infof("Serving...")
-	g.Go(func() error {
-		return server.Serve(listener)
-	})
-	<-gCtx.Done()
-	server.Stop()
-	return g.Wait()
-}
-
 // StartService runs a service, waits until it is ready, and register the gRPC server(s).
 // It will stop if either the service ended or its respective gRPC server.
 func StartService(
@@ -191,6 +165,32 @@ func StartService(
 			return RunGrpcServer(gCtx, server, service.RegisterService)
 		})
 	}
+	return g.Wait()
+}
+
+// RunGrpcServer runs a server and returns error if failed.
+func RunGrpcServer(
+	ctx context.Context,
+	serverConfig *ServerConfig,
+	register func(server *grpc.Server),
+) error {
+	listener, err := serverConfig.Listener(ctx)
+	if err != nil {
+		return err
+	}
+	server, err := serverConfig.GrpcServer()
+	if err != nil {
+		return errors.Wrapf(err, "failed creating grpc server")
+	}
+	register(server)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	logger.Infof("Serving...")
+	g.Go(func() error {
+		return server.Serve(listener)
+	})
+	<-gCtx.Done()
+	server.Stop()
 	return g.Wait()
 }
 
