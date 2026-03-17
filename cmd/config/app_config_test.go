@@ -349,7 +349,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 		expectedConfig: &loadgen.ClientConfig{
 			Server: newServerConfig("localhost", 8001),
 			Monitoring: metrics.Config{
-				ServerConfig: *newServerConfig("localhost", 2118),
+				Server: newServerConfig("localhost", 2118),
 			},
 		},
 	}, {
@@ -359,7 +359,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			Server:     newServerConfigWithDefaultTLS("loadgen", 8001),
 			HTTPServer: newServerConfig("", 6997),
 			Monitoring: metrics.Config{
-				ServerConfig: *newServerConfigWithDefaultTLS("loadgen", 2118),
+				Server: newServerConfigWithDefaultTLS("loadgen", 2118),
 				Latency: metrics.LatencyConfig{
 					SamplerConfig: metrics.SamplerConfig{
 						Portion: 0.01,

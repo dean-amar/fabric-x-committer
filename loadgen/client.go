@@ -27,6 +27,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 )
 
 type (
@@ -118,7 +119,11 @@ func (c *Client) Run(ctx context.Context) error {
 	defer cancel()
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return c.resources.Metrics.StartPrometheusServer(gCtx, &c.conf.Monitoring.ServerConfig)
+		// Convert loadgen metrics.Config to monitoring.Config for Prometheus server startup
+		return c.resources.Metrics.StartPrometheusServerWithConfig(gCtx, &monitoring.Config{
+			Server: c.conf.Monitoring.Server,
+			Retry:  c.conf.Monitoring.Retry,
+		})
 	})
 	g.Go(func() error {
 		return c.runHTTPServer(ctx)

@@ -13,6 +13,7 @@ import (
 // Config describes the load generator metrics.
 // It adds latency tracker to the common metrics configurations.
 type Config struct {
-	connection.ServerConfig `mapstructure:",squash" yaml:",inline"`
-	Latency                 LatencyConfig `mapstructure:"latency" yaml:"latency"`
+	Server  *connection.ServerConfig `mapstructure:"server" yaml:"server"`
+	Retry   *connection.RetryProfile `mapstructure:"retry" yaml:"retry,omitempty"`
+	Latency LatencyConfig            `mapstructure:"latency" yaml:"latency"`
 }

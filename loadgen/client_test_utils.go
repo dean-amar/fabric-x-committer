@@ -39,7 +39,7 @@ func DefaultClientConf(t *testing.T, serverTLS connection.TLSConfig) *ClientConf
 	return &ClientConfig{
 		Server: connection.NewLocalHostServer(serverTLS),
 		Monitoring: metrics.Config{
-			ServerConfig: *connection.NewLocalHostServer(serverTLS),
+			Server: connection.NewLocalHostServer(serverTLS),
 		},
 		LoadProfile: &workload.Profile{
 			Key:   workload.KeyProfile{Size: 32},

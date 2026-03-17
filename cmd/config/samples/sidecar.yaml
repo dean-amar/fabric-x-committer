@@ -51,15 +51,16 @@ server:
     burst: 0
 # Monitoring endpoint configuration (Prometheus metrics at /metrics and pprof profiling at /debug/pprof/).
 monitoring:
-  # The endpoint where Prometheus metrics and pprof profiling are exposed.
-  # Format: host:port or :port (binds to all interfaces).
-  endpoint: :2114
-  # Monitoring TLS configuration should/could be different from the GRPC server TLS
-  # to only allow authorized admins to monitor the service's metrics.
-  tls: *tlsConfig
-  rate-limit:
-    requests-per-second: 0
-    burst: 0
+  server:
+    # The endpoint where Prometheus metrics and pprof profiling are exposed.
+    # Format: host:port or :port (binds to all interfaces).
+    endpoint: :2114
+    # Monitoring TLS configuration should/could be different from the GRPC server TLS
+    # to only allow authorized admins to monitor the service's metrics.
+    tls: *tlsConfig
+    rate-limit:
+      requests-per-second: 0
+      burst: 0
 
 # Orderer connection configuration for fetching blocks
 orderer:
