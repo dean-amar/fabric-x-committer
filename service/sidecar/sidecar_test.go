@@ -134,10 +134,13 @@ func newSidecarTestEnvWithTLS(
 	})
 
 	ordererEndpoints := ordererEnv.AllEndpoints()
-	configBlock := ordererEnv.SubmitConfigBlock(t, &testcrypto.ConfigBlock{
-		OrdererEndpoints: ordererEndpoints,
-		ChannelID:        ordererEnv.TestConfig.ChanID,
+	cryptoMaterialsPath := t.TempDir()
+	configBlock, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(cryptoMaterialsPath, &testcrypto.ConfigBlock{
+		OrdererEndpoints:      ordererEndpoints,
+		ChannelID:             ordererEnv.TestConfig.ChanID,
+		PeerOrganizationCount: 1,
 	})
+	require.NoError(t, ordererEnv.Orderer.SubmitBlock(t.Context(), configBlock))
 
 	var genesisBlockFilePath string
 	initOrdererOrganizations := map[string]*ordererconn.OrganizationConfig{
