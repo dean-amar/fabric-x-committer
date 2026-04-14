@@ -55,7 +55,7 @@ func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 
 	g.Go(func() error {
 		return grpcservice.StartAndServe(
-			gCtx, orderer, c.res.InternalServiceReadinessTimeout, c.config.OrdererServers...,
+			gCtx, orderer, c.res.InternalServiceStartupTimeout, c.config.OrdererServers...,
 		)
 	})
 

@@ -26,12 +26,12 @@ import (
 type (
 	// ClientResources holds client's pre-generated resources to be used by the adapters.
 	ClientResources struct {
-		Metrics                         *metrics.PerfMetrics
-		Profile                         *workload.Profile
-		Stream                          *workload.StreamOptions
-		ConfigBlock                     *common.Block
-		Limit                           *GenerateLimit
-		InternalServiceReadinessTimeout time.Duration
+		Metrics                       *metrics.PerfMetrics
+		Profile                       *workload.Profile
+		Stream                        *workload.StreamOptions
+		ConfigBlock                   *common.Block
+		Limit                         *GenerateLimit
+		InternalServiceStartupTimeout time.Duration
 	}
 
 	// Phases specify the generation phases to enable.

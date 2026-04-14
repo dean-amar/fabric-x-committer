@@ -36,9 +36,9 @@ type Registerer interface {
 	RegisterService(server *grpc.Server)
 }
 
-// StartAndServe runs a full lifecycle service: starts the service, waits for it
-// to be ready, then creates and serves gRPC server(s). Stops everything
-// if either the service or any server exits.
+// StartAndServe runs a full lifecycle service: starts the service, waits up to
+// readinessTimeout for it to become ready, then creates and serves gRPC
+// server(s). Stops everything if either the service or any server exits.
 func StartAndServe(
 	ctx context.Context,
 	service Service,

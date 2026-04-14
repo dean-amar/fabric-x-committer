@@ -61,11 +61,11 @@ func NewLoadGenClient(conf *ClientConfig) (*Client, error) {
 	c := &Client{
 		conf: conf,
 		resources: adapters.ClientResources{
-			Profile:                         conf.LoadProfile,
-			Stream:                          conf.Stream,
-			Limit:                           conf.Limit,
-			Metrics:                         metrics.NewLoadgenServiceMetrics(&conf.Monitoring),
-			InternalServiceReadinessTimeout: conf.ReadinessTimeout,
+			Profile:                       conf.LoadProfile,
+			Stream:                        conf.Stream,
+			Limit:                         conf.Limit,
+			Metrics:                       metrics.NewLoadgenServiceMetrics(&conf.Monitoring),
+			InternalServiceStartupTimeout: conf.ReadinessTimeout,
 		},
 		healthcheck: connection.DefaultHealthCheckService(),
 		ready:       channel.NewReady(),
