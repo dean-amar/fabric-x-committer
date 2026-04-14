@@ -8,7 +8,6 @@ package adapters
 
 import (
 	"context"
-
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"golang.org/x/sync/errgroup"
@@ -55,7 +54,9 @@ func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 	g, gCtx := errgroup.WithContext(dCtx)
 
 	g.Go(func() error {
-		return grpcservice.StartAndServe(gCtx, orderer, c.config.OrdererServers...)
+		return grpcservice.StartAndServe(
+			gCtx, orderer, c.res.InternalServiceReadinessTimeout, c.config.OrdererServers...,
+		)
 	})
 
 	g.Go(func() error {

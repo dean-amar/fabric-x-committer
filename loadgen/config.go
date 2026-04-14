@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package loadgen
 
 import (
+	"time"
+
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
@@ -15,8 +17,9 @@ import (
 
 // Default configuration values for the load generator.
 const (
-	DefaultServerPort     = 8001
-	DefaultMonitoringPort = 2118
+	DefaultServerPort       = 8001
+	DefaultMonitoringPort   = 2118
+	DefaultReadinessTimeout = 5 * time.Minute
 )
 
 type (
@@ -24,6 +27,9 @@ type (
 	ClientConfig struct {
 		// Server for a gRPC server for the full load-generator's gRPC API.
 		Server *connection.ServerConfig `mapstructure:"server"`
+		// ReadinessTimeout is the maximum time to wait for the load generator service
+		// to become ready before startup fails.
+		ReadinessTimeout time.Duration `mapstructure:"readiness-timeout" validate:"required,gt=0"`
 		// HTTPServer for an HTTP server to set/get the limiter's rate.
 		HTTPServer *connection.ServerConfig `mapstructure:"http-server"`
 		Monitoring metrics.Config           `mapstructure:"monitoring" yaml:"monitoring"`

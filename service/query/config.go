@@ -36,6 +36,7 @@ import (
 type Config struct {
 	Server                *connection.ServerConfig `mapstructure:"server"`
 	Monitoring            *connection.ServerConfig `mapstructure:"monitoring"`
+	ReadinessTimeout      time.Duration            `mapstructure:"readiness-timeout" validate:"required,gt=0"`
 	Database              *vc.DatabaseConfig       `mapstructure:"database" validate:"required"`
 	MinBatchKeys          int                      `mapstructure:"min-batch-keys" validate:"required,gt=0"`
 	MaxBatchWait          time.Duration            `mapstructure:"max-batch-wait" validate:"required,gt=0"`
@@ -54,6 +55,7 @@ type Config struct {
 const (
 	DefaultServerPort            = 7001
 	DefaultMonitoringPort        = 2117
+	DefaultReadinessTimeout      = 5 * time.Minute
 	DefaultRequestsPerSecond     = 5000
 	DefaultBurst                 = 1000
 	DefaultMinBatchKeys          = 1024

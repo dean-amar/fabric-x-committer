@@ -39,7 +39,12 @@ type Registerer interface {
 // StartAndServe runs a full lifecycle service: starts the service, waits for it
 // to be ready, then creates and serves gRPC server(s). Stops everything
 // if either the service or any server exits.
-func StartAndServe(ctx context.Context, service Service, serverConfigs ...*connection.ServerConfig) error {
+func StartAndServe(
+	ctx context.Context,
+	service Service,
+	readinessTimeout time.Duration,
+	serverConfigs ...*connection.ServerConfig,
+) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -50,7 +55,7 @@ func StartAndServe(ctx context.Context, service Service, serverConfigs ...*conne
 		return service.Run(gCtx)
 	})
 
-	ctxTimeout, cancelTimeout := context.WithTimeout(gCtx, 5*time.Minute) // TODO: make this configurable.
+	ctxTimeout, cancelTimeout := context.WithTimeout(gCtx, readinessTimeout)
 	defer cancelTimeout()
 	if !service.WaitForReady(ctxTimeout) {
 		cancel()

@@ -51,7 +51,8 @@ func TestReadConfigSidecar(t *testing.T) {
 				Endpoint:             *newEndpoint(connection.DefaultHost, sidecar.DefaultServerPort),
 				MaxConcurrentStreams: sidecar.DefaultMaxConcurrentStreams,
 			},
-			Monitoring: newServerConfig(connection.DefaultHost, sidecar.DefaultMonitoringPort),
+			Monitoring:       newServerConfig(connection.DefaultHost, sidecar.DefaultMonitoringPort),
+			ReadinessTimeout: sidecar.DefaultReadinessTimeout,
 			Committer: &connection.ClientConfig{
 				Endpoint: newEndpoint(connection.DefaultHost, coordinator.DefaultServerPort),
 			},
@@ -89,7 +90,8 @@ func TestReadConfigSidecar(t *testing.T) {
 				},
 				MaxConcurrentStreams: 10,
 			},
-			Monitoring: newServerConfigWithDefaultTLS("sidecar", 2114),
+			Monitoring:       newServerConfigWithDefaultTLS("sidecar", 2114),
+			ReadinessTimeout: sidecar.DefaultReadinessTimeout,
 			Orderer: ordererdial.Config{
 				FaultToleranceLevel:        ordererdial.BFT,
 				LatestKnownConfigBlockPath: "/root/artifacts/config-block.pb.bin",
@@ -137,8 +139,9 @@ func TestReadConfigCoordinator(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &coordinator.Config{
-			Server:     newServerConfig(connection.DefaultHost, coordinator.DefaultServerPort),
-			Monitoring: newServerConfig(connection.DefaultHost, coordinator.DefaultMonitoringPort),
+			Server:           newServerConfig(connection.DefaultHost, coordinator.DefaultServerPort),
+			Monitoring:       newServerConfig(connection.DefaultHost, coordinator.DefaultMonitoringPort),
+			ReadinessTimeout: coordinator.DefaultReadinessTimeout,
 			DependencyGraph: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors: coordinator.DefaultNumOfLocalDepConstructors,
 				WaitingTxsLimit:           coordinator.DefaultWaitingTxsLimit,
@@ -151,6 +154,7 @@ func TestReadConfigCoordinator(t *testing.T) {
 		expectedConfig: &coordinator.Config{
 			Server:             newServerConfigWithDefaultTLS("coordinator", 9001),
 			Monitoring:         newServerConfigWithDefaultTLS("coordinator", 2119),
+			ReadinessTimeout:   coordinator.DefaultReadinessTimeout,
 			Verifier:           newMultiClientConfigWithDefaultTLS("verifier", "coordinator", 5001),
 			ValidatorCommitter: newMultiClientConfigWithDefaultTLS("vc", "coordinator", 6001),
 			DependencyGraph: &coordinator.DependencyGraphConfig{
@@ -182,9 +186,10 @@ func TestReadConfigVC(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &vc.Config{
-			Server:     newServerConfig(connection.DefaultHost, vc.DefaultServerPort),
-			Monitoring: newServerConfig(connection.DefaultHost, vc.DefaultMonitoringPort),
-			Database:   defaultDBConfig(),
+			Server:           newServerConfig(connection.DefaultHost, vc.DefaultServerPort),
+			Monitoring:       newServerConfig(connection.DefaultHost, vc.DefaultMonitoringPort),
+			ReadinessTimeout: vc.DefaultReadinessTimeout,
+			Database:         defaultDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
 				MaxWorkersForPreparer:             vc.DefaultMaxWorkersForPreparer,
 				MaxWorkersForValidator:            vc.DefaultMaxWorkersForValidator,
@@ -197,9 +202,10 @@ func TestReadConfigVC(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/vc.yaml",
 		expectedConfig: &vc.Config{
-			Server:     newServerConfigWithDefaultTLS("vc", 6001),
-			Monitoring: newServerConfigWithDefaultTLS("vc", 2116),
-			Database:   defaultSampleDBConfig(),
+			Server:           newServerConfigWithDefaultTLS("vc", 6001),
+			Monitoring:       newServerConfigWithDefaultTLS("vc", 2116),
+			ReadinessTimeout: vc.DefaultReadinessTimeout,
+			Database:         defaultSampleDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
 				MaxWorkersForPreparer:             vc.DefaultMaxWorkersForPreparer,
 				MaxWorkersForValidator:            vc.DefaultMaxWorkersForValidator,
@@ -231,8 +237,9 @@ func TestReadConfigVerifier(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &verifier.Config{
-			Server:     newServerConfig(connection.DefaultHost, verifier.DefaultServerPort),
-			Monitoring: newServerConfig(connection.DefaultHost, verifier.DefaultMonitoringPort),
+			Server:           newServerConfig(connection.DefaultHost, verifier.DefaultServerPort),
+			Monitoring:       newServerConfig(connection.DefaultHost, verifier.DefaultMonitoringPort),
+			ReadinessTimeout: verifier.DefaultReadinessTimeout,
 			ParallelExecutor: verifier.ExecutorConfig{
 				Parallelism:       verifier.DefaultParallelism,
 				BatchSizeCutoff:   verifier.DefaultBatchSizeCutoff,
@@ -244,8 +251,9 @@ func TestReadConfigVerifier(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/verifier.yaml",
 		expectedConfig: &verifier.Config{
-			Server:     newServerConfigWithDefaultTLS("verifier", 5001),
-			Monitoring: newServerConfigWithDefaultTLS("verifier", 2115),
+			Server:           newServerConfigWithDefaultTLS("verifier", 5001),
+			Monitoring:       newServerConfigWithDefaultTLS("verifier", 2115),
+			ReadinessTimeout: verifier.DefaultReadinessTimeout,
 			ParallelExecutor: verifier.ExecutorConfig{
 				BatchSizeCutoff:   verifier.DefaultBatchSizeCutoff,
 				BatchTimeCutoff:   10 * time.Millisecond,
@@ -292,6 +300,7 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxActiveViews:        query.DefaultMaxActiveViews,
 			MaxViewTimeout:        query.DefaultMaxViewTimeout,
 			MaxRequestKeys:        query.DefaultMaxRequestKeys,
+			ReadinessTimeout:      query.DefaultReadinessTimeout,
 		},
 	}, {
 		name:           "sample",
@@ -307,6 +316,7 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxActiveViews:        query.DefaultMaxActiveViews,
 			MaxViewTimeout:        query.DefaultMaxViewTimeout,
 			MaxRequestKeys:        query.DefaultMaxRequestKeys,
+			ReadinessTimeout:      query.DefaultReadinessTimeout,
 		},
 	}}
 
@@ -332,7 +342,8 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "default",
 		configFilePath: emptyConfig(t),
 		expectedConfig: &loadgen.ClientConfig{
-			Server: newServerConfig(connection.DefaultHost, loadgen.DefaultServerPort),
+			Server:           newServerConfig(connection.DefaultHost, loadgen.DefaultServerPort),
+			ReadinessTimeout: loadgen.DefaultReadinessTimeout,
 			Monitoring: metrics.Config{
 				ServerConfig: *newServerConfig(connection.DefaultHost, loadgen.DefaultMonitoringPort),
 			},
@@ -341,8 +352,9 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
 		expectedConfig: &loadgen.ClientConfig{
-			Server:     newServerConfigWithDefaultTLS("loadgen", 8001),
-			HTTPServer: newServerConfig("", 6997),
+			Server:           newServerConfigWithDefaultTLS("loadgen", 8001),
+			ReadinessTimeout: loadgen.DefaultReadinessTimeout,
+			HTTPServer:       newServerConfig("", 6997),
 			Monitoring: metrics.Config{
 				ServerConfig: *newServerConfigWithDefaultTLS("loadgen", 2118),
 				Latency: metrics.LatencyConfig{

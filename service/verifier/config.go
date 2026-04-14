@@ -17,6 +17,7 @@ type (
 	Config struct {
 		Server           *connection.ServerConfig `mapstructure:"server"`
 		Monitoring       *connection.ServerConfig `mapstructure:"monitoring"`
+		ReadinessTimeout time.Duration            `mapstructure:"readiness-timeout" validate:"required,gt=0"`
 		ParallelExecutor ExecutorConfig           `mapstructure:"parallel-executor"`
 	}
 
@@ -37,6 +38,7 @@ type (
 const (
 	DefaultServerPort        = 5001
 	DefaultMonitoringPort    = 2115
+	DefaultReadinessTimeout  = 5 * time.Minute
 	DefaultParallelism       = 4
 	DefaultBatchSizeCutoff   = 50
 	DefaultBatchTimeCutoff   = 500 * time.Millisecond

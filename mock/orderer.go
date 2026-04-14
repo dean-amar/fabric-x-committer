@@ -51,6 +51,7 @@ type (
 		PayloadCacheSize int                        `mapstructure:"payload-cache-size"`
 		ArtifactsPath    string                     `mapstructure:"artifacts-path"`
 		SendGenesisBlock bool                       `mapstructure:"send-genesis-block"`
+		ReadinessTimeout time.Duration              `mapstructure:"readiness-timeout"`
 
 		// TestServerParameters is only used for internal testing.
 		TestServerParameters test.StartServerParameters

@@ -158,6 +158,11 @@ max-view-timeout: 10s
 # Default: 10,000
 max-request-keys: 10000
 
+# Maximum time to wait for the query service to become ready before startup fails.
+# This covers initialization that happens after Run starts and before the gRPC server begins serving.
+# Default: 5m
+readiness-timeout: 5m
+
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or

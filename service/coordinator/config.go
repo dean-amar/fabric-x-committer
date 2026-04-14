@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package coordinator
 
 import (
+	"time"
+
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -18,6 +20,7 @@ type (
 		ValidatorCommitter connection.MultiClientConfig `mapstructure:"validator-committer"`
 		DependencyGraph    *DependencyGraphConfig       `mapstructure:"dependency-graph" validate:"required"`
 		Monitoring         *connection.ServerConfig     `mapstructure:"monitoring"`
+		ReadinessTimeout   time.Duration                `mapstructure:"readiness-timeout" validate:"required,gt=0"`
 		// ChannelBufferSizePerGoroutine defines the buffer size per go-routine.
 		ChannelBufferSizePerGoroutine int `mapstructure:"per-channel-buffer-size-per-goroutine" validate:"required,gt=0"` //nolint:lll,revive
 	}
@@ -33,6 +36,7 @@ type (
 const (
 	DefaultServerPort                    = 9001
 	DefaultMonitoringPort                = 2119
+	DefaultReadinessTimeout              = 5 * time.Minute
 	DefaultNumOfLocalDepConstructors     = 1
 	DefaultWaitingTxsLimit               = 100_000
 	DefaultChannelBufferSizePerGoroutine = 10

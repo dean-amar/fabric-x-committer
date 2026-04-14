@@ -141,6 +141,11 @@ waiting-txs-limit: 20_000_000
 # Default: 100
 channel-buffer-size: 100
 
+# Maximum time to wait for the sidecar service to become ready before startup fails.
+# This covers initialization that happens after Run starts and before the gRPC server begins serving.
+# Default: 5m
+readiness-timeout: 5m
+
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or

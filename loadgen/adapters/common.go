@@ -9,6 +9,7 @@ package adapters
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
@@ -25,11 +26,12 @@ import (
 type (
 	// ClientResources holds client's pre-generated resources to be used by the adapters.
 	ClientResources struct {
-		Metrics     *metrics.PerfMetrics
-		Profile     *workload.Profile
-		Stream      *workload.StreamOptions
-		ConfigBlock *common.Block
-		Limit       *GenerateLimit
+		Metrics                         *metrics.PerfMetrics
+		Profile                         *workload.Profile
+		Stream                          *workload.StreamOptions
+		ConfigBlock                     *common.Block
+		Limit                           *GenerateLimit
+		InternalServiceReadinessTimeout time.Duration
 	}
 
 	// Phases specify the generation phases to enable.

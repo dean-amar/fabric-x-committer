@@ -23,6 +23,11 @@ server:
       - /root/artifacts/peerOrganizations/peer-org-0/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
       - /root/artifacts/peerOrganizations/peer-org-1/msp/tlscacerts/tlspeer-org-1-CA-cert.pem
 
+
+# Maximum time to wait for the orderer service to become ready before startup fails.
+# This covers initialization that happens after Run starts and before the gRPC server begins serving.
+# Default: 5m
+readiness-timeout: 5m
 # Maximum number of transactions to include in each block. Blocks are cut when
 # this size is reached or when the block-timeout expires, whichever comes first.
 block-size: 1024

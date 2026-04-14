@@ -63,10 +63,10 @@ func startService(ctx context.Context, name, configPath string) error {
 			return errors.Wrap(err, "failed to create sidecar service")
 		}
 		defer service.Close()
-		return grpcservice.StartAndServe(ctx, service, c.Server)
+		return grpcservice.StartAndServe(ctx, service, c.ReadinessTimeout, c.Server)
 
 	case *coordinator.Config:
-		return grpcservice.StartAndServe(ctx, coordinator.NewCoordinatorService(c), c.Server)
+		return grpcservice.StartAndServe(ctx, coordinator.NewCoordinatorService(c), c.ReadinessTimeout, c.Server)
 
 	case *vc.Config:
 		service, err := vc.NewValidatorCommitterService(ctx, c)
@@ -74,13 +74,13 @@ func startService(ctx context.Context, name, configPath string) error {
 			return errors.Wrap(err, "failed to create validator committer service")
 		}
 		defer service.Close()
-		return grpcservice.StartAndServe(ctx, service, c.Server)
+		return grpcservice.StartAndServe(ctx, service, c.ReadinessTimeout, c.Server)
 
 	case *verifier.Config:
-		return grpcservice.StartAndServe(ctx, verifier.New(c), c.Server)
+		return grpcservice.StartAndServe(ctx, verifier.New(c), c.ReadinessTimeout, c.Server)
 
 	case *query.Config:
-		return grpcservice.StartAndServe(ctx, query.NewQueryService(c), c.Server)
+		return grpcservice.StartAndServe(ctx, query.NewQueryService(c), c.ReadinessTimeout, c.Server)
 
 	default:
 		return errors.Newf("unknown config type: %T", conf)

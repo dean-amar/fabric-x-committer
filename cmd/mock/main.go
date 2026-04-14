@@ -84,7 +84,7 @@ func startMockOrderer() *cobra.Command {
 			if conf.Server != nil && !conf.Server.Endpoint.Empty() {
 				serverConfigs = append(serverConfigs, conf.Server)
 			}
-			return grpcservice.StartAndServe(cmd.Context(), service, serverConfigs...)
+			return grpcservice.StartAndServe(cmd.Context(), service, conf.ReadinessTimeout, serverConfigs...)
 		},
 	}
 	cliutil.SetDefaultFlags(cmd, &configPath)

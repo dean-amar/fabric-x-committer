@@ -152,6 +152,11 @@ resource-limits:
   # Default: 5s
   timeout-for-min-transaction-batch-size: 2s
 
+# Maximum time to wait for the validator-committer service to become ready before startup fails.
+# This covers initialization that happens after Run starts and before the gRPC server begins serving.
+# Default: 5m
+readiness-timeout: 5m
+
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or
