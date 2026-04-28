@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -51,6 +52,10 @@ type Config struct {
 	// TLSRefreshInterval is the interval at which the query service polls the database
 	// for config block updates to refresh TLS CA certificates. Defaults to 1 minute.
 	TLSRefreshInterval time.Duration `mapstructure:"tls-refresh-interval" validate:"gt=0"`
+	// ACL is the inline ACL configuration.
+	// If nil or Enabled=false, ACL enforcement is disabled (backward compatible).
+	// ACL controls access to query service operations based on client certificate roles.
+	ACL *acl.Config `mapstructure:"acl"`
 }
 
 // Default configuration values for the query service.

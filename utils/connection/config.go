@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
@@ -42,6 +43,12 @@ type (
 		MaxConcurrentStreams int                    `mapstructure:"max-concurrent-streams" validate:"gte=0"`
 
 		preAllocatedListener net.Listener
+		// customUnaryInterceptors holds additional unary interceptors to be added to the server.
+		// These are applied after built-in interceptors (rate limiting, etc.).
+		customUnaryInterceptors []grpc.UnaryServerInterceptor
+		// customStreamInterceptors holds additional stream interceptors to be added to the server.
+		// These are applied after built-in interceptors (concurrency limiting, etc.).
+		customStreamInterceptors []grpc.StreamServerInterceptor
 	}
 
 	// RateLimitConfig describes the rate limiting configuration for unary gRPC endpoints.
@@ -148,4 +155,16 @@ func (c *ServerConfig) serverCredentials(tlsProvider TLSConfigProvider) (credent
 		MinVersion:         DefaultTLSMinVersion,
 		GetConfigForClient: tlsProvider.GetConfigForClient,
 	}, nil)
+}
+
+// AddUnaryInterceptor adds a custom unary interceptor to the server configuration.
+// The interceptor will be applied after built-in interceptors (rate limiting, etc.).
+func (c *ServerConfig) AddUnaryInterceptor(interceptor grpc.UnaryServerInterceptor) {
+	c.customUnaryInterceptors = append(c.customUnaryInterceptors, interceptor)
+}
+
+// AddStreamInterceptor adds a custom stream interceptor to the server configuration.
+// The interceptor will be applied after built-in interceptors (concurrency limiting, etc.).
+func (c *ServerConfig) AddStreamInterceptor(interceptor grpc.StreamServerInterceptor) {
+	c.customStreamInterceptors = append(c.customStreamInterceptors, interceptor)
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
@@ -62,6 +63,7 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  connection.TLSCertUpdater
+		aclProvider *acl.Provider
 	}
 )
 
@@ -69,12 +71,33 @@ type (
 // The tlsUpdater is optional; when non-nil, it is used to push updated
 // root CA certificates read from the database.
 func NewQueryService(config *Config, tlsUpdater connection.TLSCertUpdater) *Service {
+	// Initialize ACL provider from inline configuration
+	// If ACL is explicitly configured but fails to initialize, we panic to fail fast
+	// rather than silently disabling security enforcement.
+	aclProvider, err := acl.NewProvider(config.ACL)
+	if err != nil {
+		// If ACL config exists and is enabled, this is a fatal configuration error
+		if config.ACL != nil && config.ACL.Enabled {
+			logger.Panicf("Failed to initialize ACL provider with enabled configuration: %v", err)
+		}
+		// If ACL is not configured or explicitly disabled, create disabled provider
+		logger.Infof("ACL not configured or disabled, creating disabled provider")
+		aclProvider, _ = acl.NewProvider(nil)
+	}
+
+	if aclProvider.IsEnabled() {
+		logger.Infof("ACL enforcement enabled for Query Service")
+	} else {
+		logger.Infof("ACL enforcement disabled for Query Service")
+	}
+
 	return &Service{
 		config:      config,
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: connection.DefaultHealthCheckService(),
 		tlsUpdater:  tlsUpdater,
+		aclProvider: aclProvider,
 	}
 }
 
@@ -128,6 +151,18 @@ func (q *Service) Run(ctx context.Context) error {
 func (q *Service) RegisterService(server *grpc.Server) {
 	committerpb.RegisterQueryServiceServer(server, q)
 	healthgrpc.RegisterHealthServer(server, q.healthcheck)
+}
+
+// ConfigureACLInterceptors adds ACL interceptors to the server configuration.
+// This should be called before creating the gRPC server.
+func (q *Service) ConfigureACLInterceptors(serverConfig *connection.ServerConfig) {
+	if q.aclProvider == nil || !q.aclProvider.IsEnabled() {
+		return
+	}
+
+	// Add ACL unary interceptor
+	serverConfig.AddUnaryInterceptor(acl.UnaryServerInterceptor(q.aclProvider))
+	logger.Infof("Added ACL unary interceptor to Query Service")
 }
 
 // BeginView implements the query-service interface.

@@ -67,6 +67,7 @@ func startService(ctx context.Context, name, configPath string) error {
 			return errors.Wrap(err, "failed to create sidecar service")
 		}
 		defer service.Close()
+		service.ConfigureACLInterceptors(c.Server)
 		return grpcservice.StartAndServe(ctx, service, tlsProvider, c.Server)
 
 	case *coordinator.Config:
@@ -88,7 +89,9 @@ func startService(ctx context.Context, name, configPath string) error {
 		if err != nil {
 			return err
 		}
-		return grpcservice.StartAndServe(ctx, query.NewQueryService(c, tlsUpdater), tlsProvider, c.Server)
+		queryService := query.NewQueryService(c, tlsUpdater)
+		queryService.ConfigureACLInterceptors(c.Server)
+		return grpcservice.StartAndServe(ctx, queryService, tlsProvider, c.Server)
 
 	default:
 		return errors.Newf("unknown config type: %T", conf)

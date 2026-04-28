@@ -63,6 +63,16 @@ func (c *ServerConfig) GrpcServer(tlsProvider TLSConfigProvider) (*grpc.Server, 
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
 	}
 
+	// Add custom unary interceptors
+	for _, interceptor := range c.customUnaryInterceptors {
+		opts = append(opts, grpc.UnaryInterceptor(interceptor))
+	}
+
+	// Add custom stream interceptors
+	for _, interceptor := range c.customStreamInterceptors {
+		opts = append(opts, grpc.StreamInterceptor(interceptor))
+	}
+
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
 		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     c.KeepAlive.Params.MaxConnectionIdle,

@@ -26,6 +26,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/deliverorderer"
@@ -53,6 +54,7 @@ type Service struct {
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 	tlsUpdater         connection.TLSCertUpdater
+	aclProvider        *acl.Provider
 }
 
 // New creates a sidecar service. The tlsUpdater is optional; when non-nil,
@@ -76,6 +78,26 @@ func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 		return nil, fmt.Errorf("failed to create block store: %w", err)
 	}
 
+	// 4. Initialize ACL provider from inline configuration
+	// If ACL is explicitly configured but fails to initialize, we return error to fail fast
+	// rather than silently disabling security enforcement.
+	aclProvider, err := acl.NewProvider(c.ACL)
+	if err != nil {
+		// If ACL config exists and is enabled, this is a fatal configuration error
+		if c.ACL != nil && c.ACL.Enabled {
+			return nil, fmt.Errorf("failed to initialize ACL provider with enabled configuration: %w", err)
+		}
+		// If ACL is not configured or explicitly disabled, create disabled provider
+		logger.Infof("ACL not configured or disabled, creating disabled provider")
+		aclProvider, _ = acl.NewProvider(nil)
+	}
+
+	if aclProvider.IsEnabled() {
+		logger.Infof("ACL enforcement enabled for Sidecar Service")
+	} else {
+		logger.Infof("ACL enforcement disabled for Sidecar Service")
+	}
+
 	return &Service{
 		deliveryParams: deliveryParams,
 		relay:          relayService,
@@ -89,6 +111,7 @@ func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 		committedBlock: make(chan *common.Block, c.ChannelBufferSize),
 		statusQueue:    make(chan []*committerpb.TxStatus, c.ChannelBufferSize),
 		tlsUpdater:     tlsUpdater,
+		aclProvider:    aclProvider,
 	}, nil
 }
 
@@ -96,6 +119,19 @@ func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 // If the context ended before the service is ready, returns false.
 func (*Service) WaitForReady(context.Context) bool {
 	return true
+}
+
+// ConfigureACLInterceptors adds ACL interceptors to the server configuration.
+// This must be called before the gRPC server is created.
+func (s *Service) ConfigureACLInterceptors(serverConfig *connection.ServerConfig) {
+	// Use consistent nil check pattern: skip if nil OR disabled
+	if s.aclProvider == nil || !s.aclProvider.IsEnabled() {
+		return
+	}
+
+	logger.Info("Configuring ACL interceptors for Sidecar Service")
+	serverConfig.AddUnaryInterceptor(acl.UnaryServerInterceptor(s.aclProvider))
+	serverConfig.AddStreamInterceptor(acl.StreamServerInterceptor(s.aclProvider))
 }
 
 // Run starts the sidecar service. The call to Run blocks until an error occurs or the context is canceled.

@@ -1,0 +1,85 @@
+# ACL Configuration for fabric-x-committer
+# This file defines Access Control Lists (ACLs) for the Query and Sidecar services.
+# ACLs control which client identities can access specific gRPC methods.
+
+# Enable or disable ACL enforcement globally
+# When false, all requests are allowed (backward compatible mode)
+enabled: true
+
+# Policy definitions map gRPC methods to required roles
+# Roles are extracted from the client certificate's OU (Organizational Unit) field
+# Available roles (in order of privilege):
+#   - admin: Full administrative access
+#   - client: Can read and write data
+#   - member: Basic read access (default for any valid certificate)
+policies:
+  # Query Service Methods - Read Operations
+  "/query.QueryService/GetBlock": "member"
+  "/query.QueryService/GetTransaction": "member"
+  "/query.QueryService/GetBlockByTxID": "member"
+  "/query.QueryService/GetState": "member"
+  "/query.QueryService/GetStateMetadata": "member"
+  "/query.QueryService/GetStateRange": "member"
+  "/query.QueryService/GetHistory": "member"
+  "/query.QueryService/GetBlockByNumber": "member"
+  "/query.QueryService/GetBlockByHash": "member"
+  
+  # Sidecar Service Methods - Block Delivery (Streaming)
+  "/sidecar.SidecarService/Deliver": "client"
+  "/sidecar.SidecarService/DeliverFiltered": "client"
+  "/sidecar.SidecarService/DeliverWithPrivateData": "admin"
+  
+  # Sidecar Service Methods - Notifications
+  "/sidecar.SidecarService/NotifyTxStatus": "client"
+  
+  # Sidecar Service Methods - Block Query
+  "/sidecar.SidecarService/GetBlockByNumber": "member"
+  "/sidecar.SidecarService/GetBlockByTxID": "member"
+  "/sidecar.SidecarService/GetNewestBlock": "member"
+
+# MSP (Membership Service Provider) Configuration
+# Defines trusted Certificate Authorities for each organization
+msps:
+  # Organization 1
+  Org1MSP:
+    # Root CA certificates (required)
+    root_certs:
+      - /path/to/crypto-config/peerOrganizations/org1.example.com/msp/cacerts/ca.org1.example.com-cert.pem
+    
+    # Intermediate CA certificates (optional)
+    intermediate_certs: []
+    
+    # TLS Root CA certificates (optional, for TLS validation)
+    tls_root_certs:
+      - /path/to/crypto-config/peerOrganizations/org1.example.com/msp/tlscacerts/tlsca.org1.example.com-cert.pem
+  
+  # Organization 2
+  Org2MSP:
+    root_certs:
+      - /path/to/crypto-config/peerOrganizations/org2.example.com/msp/cacerts/ca.org2.example.com-cert.pem
+    intermediate_certs: []
+    tls_root_certs:
+      - /path/to/crypto-config/peerOrganizations/org2.example.com/msp/tlscacerts/tlsca.org2.example.com-cert.pem
+
+# Notes:
+# 1. Role Hierarchy: admin > client > member
+#    - admin: Can access all methods
+#    - client: Can access client and member methods
+#    - member: Can only access member methods
+#
+# 2. Certificate Requirements:
+#    - Client certificates must be signed by a trusted CA listed in the MSP configuration
+#    - The role is determined by the OU field in the certificate's Subject
+#    - Example: CN=User1@org1.example.com, OU=client, O=Org1MSP
+#
+# 3. Backward Compatibility:
+#    - If this file is not provided or enabled=false, ACL enforcement is disabled
+#    - All requests are allowed when ACL is disabled
+#
+# 4. Security Best Practices:
+#    - Use TLS mutual authentication (mTLS) for all connections
+#    - Regularly rotate CA certificates
+#    - Monitor ACL metrics for unauthorized access attempts
+#    - Use the principle of least privilege when assigning roles
+
+# Made with Bob

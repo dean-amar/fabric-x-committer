@@ -141,6 +141,22 @@ waiting-txs-limit: 20_000_000
 # Default: 100
 channel-buffer-size: 100
 
+# ACL (Access Control List) configuration
+# Controls access to sidecar service operations based on client certificate roles.
+# If not specified or enabled=false, ACL enforcement is disabled (backward compatible).
+# acl:
+#   enabled: true
+#   policies:
+#     "/sidecar.SidecarService/Deliver": "client"
+#     "/sidecar.SidecarService/NotifyTxStatus": "client"
+#     "/sidecar.SidecarService/GetBlockByNumber": "member"
+#   msps:
+#     Org1MSP:
+#       id: "Org1MSP"
+#       organization: "org1.example.com"
+#       root_certs:
+#         - /root/artifacts/peerOrganizations/peer-org-0/msp/cacerts/peer-org-0-CA-cert.pem
+
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or
