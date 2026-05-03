@@ -14,6 +14,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/semaphore"
@@ -62,6 +63,7 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  connection.TLSCertUpdater
+		acl         *envelopeACL
 	}
 )
 
@@ -75,6 +77,7 @@ func NewQueryService(config *Config, tlsUpdater connection.TLSCertUpdater) *Serv
 		ready:       channel.NewReady(),
 		healthcheck: connection.DefaultHealthCheckService(),
 		tlsUpdater:  tlsUpdater,
+		acl:         newEnvelopeACL(queryReadersPolicy),
 	}
 }
 
@@ -132,19 +135,21 @@ func (q *Service) RegisterService(server *grpc.Server) {
 
 // BeginView implements the query-service interface.
 func (q *Service) BeginView(
-	ctx context.Context, params *committerpb.ViewParameters,
+	ctx context.Context, envelope *common.Envelope,
 ) (*committerpb.View, error) {
 	q.metrics.requests.WithLabelValues(grpcBeginView).Inc()
 	defer q.requestLatency(grpcBeginView, time.Now())
 
-	// Validate and cap timeout.
+	params := &committerpb.ViewParameters{}
+	if err := q.authorizeAndUnmarshal(ctx, envelope, params); err != nil {
+		return nil, err
+	}
+
 	if params.TimeoutMilliseconds == 0 ||
 		int64(params.TimeoutMilliseconds) > q.config.MaxViewTimeout.Milliseconds() { //nolint:gosec
 		params.TimeoutMilliseconds = uint64(q.config.MaxViewTimeout.Milliseconds()) //nolint:gosec
 	}
 
-	// Generate unique view ID and create view.
-	// We try again if we have view-id collision.
 	for ctx.Err() == nil {
 		viewID, err := getUUID()
 		if err != nil {
@@ -169,18 +174,29 @@ func (q *Service) BeginView(
 
 // EndView implements the query-service interface.
 func (q *Service) EndView(
-	_ context.Context, view *committerpb.View,
+	ctx context.Context, envelope *common.Envelope,
 ) (*emptypb.Empty, error) {
 	q.metrics.requests.WithLabelValues(grpcEndView).Inc()
 	defer q.requestLatency(grpcEndView, time.Now())
-	return nil, grpcerror.WrapFailedPrecondition(q.batcher.removeViewID(view.Id))
+
+	view := &committerpb.View{}
+	if err := q.authorizeAndUnmarshal(ctx, envelope, view); err != nil {
+		return nil, err
+	}
+
+	return &emptypb.Empty{}, grpcerror.WrapFailedPrecondition(q.batcher.removeViewID(view.Id))
 }
 
 // GetRows implements the query-service interface.
 func (q *Service) GetRows(
-	ctx context.Context, query *committerpb.Query,
+	ctx context.Context, envelope *common.Envelope,
 ) (*committerpb.Rows, error) {
 	q.metrics.requests.WithLabelValues(grpcGetRows).Inc()
+
+	query := &committerpb.Query{}
+	if err := q.authorizeAndUnmarshal(ctx, envelope, query); err != nil {
+		return nil, err
+	}
 
 	if len(query.Namespaces) == 0 {
 		return nil, grpcerror.WrapInvalidArgument(ErrEmptyNamespaces)
@@ -231,9 +247,14 @@ func (q *Service) GetRows(
 
 // GetTransactionStatus implements the query-service interface.
 func (q *Service) GetTransactionStatus(
-	ctx context.Context, query *committerpb.TxStatusQuery,
+	ctx context.Context, envelope *common.Envelope,
 ) (*committerpb.TxStatusResponse, error) {
 	q.metrics.requests.WithLabelValues(grpcGetTxStatus).Inc()
+
+	query := &committerpb.TxStatusQuery{}
+	if err := q.authorizeAndUnmarshal(ctx, envelope, query); err != nil {
+		return nil, err
+	}
 
 	if len(query.TxIds) == 0 {
 		return nil, grpcerror.WrapInvalidArgument(ErrEmptyTxIDs)
@@ -274,8 +295,11 @@ func (q *Service) GetTransactionStatus(
 // GetNamespacePolicies implements the query-service interface.
 func (q *Service) GetNamespacePolicies(
 	ctx context.Context,
-	_ *emptypb.Empty,
+	envelope *common.Envelope,
 ) (*applicationpb.NamespacePolicies, error) {
+	if err := q.authorizeAndUnmarshal(ctx, envelope, nil); err != nil {
+		return nil, err
+	}
 	res, err := queryPolicies(ctx, q.batcher.pool)
 	return res, grpcerror.WrapInternalError(err)
 }
@@ -283,8 +307,11 @@ func (q *Service) GetNamespacePolicies(
 // GetConfigTransaction implements the query-service interface.
 func (q *Service) GetConfigTransaction(
 	ctx context.Context,
-	_ *emptypb.Empty,
+	envelope *common.Envelope,
 ) (*applicationpb.ConfigTransaction, error) {
+	if err := q.authorizeAndUnmarshal(ctx, envelope, nil); err != nil {
+		return nil, err
+	}
 	res, err := queryConfig(ctx, q.batcher.pool)
 	return res, grpcerror.WrapInternalError(err)
 }

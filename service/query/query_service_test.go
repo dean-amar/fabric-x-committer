@@ -10,9 +10,14 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/hyperledger/fabric-x-committer/utils/testcrypto"
+	"github.com/hyperledger/fabric-x-committer/utils/testdb"
 	"strings"
 	"testing"
 	"time"
+
+	cb "github.com/hyperledger/fabric-protos-go-apiv2/common"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -21,8 +26,11 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen"
@@ -37,11 +45,12 @@ import (
 
 type (
 	queryServiceTestEnv struct {
-		config     *Config
-		qs         *Service
-		ns         []string
-		clientConn committerpb.QueryServiceClient
-		pool       *pgxpool.Pool
+		config      *Config
+		qs          *Service
+		ns          []string
+		clientConn  committerpb.QueryServiceClient
+		pool        *pgxpool.Pool
+		querySigner msp.SigningIdentity
 	}
 
 	queryServiceTestOpts struct {
@@ -51,6 +60,43 @@ type (
 		maxActiveViews int
 	}
 )
+
+func TestQueryWithACLs(t *testing.T) {
+	t.Parallel()
+	env := newQueryServiceTestEnv(t, nil)
+	requiredItems := env.insertSampleKeysValueItems(t)
+	query, _, _ := makeQuery(requiredItems)
+	txIDs := env.insertSampleTxsStatus(t)
+	expectedStatus := make([]*committerpb.TxStatus, len(txIDs))
+	for i, txID := range txIDs {
+		expectedStatus[i] = &committerpb.TxStatus{
+			Ref:    committerpb.NewTxRef(txID, 0, uint32(i)), //nolint:gosec // int -> uint32.
+			Status: committerpb.Status_COMMITTED,
+		}
+	}
+
+	for i, qNs := range query.Namespaces {
+		expectedItem := requiredItems[i]
+		qNs := qNs
+		t.Run(fmt.Sprintf("Query internal NS %s", qNs.NsId), func(t *testing.T) {
+			t.Parallel()
+			ret, err := unsafeQueryRows(t.Context(), env.pool, qNs.NsId, qNs.Keys)
+			require.NoError(t, err)
+			requireRow(t, expectedItem, &committerpb.RowsNamespace{
+				NsId: qNs.NsId,
+				Rows: ret,
+			})
+		})
+	}
+
+	t.Run("Query GetRows client", func(t *testing.T) {
+		t.Parallel()
+		ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, query))
+		require.NoError(t, err)
+		requireResults(t, requiredItems, ret.Namespaces)
+	})
+
+}
 
 // TestQuerySecureConnection verifies the query service gRPC server's behavior
 // under various client TLS configurations.
@@ -63,11 +109,54 @@ func TestQuerySecureConnection(t *testing.T) {
 			return func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error {
 				t.Helper()
 				client := createQueryClientWithTLS(t, &env.qs.config.Server.Endpoint, cfg)
-				_, err := client.GetConfigTransaction(ctx, nil)
+				_, err := client.GetConfigTransaction(ctx, newQueryTestEnvelope(t, env.querySigner, nil))
 				return err
 			}
 		},
 	)
+}
+
+func TestQueryACL(t *testing.T) {
+	t.Parallel()
+
+	env := newQueryServiceTestEnv(t, nil)
+	requiredItems := env.insertSampleKeysValueItems(t)
+	query, _, _ := makeQuery(requiredItems)
+
+	t.Run("GetRows_AuthorizedSigner", func(t *testing.T) {
+		t.Parallel()
+
+		ret, err := env.qs.GetRows(
+			t.Context(),
+			newQueryTestEnvelope(t, env.querySigner, query),
+		)
+		require.NoError(t, err)
+		requireResults(t, requiredItems, ret.Namespaces)
+	})
+
+	t.Run("GetRows_UnauthorizedSigner", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := env.qs.GetRows(
+			t.Context(),
+			newQueryTestEnvelope(t, env.querySigner, query),
+		)
+		require.Error(t, err)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.ErrorContains(t, err, "failed to deserialize creator identity")
+	})
+
+	t.Run("GetConfigTransaction_UnauthorizedSigner", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := env.qs.GetConfigTransaction(
+			t.Context(),
+			newQueryTestEnvelope(t, env.querySigner, nil),
+		)
+		require.Error(t, err)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.ErrorContains(t, err, "failed to deserialize creator identity")
+	})
 }
 
 func TestQuery(t *testing.T) {
@@ -111,7 +200,7 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Query GetRows client", func(t *testing.T) {
 		t.Parallel()
-		ret, err := env.clientConn.GetRows(t.Context(), query)
+		ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, query))
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
 	})
@@ -120,7 +209,7 @@ func TestQuery(t *testing.T) {
 		t.Parallel()
 		badQuery, _, _ := makeQuery(requiredItems)
 		badQuery.Namespaces[0].NsId = "$1"
-		ret, err := env.clientConn.GetRows(t.Context(), badQuery)
+		ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, badQuery))
 		require.Error(t, err)
 		require.Nil(t, ret)
 		require.Contains(t, err.Error(), policy.ErrInvalidNamespaceID.Error())
@@ -128,9 +217,9 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Query GetTransactionStatus with non existing TX ID", func(t *testing.T) {
 		t.Parallel()
-		ret, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		ret, err := env.clientConn.GetTransactionStatus(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.TxStatusQuery{
 			TxIds: append(txIDs, "bad-id"),
-		})
+		}))
 		require.NoError(t, err)
 		require.NotNil(t, ret)
 		test.RequireProtoElementsMatch(t, expectedStatus, ret.Statuses)
@@ -138,10 +227,10 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Query GetRows client with view", func(t *testing.T) {
 		t.Parallel()
-		ret, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+		ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.Query{
 			View:       env.beginView(t, env.clientConn, defaultViewParams(time.Minute)),
 			Namespaces: query.Namespaces,
-		})
+		}))
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
 	})
@@ -153,26 +242,26 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Bad view ID", func(t *testing.T) {
 		t.Parallel()
-		_, err := env.clientConn.EndView(t.Context(), &committerpb.View{Id: "bad"})
+		_, err := env.clientConn.EndView(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.View{Id: "bad"}))
 		require.Equal(t, ErrInvalidOrStaleView.Error(), status.Convert(err).Message())
 	})
 
 	t.Run("Cancelled view ID", func(t *testing.T) {
 		t.Parallel()
-		view, err := env.clientConn.BeginView(t.Context(), defaultViewParams(time.Minute))
+		view, err := env.clientConn.BeginView(t.Context(), newQueryTestEnvelope(t, env.querySigner, defaultViewParams(time.Minute)))
 		require.NoError(t, err)
-		_, err = env.clientConn.EndView(t.Context(), view)
+		_, err = env.clientConn.EndView(t.Context(), newQueryTestEnvelope(t, env.querySigner, view))
 		require.NoError(t, err)
-		_, err = env.clientConn.EndView(t.Context(), view)
+		_, err = env.clientConn.EndView(t.Context(), newQueryTestEnvelope(t, env.querySigner, view))
 		require.Equal(t, ErrInvalidOrStaleView.Error(), status.Convert(err).Message())
 	})
 
 	t.Run("Expired view ID", func(t *testing.T) {
 		t.Parallel()
-		view, err := env.clientConn.BeginView(t.Context(), defaultViewParams(100*time.Millisecond))
+		view, err := env.clientConn.BeginView(t.Context(), newQueryTestEnvelope(t, env.querySigner, defaultViewParams(100*time.Millisecond)))
 		require.NoError(t, err)
 		time.Sleep(150 * time.Millisecond)
-		_, err = env.clientConn.EndView(t.Context(), view)
+		_, err = env.clientConn.EndView(t.Context(), newQueryTestEnvelope(t, env.querySigner, view))
 		require.ErrorContains(t, err, status.Convert(err).Message())
 	})
 }
@@ -192,7 +281,7 @@ func TestMaxRequestKeys(t *testing.T) {
 				{NsId: "1", Keys: strToBytes("item1", "item2", "item3")},
 			},
 		}
-		_, err := env.clientConn.GetRows(t.Context(), query)
+		_, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, query))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrTooManyKeys.Error())
 		require.ErrorContains(t, err, "requested 6 keys")
@@ -210,7 +299,7 @@ func TestMaxRequestKeys(t *testing.T) {
 				{NsId: "1", Keys: strToBytes("item1", "item2", "item3")},
 			},
 		}
-		ret, err := env.clientConn.GetRows(t.Context(), query)
+		ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, query))
 		require.NoError(t, err)
 		require.Len(t, ret.Namespaces, 2)
 	})
@@ -220,11 +309,11 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 10})
 		env.insertSampleKeysValueItems(t)
 
-		_, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+		_, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.Query{
 			Namespaces: []*committerpb.QueryNamespace{
 				{NsId: "0", Keys: [][]byte{}},
 			},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrEmptyKeys.Error())
 	})
@@ -234,9 +323,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 10})
 		env.insertSampleKeysValueItems(t)
 
-		_, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+		_, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.Query{
 			Namespaces: []*committerpb.QueryNamespace{},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrEmptyNamespaces.Error())
 	})
@@ -254,7 +343,7 @@ func TestMaxRequestKeys(t *testing.T) {
 				{NsId: "2", Keys: strToBytes("item1", "item2", "item3", "item4")},
 			},
 		}
-		ret, err := env.clientConn.GetRows(t.Context(), query)
+		ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, query))
 		require.NoError(t, err)
 		require.Len(t, ret.Namespaces, 3)
 	})
@@ -264,9 +353,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 2})
 
 		// Request with 3 transaction IDs should fail (limit is 2)
-		_, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		_, err := env.clientConn.GetTransactionStatus(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.TxStatusQuery{
 			TxIds: []string{"tx1", "tx2", "tx3"},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrTooManyKeys.Error())
 		require.ErrorContains(t, err, "requested 3 keys")
@@ -277,9 +366,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 5})
 
 		// Request with 2 transaction IDs should succeed (limit is 5)
-		ret, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		ret, err := env.clientConn.GetTransactionStatus(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.TxStatusQuery{
 			TxIds: []string{"tx1", "tx2"},
-		})
+		}))
 		require.NoError(t, err)
 		// The transactions don't exist, but the request should be accepted
 		require.Empty(t, ret.Statuses)
@@ -289,9 +378,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		t.Parallel()
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 5})
 
-		_, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		_, err := env.clientConn.GetTransactionStatus(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.TxStatusQuery{
 			TxIds: []string{},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrEmptyTxIDs.Error())
 	})
@@ -304,11 +393,11 @@ func TestMaxActiveViews(t *testing.T) {
 		t.Parallel()
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxActiveViews: 1})
 
-		view, err := env.clientConn.BeginView(t.Context(), defaultViewParams(time.Minute))
+		view, err := env.clientConn.BeginView(t.Context(), newQueryTestEnvelope(t, env.querySigner, defaultViewParams(time.Minute)))
 		require.NoError(t, err)
 		require.NotNil(t, view)
 
-		_, err = env.clientConn.BeginView(t.Context(), defaultViewParams(time.Minute))
+		_, err = env.clientConn.BeginView(t.Context(), newQueryTestEnvelope(t, env.querySigner, defaultViewParams(time.Minute)))
 		require.Error(t, err)
 		st := status.Convert(err)
 		require.Equal(t, codes.ResourceExhausted, st.Code())
@@ -353,10 +442,10 @@ func TestQueryMetrics(t *testing.T) {
 
 	t.Log("Query GetRows client with view")
 	view0 := env.beginView(t, env.clientConn, defaultViewParams(time.Minute))
-	ret, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+	ret, err := env.clientConn.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.Query{
 		View:       view0,
 		Namespaces: query.Namespaces,
-	})
+	}))
 	require.NoError(t, err)
 	requireResults(t, requiredItems, ret.Namespaces)
 
@@ -369,7 +458,7 @@ func TestQueryMetrics(t *testing.T) {
 	require.Equal(t, 0, env.qs.batcher.viewIDToViewHolder.Count())
 
 	for range 3 {
-		ret, err = env.qs.GetRows(t.Context(), query)
+		ret, err = env.qs.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, query))
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
 	}
@@ -393,10 +482,10 @@ func TestQueryWithConsistentView(t *testing.T) {
 
 	t.Log("Query GetRows client with view")
 	view0 := env.beginView(t, client, defaultViewParams(time.Minute))
-	ret, err := client.GetRows(t.Context(), &committerpb.Query{
+	ret, err := client.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.Query{
 		View:       view0,
 		Namespaces: query.Namespaces,
-	})
+	}))
 	require.NoError(t, err)
 	requireResults(t, requiredItems, ret.Namespaces)
 
@@ -408,13 +497,13 @@ func TestQueryWithConsistentView(t *testing.T) {
 	testItem1 := items{"0", t1.keys[:1], t1.values[:1], t1.versions[:1]}
 
 	view1 := env.beginView(t, client, defaultViewParams(time.Minute))
-	ret, err = client.GetRows(t.Context(), &committerpb.Query{
+	ret, err = client.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, &committerpb.Query{
 		View: view1,
 		Namespaces: []*committerpb.QueryNamespace{{
 			NsId: testItem1.ns,
 			Keys: testItem1.keys,
 		}},
-	})
+	}))
 	require.NoError(t, err)
 
 	requireResults(t, []*items{&testItem1}, ret.Namespaces)
@@ -432,14 +521,14 @@ func TestQueryWithConsistentView(t *testing.T) {
 			Keys: testItem2.keys,
 		}},
 	}
-	ret2, err := client.GetRows(t.Context(), key2Query)
+	ret2, err := client.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, key2Query))
 	require.NoError(t, err)
 	// This is the same view, so we expect the old version of item 2.
 	requireResults(t, []*items{&testItem2}, ret2.Namespaces)
 
 	view2 := env.beginView(t, client, defaultViewParams(time.Minute))
 	key2Query.View = view2
-	ret3, err := client.GetRows(t.Context(), key2Query)
+	ret3, err := client.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, key2Query))
 	require.NoError(t, err)
 	// This is a new view, but it should be aggregated with the previous one.
 	// So we expect the old version of item 2.
@@ -451,7 +540,7 @@ func TestQueryWithConsistentView(t *testing.T) {
 
 	view3 := env.beginView(t, client, defaultViewParams(time.Minute))
 	key2Query.View = view3
-	ret4, err := client.GetRows(t.Context(), key2Query)
+	ret4, err := client.GetRows(t.Context(), newQueryTestEnvelope(t, env.querySigner, key2Query))
 	require.NoError(t, err)
 	// After we cancelled the other views, a new view should create
 	// a new transactions. So we expect the new version of item 2.
@@ -547,13 +636,32 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	return &queryServiceTestEnv{
-		config:     config,
-		qs:         qs,
-		ns:         namespacesToTest,
-		clientConn: clientConn,
-		pool:       pool,
+	configBlock, signer := CreateCommittedConfigBlockForTest(t)
+
+	env := &queryServiceTestEnv{
+		config:      config,
+		qs:          qs,
+		ns:          namespacesToTest,
+		clientConn:  clientConn,
+		pool:        pool,
+		querySigner: signer,
 	}
+
+	env.insertConfigBlockToDatabase(t, configBlock)
+
+	return env
+}
+
+func (env *queryServiceTestEnv) insertConfigBlockToDatabase(t *testing.T, configBlock *cb.Block) {
+	// Store initial config in database
+	envelope, err := protoutil.ExtractEnvelope(configBlock, 0)
+	require.NoError(t, err)
+	envelopeBytes, err := proto.Marshal(envelope)
+	require.NoError(t, err)
+
+	require.NoError(t, retry.ExecuteSQL(t.Context(), testdb.DefaultRetry, env.pool,
+		fmt.Sprintf("UPDATE ns_%s SET value = $1 WHERE key = $2", committerpb.ConfigNamespaceID),
+		envelopeBytes, []byte(committerpb.ConfigNamespaceID)))
 }
 
 func generateNamespacesUnderTest(t *testing.T, namespaces []string) *vc.DatabaseConfig {
@@ -676,7 +784,7 @@ func (q *queryServiceTestEnv) beginView(
 	params *committerpb.ViewParameters,
 ) *committerpb.View {
 	t.Helper()
-	view, err := client.BeginView(t.Context(), params)
+	view, err := client.BeginView(t.Context(), newQueryTestEnvelope(t, q.querySigner, params))
 	require.NoError(t, err)
 	require.NotNil(t, view)
 	require.NotEmpty(t, view.Id)
@@ -693,7 +801,7 @@ func (q *queryServiceTestEnv) endView(
 	view *committerpb.View,
 ) {
 	t.Helper()
-	_, err := client.EndView(t.Context(), view)
+	_, err := client.EndView(t.Context(), newQueryTestEnvelope(t, q.querySigner, view))
 	require.NoError(t, err)
 }
 
@@ -795,4 +903,47 @@ func createQueryClientWithTLS(
 ) committerpb.QueryServiceClient {
 	t.Helper()
 	return test.CreateClientWithTLS(t, ep, tlsCfg, committerpb.NewQueryServiceClient)
+}
+
+func newQueryTestEnvelope(t *testing.T, signer msp.SigningIdentity, msg proto.Message) *cb.Envelope {
+	t.Helper()
+
+	if msg == nil {
+		// Create an empty message or use a default
+		msg = &cb.Payload{} // Or whatever makes sense for your test
+	}
+
+	env, err := protoutil.CreateSignedEnvelope(
+		cb.HeaderType_MESSAGE,
+		"",
+		signer,
+		msg,
+		0,
+		0,
+	)
+	require.NoError(t, err)
+	return env
+}
+
+func CreateCommittedConfigBlockForTest(t *testing.T) (*cb.Block, msp.SigningIdentity) {
+	t.Helper()
+
+	cryptoPath := t.TempDir()
+	configBlock, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(cryptoPath, &testcrypto.ConfigBlock{
+		ChannelID:             "channel",
+		PeerOrganizationCount: 1,
+	})
+	require.NoError(t, err)
+
+	identities, err := testcrypto.GetPeersIdentities(cryptoPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+
+	valid := byte(committerpb.Status_COMMITTED)
+	configBlock.Metadata = &cb.BlockMetadata{
+		Metadata: [][]byte{nil, nil, {valid}},
+	}
+	configBlock.Header.DataHash = protoutil.ComputeBlockDataHash(configBlock.Data)
+
+	return configBlock, identities[0]
 }

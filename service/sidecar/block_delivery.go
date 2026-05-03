@@ -20,12 +20,13 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 )
 
 // blockDelivery implements peer.DeliverServer by streaming blocks from a blockStore.
 type blockDelivery struct {
-	blockStore *blockStore
+	blockStore        *blockStore
+	configBlockSource func() *common.Block
+	acl               *envelopeACL
 }
 
 var blockReadyRetryProfile = retry.Profile{
@@ -34,8 +35,12 @@ var blockReadyRetryProfile = retry.Profile{
 	MaxInterval:     3 * time.Second,
 }
 
-func newBlockDelivery(bs *blockStore) *blockDelivery {
-	return &blockDelivery{blockStore: bs}
+func newBlockDelivery(bs *blockStore, configBlockSource func() *common.Block) *blockDelivery {
+	return &blockDelivery{
+		blockStore:        bs,
+		configBlockSource: configBlockSource,
+		acl:               newEnvelopeACL(queryReadersPolicy),
+	}
 }
 
 // Deliver delivers the requested blocks.
@@ -88,9 +93,14 @@ func (s *blockDelivery) deliverBlocks( //nolint:gocognit
 	srv peer.Deliver_DeliverServer,
 	envelope *common.Envelope,
 ) (common.Status, error) {
-	payload, _, err := serialization.ParseEnvelope(envelope)
+	configEnvelopeBytes, err := configEnvelopeBytesFromBlock(s.currentConfigBlock())
 	if err != nil {
-		return common.Status_BAD_REQUEST, errors.Wrap(err, "error parsing envelope")
+		return common.Status_BAD_REQUEST, err
+	}
+
+	payload, err := s.acl.authorize(configEnvelopeBytes, envelope)
+	if err != nil {
+		return common.Status_BAD_REQUEST, err
 	}
 
 	seekInfo, err := readSeekInfo(payload.Data)
@@ -132,6 +142,13 @@ func (s *blockDelivery) deliverBlocks( //nolint:gocognit
 		}
 	}
 	return common.Status_SUCCESS, nil
+}
+
+func (s *blockDelivery) currentConfigBlock() *common.Block {
+	if s.configBlockSource == nil {
+		return nil
+	}
+	return s.configBlockSource()
 }
 
 func (s *blockDelivery) getCursor(seekInfo *ab.SeekInfo) (blockledger.Iterator, uint64, error) {

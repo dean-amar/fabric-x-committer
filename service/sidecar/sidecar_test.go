@@ -384,8 +384,8 @@ func TestSidecarRecovery(t *testing.T) {
 		newPerformanceMetrics(),
 	)
 	require.NoError(t, err)
-	env.sidecar.blockDelivery = newBlockDelivery(env.sidecar.blockStore)
-	env.sidecar.blockQuery = newBlockQuery(env.sidecar.blockStore)
+	env.sidecar.blockDelivery = newBlockDelivery(env.sidecar.blockStore, env.sidecar.currentConfigBlock)
+	env.sidecar.blockQuery = newBlockQuery(env.sidecar.blockStore, env.sidecar.currentConfigBlock)
 	ensureAtLeastHeight(t, env.sidecar.blockStore, 1) // back to block 0
 
 	t.Log("4. Make coordinator not idle to ensure sidecar is waiting")
@@ -563,12 +563,12 @@ func (env *sidecarTestEnv) submitTXs(ctx context.Context, t *testing.T, txs []*s
 	for i, tx := range txs {
 		txIDs[i] = tx.Id
 	}
-	err := env.notifyStream.Send(&committerpb.NotificationRequest{
+	err := env.notifyStream.Send(newTestEnvelope(t, newTestSigningIdentity(t), &committerpb.NotificationRequest{
 		TxStatusRequest: &committerpb.TxIDsBatch{
 			TxIds: txIDs,
 		},
 		Timeout: durationpb.New(3 * time.Minute),
-	})
+	}))
 	require.NoError(t, err)
 
 	// Allows processing the request before submitting the payload.

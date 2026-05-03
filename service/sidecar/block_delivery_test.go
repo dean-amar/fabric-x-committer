@@ -13,6 +13,7 @@ import (
 	ab "github.com/hyperledger/fabric-protos-go-apiv2/orderer"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -20,18 +21,23 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/hyperledger/fabric-x-committer/utils/testcrypto"
 )
 
 func TestBlockDelivery(t *testing.T) {
 	t.Parallel()
 
-	bs, _ := newBlockStoreWithBlocks(t, 3)
+	bs, _, signer := newBlockStoreWithBlocks(t, 3)
 
 	// Register block delivery on a gRPC server.
 	config := test.NewLocalHostServer(test.InsecureTLSConfig)
 	test.RunGrpcServerForTest(t.Context(), t, config,
 		func(server *grpc.Server) {
-			peer.RegisterDeliverServer(server, newBlockDelivery(bs))
+			peer.RegisterDeliverServer(server, newBlockDelivery(bs, func() *common.Block {
+				block, err := bs.store.RetrieveBlockByNumber(0)
+				require.NoError(t, err)
+				return block
+			}))
 		})
 	conn := test.NewInsecureConnection(t, &config.Endpoint)
 	deliverClient := peer.NewDeliverClient(conn)
@@ -41,7 +47,7 @@ func TestBlockDelivery(t *testing.T) {
 		stream, err := deliverClient.Deliver(t.Context())
 		require.NoError(t, err)
 
-		env := seekEnvelope(t, 1, 2)
+		env := seekEnvelope(t, signer, 1, 2)
 		require.NoError(t, stream.Send(env))
 
 		// Should receive block 1, then block 2, then a SUCCESS status.
@@ -61,7 +67,7 @@ func TestBlockDelivery(t *testing.T) {
 		stream, err := deliverClient.Deliver(t.Context())
 		require.NoError(t, err)
 
-		env := seekEnvelope(t, 0, 0)
+		env := seekEnvelope(t, signer, 0, 0)
 		require.NoError(t, stream.Send(env))
 
 		resp, err := stream.Recv()
@@ -94,42 +100,82 @@ func TestBlockDelivery(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, codes.Unimplemented, status.Code(err))
 	})
+
+	t.Run("Deliver_UnauthorizedSigner", func(t *testing.T) {
+		t.Parallel()
+		stream, err := deliverClient.Deliver(t.Context())
+		require.NoError(t, err)
+
+		unauthorizedSigner := newTestSigningIdentity(t)
+		require.NoError(t, stream.Send(seekEnvelope(t, unauthorizedSigner, 1, 1)))
+
+		_, err = stream.Recv()
+		require.Error(t, err)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.ErrorContains(t, err, "failed to deserialize creator identity")
+	})
 }
 
 // newBlockStoreWithBlocks creates a blockStore pre-populated with numBlocks chained blocks.
 // Each block carries valid transaction metadata. Returns the blockStore and per-block txIDs.
-func newBlockStoreWithBlocks(t *testing.T, numBlocks int) (*blockStore, [][3]string) {
+func newBlockStoreWithBlocks(t *testing.T, numBlocks int) (*blockStore, [][3]string, msp.SigningIdentity) {
 	t.Helper()
 
 	bs, err := newBlockStore(t.TempDir(), 0, newPerformanceMetrics())
 	require.NoError(t, err)
 	t.Cleanup(bs.close)
 
+	configBlock, signer := createCommittedConfigBlockForTest(t)
+	require.NoError(t, bs.ledger.Append(configBlock))
+
 	valid := byte(committerpb.Status_COMMITTED)
 	metadata := &common.BlockMetadata{
 		Metadata: [][]byte{nil, nil, {valid, valid, valid}},
 	}
 
-	var prevHash []byte
+	prevHash := protoutil.BlockHeaderHash(configBlock.Header)
 	allTxIDs := make([][3]string, numBlocks)
 	for i := range numBlocks {
-		blk, txIDs := createBlockForTest(t, uint64(i), prevHash) //nolint:gosec
+		blk, txIDs := createBlockForTest(t, uint64(i+1), prevHash) //nolint:gosec
 		blk.Metadata = metadata
 		require.NoError(t, bs.ledger.Append(blk))
 		prevHash = protoutil.BlockHeaderHash(blk.Header)
 		allTxIDs[i] = txIDs
 	}
 
-	return bs, allTxIDs
+	return bs, allTxIDs, signer
+}
+
+func createCommittedConfigBlockForTest(t *testing.T) (*common.Block, msp.SigningIdentity) {
+	t.Helper()
+
+	cryptoPath := t.TempDir()
+	configBlock, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(cryptoPath, &testcrypto.ConfigBlock{
+		ChannelID:             committerChannelID,
+		PeerOrganizationCount: 1,
+	})
+	require.NoError(t, err)
+
+	identities, err := testcrypto.GetPeersIdentities(cryptoPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+
+	valid := byte(committerpb.Status_COMMITTED)
+	configBlock.Metadata = &common.BlockMetadata{
+		Metadata: [][]byte{nil, nil, {valid}},
+	}
+	configBlock.Header.DataHash = protoutil.ComputeBlockDataHash(configBlock.Data)
+
+	return configBlock, identities[0]
 }
 
 // seekEnvelope creates a signed deliver envelope requesting blocks [start, stop].
-func seekEnvelope(t *testing.T, start, stop uint64) *common.Envelope {
+func seekEnvelope(t *testing.T, signer msp.SigningIdentity, start, stop uint64) *common.Envelope {
 	t.Helper()
 	env, err := protoutil.CreateSignedEnvelope(
 		common.HeaderType_DELIVER_SEEK_INFO,
 		"",
-		nil, // no signer needed — the sidecar doesn't verify deliver request signatures.
+		signer,
 		&ab.SeekInfo{
 			Start:    &ab.SeekPosition{Type: &ab.SeekPosition_Specified{Specified: &ab.SeekSpecified{Number: start}}},
 			Stop:     &ab.SeekPosition{Type: &ab.SeekPosition_Specified{Specified: &ab.SeekSpecified{Number: stop}}},

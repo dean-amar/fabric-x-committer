@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -95,6 +97,7 @@ func BenchmarkNotifier(b *testing.B) {
 type notifierTestEnv struct {
 	n              *notifier
 	metrics        *perfMetrics
+	signer         msp.SigningIdentity
 	requestQueue   channel.Writer[*notificationRequest]
 	statusQueue    channel.Writer[[]*committerpb.TxStatus]
 	responseQueues []channel.ReaderWriter[*committerpb.NotificationResponse]
@@ -307,12 +310,12 @@ func TestNotifierStream(t *testing.T) {
 	test.EventuallyIntMetric(t, 1, m.notifierActiveStreams, 5*time.Second, 100*time.Millisecond)
 
 	t.Log("Submitting requests")
-	err = stream.Send(&committerpb.NotificationRequest{
+	err = stream.Send(newTestEnvelope(t, env.signer, &committerpb.NotificationRequest{
 		TxStatusRequest: &committerpb.TxIDsBatch{
 			TxIds: []string{"1", "2", "3", "4", "5", "5", "5", "5", "6"},
 		},
 		Timeout: durationpb.New(5 * time.Minute),
-	})
+	}))
 	require.NoError(t, err)
 
 	// Wait for the request to process.
@@ -346,12 +349,12 @@ func TestNotifierStream(t *testing.T) {
 
 	t.Log("Submitting requests with short timeout - expecting notifications")
 	timeoutIDs := []string{"5", "6", "7", "8"}
-	err = stream.Send(&committerpb.NotificationRequest{
+	err = stream.Send(newTestEnvelope(t, env.signer, &committerpb.NotificationRequest{
 		TxStatusRequest: &committerpb.TxIDsBatch{
 			TxIds: timeoutIDs,
 		},
 		Timeout: durationpb.New(1 * time.Millisecond),
-	})
+	}))
 	require.NoError(t, err)
 
 	// Wait for the request to process.
@@ -480,9 +483,12 @@ func newNotifierTestEnv(tb testing.TB, numOfClients int) *notifierTestEnv {
 func newNotifierTestEnvWithConfig(tb testing.TB, numOfClients int, conf *NotificationServiceConfig) *notifierTestEnv {
 	tb.Helper()
 	metrics := newPerformanceMetrics()
+	configBlock, signer := createCommittedConfigBlockForTest(tb.(*testing.T))
+
 	env := &notifierTestEnv{
-		n:              newNotifier(DefaultBufferSize, conf, metrics),
+		n:              newNotifier(DefaultBufferSize, conf, metrics, func() *common.Block { return configBlock }),
 		metrics:        metrics,
+		signer:         signer,
 		responseQueues: make([]channel.ReaderWriter[*committerpb.NotificationResponse], numOfClients),
 	}
 	statusQueue := make(chan []*committerpb.TxStatus, DefaultBufferSize)

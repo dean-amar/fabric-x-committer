@@ -53,6 +53,7 @@ type Service struct {
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 	tlsUpdater         connection.TLSCertUpdater
+	cachedConfigBlock  atomic.Pointer[common.Block]
 }
 
 // New creates a sidecar service. The tlsUpdater is optional; when non-nil,
@@ -76,20 +77,22 @@ func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 		return nil, fmt.Errorf("failed to create block store: %w", err)
 	}
 
-	return &Service{
+	service := &Service{
 		deliveryParams: deliveryParams,
 		relay:          relayService,
-		notifier:       newNotifier(c.ChannelBufferSize, &c.Notification, metrics),
 		blockStore:     blockStoreInstance,
-		blockDelivery:  newBlockDelivery(blockStoreInstance),
-		blockQuery:     newBlockQuery(blockStoreInstance),
 		healthcheck:    connection.DefaultHealthCheckService(),
 		config:         c,
 		metrics:        metrics,
 		committedBlock: make(chan *common.Block, c.ChannelBufferSize),
 		statusQueue:    make(chan []*committerpb.TxStatus, c.ChannelBufferSize),
 		tlsUpdater:     tlsUpdater,
-	}, nil
+	}
+	service.notifier = newNotifier(c.ChannelBufferSize, &c.Notification, metrics, service.currentConfigBlock)
+	service.blockDelivery = newBlockDelivery(blockStoreInstance, service.currentConfigBlock)
+	service.blockQuery = newBlockQuery(blockStoreInstance, service.currentConfigBlock)
+	service.loadLatestConfigBlockFromStore()
+	return service, nil
 }
 
 // WaitForReady wait for sidecar to be ready to be exposed as gRPC service.
@@ -171,7 +174,7 @@ func (s *Service) sendBlocksAndReceiveStatus(
 
 	// We drop all enqueued block if any before starting a new session.
 	blocksToBeCommitted := make(chan *common.Block, s.config.ChannelBufferSize)
-	s.blockToBeCommitted.Store(new(blocksToBeCommitted))
+	s.blockToBeCommitted.Store(&blocksToBeCommitted)
 
 	var configBlocks chan *common.Block
 	if s.tlsUpdater != nil {
@@ -436,12 +439,13 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 			return errors.Wrap(ctx.Err(), "context ended")
 		}
 
-		if len(configBlk.Data.Data) == 0 {
-			return errors.Join(retry.ErrNonRetryable,
-				errors.Newf("config block %d has no data", configBlk.Header.Number))
+		envelopeBytes, err := configEnvelopeBytesFromBlock(configBlk)
+		if err != nil {
+			return errors.Join(retry.ErrNonRetryable, err)
 		}
+		s.setLatestConfigBlock(configBlk)
 
-		certs, err := connection.ExtractAppTLSCAsFromEnvelope(configBlk.Data.Data[0])
+		certs, err := connection.ExtractAppTLSCAsFromEnvelope(envelopeBytes)
 		if err != nil {
 			return errors.Join(retry.ErrNonRetryable,
 				errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
@@ -454,6 +458,61 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 	}
 
 	return errors.Wrap(ctx.Err(), "context cancelled")
+}
+
+func (s *Service) currentConfigBlock() *common.Block {
+	configBlock := s.cachedConfigBlock.Load()
+	if configBlock != nil {
+		return configBlock
+	}
+
+	return s.loadLatestConfigBlockFromStore()
+}
+
+func (s *Service) loadLatestConfigBlockFromStore() *common.Block {
+	if s.blockStore == nil || s.blockStore.store == nil {
+		return nil
+	}
+
+	info, err := s.blockStore.store.GetBlockchainInfo()
+	if err != nil || info == nil || info.Height == 0 {
+		return nil
+	}
+
+	lastBlock, err := s.blockStore.store.RetrieveBlockByNumber(info.Height - 1)
+	if err != nil || lastBlock == nil {
+		return nil
+	}
+
+	lastConfigIndex, err := protoutil.GetLastConfigIndexFromBlock(lastBlock)
+	if err != nil {
+		return nil
+	}
+
+	configBlock, err := s.blockStore.store.RetrieveBlockByNumber(lastConfigIndex)
+	if err != nil {
+		return nil
+	}
+
+	s.setLatestConfigBlock(configBlock)
+	return s.cachedConfigBlock.Load()
+}
+
+func (s *Service) setLatestConfigBlock(configBlock *common.Block) {
+	if configBlock == nil {
+		return
+	}
+	s.cachedConfigBlock.Store(configBlock)
+}
+
+func configEnvelopeBytesFromBlock(configBlk *common.Block) ([]byte, error) {
+	if configBlk == nil || configBlk.Header == nil {
+		return nil, errors.New("config block is not available")
+	}
+	if configBlk.Data == nil || len(configBlk.Data.Data) == 0 {
+		return nil, errors.Newf("config block %d has no data", configBlk.Header.Number)
+	}
+	return configBlk.Data.Data[0], nil
 }
 
 // Close closes the ledger.

@@ -33,7 +33,11 @@ func TestBlockStoreAndDelivery(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(bs.close)
 
-	bd := newBlockDelivery(bs)
+	bd := newBlockDelivery(bs, func() *common.Block {
+		block, err := bs.store.RetrieveBlockByNumber(0)
+		require.NoError(t, err)
+		return block
+	})
 
 	config := test.NewLocalHostServer(test.InsecureTLSConfig)
 	inputBlock := make(chan *common.Block, 10)

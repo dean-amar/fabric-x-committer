@@ -13,7 +13,6 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/common/ledger/blkstorage"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
@@ -25,15 +24,29 @@ var ErrEmptyTxID = errors.New("tx_id must not be empty")
 // read-only queries directly to the underlying block store.
 type blockQuery struct {
 	committerpb.UnimplementedBlockQueryServiceServer
-	blockStore *blockStore
+	blockStore        *blockStore
+	configBlockSource func() *common.Block
+	acl               *envelopeACL
 }
 
-func newBlockQuery(bs *blockStore) *blockQuery {
-	return &blockQuery{blockStore: bs}
+func newBlockQuery(bs *blockStore, configBlockSource func() *common.Block) *blockQuery {
+	return &blockQuery{
+		blockStore:        bs,
+		configBlockSource: configBlockSource,
+		acl:               newEnvelopeACL(queryReadersPolicy),
+	}
 }
 
 // GetBlockchainInfo returns the current blockchain height and hash metadata.
-func (s *blockQuery) GetBlockchainInfo(_ context.Context, _ *emptypb.Empty) (*common.BlockchainInfo, error) {
+func (s *blockQuery) GetBlockchainInfo(ctx context.Context, envelope *common.Envelope) (*common.BlockchainInfo, error) {
+	configEnvelopeBytes, err := s.currentConfigEnvelopeBytes()
+	if err != nil {
+		return nil, grpcerror.WrapFailedPrecondition(err)
+	}
+	if _, err := s.acl.authorize(configEnvelopeBytes, envelope); err != nil {
+		return nil, err
+	}
+
 	info, err := s.blockStore.store.GetBlockchainInfo()
 	if err != nil {
 		logger.Errorf("GetBlockchainInfo failed: %v", err)
@@ -43,39 +56,80 @@ func (s *blockQuery) GetBlockchainInfo(_ context.Context, _ *emptypb.Empty) (*co
 }
 
 // GetBlockByNumber retrieves a block by its sequence number.
-func (s *blockQuery) GetBlockByNumber(_ context.Context, req *committerpb.BlockNumber) (*common.Block, error) {
+func (s *blockQuery) GetBlockByNumber(ctx context.Context, envelope *common.Envelope) (*common.Block, error) {
+	configEnvelopeBytes, err := s.currentConfigEnvelopeBytes()
+	if err != nil {
+		return nil, grpcerror.WrapFailedPrecondition(err)
+	}
+
+	req := &committerpb.BlockNumber{}
+	if err := s.acl.authorizeAndUnmarshal(configEnvelopeBytes, envelope, req); err != nil {
+		return nil, err
+	}
+
 	block, err := s.blockStore.store.RetrieveBlockByNumber(req.GetNumber())
 	if err != nil {
-		return nil, wrapQueryError(err)
+		return nil, wrapBlockQueryError(err)
 	}
 	return block, nil
 }
 
 // GetBlockByTxID retrieves the block that contains the specified transaction.
-func (s *blockQuery) GetBlockByTxID(_ context.Context, req *committerpb.TxID) (*common.Block, error) {
+func (s *blockQuery) GetBlockByTxID(ctx context.Context, envelope *common.Envelope) (*common.Block, error) {
+	configEnvelopeBytes, err := s.currentConfigEnvelopeBytes()
+	if err != nil {
+		return nil, grpcerror.WrapFailedPrecondition(err)
+	}
+
+	req := &committerpb.TxID{}
+	if err := s.acl.authorizeAndUnmarshal(configEnvelopeBytes, envelope, req); err != nil {
+		return nil, err
+	}
 	if req.GetTxId() == "" {
 		return nil, grpcerror.WrapInvalidArgument(ErrEmptyTxID)
 	}
+
 	block, err := s.blockStore.store.RetrieveBlockByTxID(req.GetTxId())
 	if err != nil {
-		return nil, wrapQueryError(err)
+		return nil, wrapBlockQueryError(err)
 	}
 	return block, nil
 }
 
 // GetTxByID retrieves the transaction envelope for the specified transaction ID.
-func (s *blockQuery) GetTxByID(_ context.Context, req *committerpb.TxID) (*common.Envelope, error) {
+func (s *blockQuery) GetTxByID(ctx context.Context, envelope *common.Envelope) (*common.Envelope, error) {
+	configEnvelopeBytes, err := s.currentConfigEnvelopeBytes()
+	if err != nil {
+		return nil, grpcerror.WrapFailedPrecondition(err)
+	}
+
+	req := &committerpb.TxID{}
+	if err := s.acl.authorizeAndUnmarshal(configEnvelopeBytes, envelope, req); err != nil {
+		return nil, err
+	}
 	if req.GetTxId() == "" {
 		return nil, grpcerror.WrapInvalidArgument(ErrEmptyTxID)
 	}
-	envelope, err := s.blockStore.store.RetrieveTxByID(req.GetTxId())
+
+	txEnvelope, err := s.blockStore.store.RetrieveTxByID(req.GetTxId())
 	if err != nil {
-		return nil, wrapQueryError(err)
+		return nil, wrapBlockQueryError(err)
 	}
-	return envelope, nil
+	return txEnvelope, nil
 }
 
-func wrapQueryError(err error) error {
+func (s *blockQuery) currentConfigBlock() *common.Block {
+	if s.configBlockSource == nil {
+		return nil
+	}
+	return s.configBlockSource()
+}
+
+func (s *blockQuery) currentConfigEnvelopeBytes() ([]byte, error) {
+	return configEnvelopeBytesFromBlock(s.currentConfigBlock())
+}
+
+func wrapBlockQueryError(err error) error {
 	if errors.Is(err, blkstorage.ErrNotFound) {
 		return grpcerror.WrapNotFound(err)
 	}

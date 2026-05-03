@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	cb "github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
@@ -35,6 +37,8 @@ type (
 		maxActiveTxIDs     int
 		maxTxIDsPerRequest int
 		metrics            *perfMetrics
+		acl                *envelopeACL
+		configBlockSource  func() *cb.Block
 		// requestQueue receives requests from users.
 		requestQueue chan *notificationRequest
 	}
@@ -57,13 +61,20 @@ type (
 	}
 )
 
-func newNotifier(bufferSize int, conf *NotificationServiceConfig, metrics *perfMetrics) *notifier {
+func newNotifier(
+	bufferSize int,
+	conf *NotificationServiceConfig,
+	metrics *perfMetrics,
+	configBlockSource func() *cb.Block,
+) *notifier {
 	return &notifier{
 		bufferSize:         bufferSize,
 		maxTimeout:         conf.MaxTimeout,
 		maxActiveTxIDs:     conf.MaxActiveTxIDs,
 		maxTxIDsPerRequest: conf.MaxTxIDsPerRequest,
 		metrics:            metrics,
+		acl:                newEnvelopeACL(queryReadersPolicy),
+		configBlockSource:  configBlockSource,
 		requestQueue:       make(chan *notificationRequest, bufferSize),
 	}
 }
@@ -129,8 +140,10 @@ func (n *notifier) recordRemovals(pendingTxIDsRemoved, uniquePendingTxIDsRemoved
 	promutil.AddToGauge(n.metrics.notifierUniquePendingTxIDs, -uniquePendingTxIDsRemoved)
 }
 
+type notifierStream = grpc.BidiStreamingServer[cb.Envelope, committerpb.NotificationResponse]
+
 // OpenNotificationStream implements the [protonotify.NotifierServer] API.
-func (n *notifier) OpenNotificationStream(stream committerpb.Notifier_OpenNotificationStreamServer) error {
+func (n *notifier) OpenNotificationStream(stream notifierStream) error {
 	n.metrics.notifierActiveStreams.Inc()
 	defer n.metrics.notifierActiveStreams.Dec()
 
@@ -140,10 +153,21 @@ func (n *notifier) OpenNotificationStream(stream committerpb.Notifier_OpenNotifi
 
 	g.Go(func() error {
 		for gCtx.Err() == nil {
-			req, err := stream.Recv()
+			envelope, err := stream.Recv()
 			if err != nil {
 				return errors.Wrap(err, "error receiving request")
 			}
+
+			configEnvelopeBytes, err := configEnvelopeBytesFromBlock(n.currentConfigBlock())
+			if err != nil {
+				return grpcerror.WrapFailedPrecondition(err)
+			}
+
+			req := &committerpb.NotificationRequest{}
+			if err := n.acl.authorizeAndUnmarshal(configEnvelopeBytes, envelope, req); err != nil {
+				return err
+			}
+
 			fixTimeout(req, n.maxTimeout)
 			requestQueue.Write(&notificationRequest{
 				request:          req,
@@ -176,6 +200,13 @@ func wrapNotifierError(err error) error {
 		return grpcerror.WrapCancelled(err)
 	}
 	return grpcerror.WrapInternalError(err)
+}
+
+func (n *notifier) currentConfigBlock() *cb.Block {
+	if n.configBlockSource == nil {
+		return nil
+	}
+	return n.configBlockSource()
 }
 
 func fixTimeout(request *committerpb.NotificationRequest, maxTimeout time.Duration) {
