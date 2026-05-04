@@ -19,6 +19,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -286,6 +287,7 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	c.NotifyClient = committerpb.NewNotifierClient(
 		test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
+
 	var err error
 	c.OrdererStream, err = adapters.NewBroadcastStream(ctx, &c.OrdererEnv.OrdererConnConfig)
 	require.NoError(t, err)
@@ -460,6 +462,39 @@ func (c *CommitterRuntime) MakeAndSendTransactionsToOrderer(
 	return c.SendTransactionsToOrderer(t, txs, expectedStatus)
 }
 
+// wrapRequestInEnvelope wraps a proto message in a common.Envelope for testing.
+// This is a simplified version that doesn't include signatures since ACL is disabled in tests.
+func (c *CommitterRuntime) wrapRequestInEnvelope(t *testing.T, request proto.Message) *common.Envelope {
+	t.Helper()
+
+	// Marshal the request
+	requestBytes, err := proto.Marshal(request)
+	require.NoError(t, err)
+
+	// Create channel header
+	channelHeader := &common.ChannelHeader{
+		Type:      int32(common.HeaderType_MESSAGE),
+		ChannelId: c.OrdererEnv.ChanID, // Use default test channel ID
+	}
+	channelHeaderBytes, err := proto.Marshal(channelHeader)
+	require.NoError(t, err)
+
+	// Create payload
+	payload := &common.Payload{
+		Header: &common.Header{
+			ChannelHeader: channelHeaderBytes,
+		},
+		Data: requestBytes,
+	}
+	payloadBytes, err := proto.Marshal(payload)
+	require.NoError(t, err)
+
+	// Create envelope (unsigned for test simplicity)
+	return &common.Envelope{
+		Payload: payloadBytes,
+	}
+}
+
 // SendTransactionsToOrderer creates a block with given transactions, send it to the committer, and verify the result.
 func (c *CommitterRuntime) SendTransactionsToOrderer(
 	t *testing.T, txs []*servicepb.LoadGenTx, expectedStatus []committerpb.Status,
@@ -472,14 +507,17 @@ func (c *CommitterRuntime) SendTransactionsToOrderer(
 	for i, tx := range txs {
 		expected.TxIDs[i] = tx.Id
 	}
-
 	if !c.Config.CrashTest {
-		err := c.NotifyStream.Send(&committerpb.NotificationRequest{
+		// Wrap the notification request in an envelope
+		notificationReq := &committerpb.NotificationRequest{
 			TxStatusRequest: &committerpb.TxIDsBatch{
 				TxIds: expected.TxIDs,
 			},
 			Timeout: durationpb.New(3 * time.Minute),
-		})
+		}
+		envelope := c.wrapRequestInEnvelope(t, notificationReq)
+
+		err := c.NotifyStream.Send(envelope)
 		require.NoError(t, err)
 		// Allows processing the request before submitting the payload.
 		time.Sleep(1 * time.Second)

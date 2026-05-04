@@ -14,6 +14,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/semaphore"
@@ -22,6 +23,7 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/hyperledger/fabric-x-committer/service/acl"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
@@ -62,15 +64,18 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  connection.TLSCertUpdater
+		aclProvider acl.Provider
 	}
 )
 
 // NewQueryService create a new QueryService given a configuration.
 // The tlsUpdater is optional; when non-nil, it is used to push updated
 // root CA certificates read from the database.
-func NewQueryService(config *Config, tlsUpdater connection.TLSCertUpdater) *Service {
+// The aclProvider is optional; when non-nil, it is used to enforce ACLs on query operations.
+func NewQueryService(config *Config, aclProvider acl.Provider, tlsUpdater connection.TLSCertUpdater) *Service {
 	return &Service{
 		config:      config,
+		aclProvider: aclProvider,
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: connection.DefaultHealthCheckService(),
@@ -116,7 +121,7 @@ func (q *Service) Run(ctx context.Context) error {
 
 	// TLS refresh runs as a standalone goroutine rather than in an errgroup because
 	// a transient failure to read config from the DB should not stop the query service.
-	go q.refreshTLSFromDB(ctx, pool)
+	go q.refreshTLSAndACLFromDB(ctx, pool)
 
 	_ = q.metrics.StartPrometheusServer(ctx, q.config.Monitoring)
 	// We don't use the error here as we avoid stopping the service due to monitoring error.
@@ -132,10 +137,16 @@ func (q *Service) RegisterService(server *grpc.Server) {
 
 // BeginView implements the query-service interface.
 func (q *Service) BeginView(
-	ctx context.Context, params *committerpb.ViewParameters,
+	ctx context.Context, envelope *common.Envelope,
 ) (*committerpb.View, error) {
 	q.metrics.requests.WithLabelValues(grpcBeginView).Inc()
 	defer q.requestLatency(grpcBeginView, time.Now())
+
+	// Extract and validate request from envelope
+	params := &committerpb.ViewParameters{}
+	if err := q.extractRequestFromEnvelope(envelope, params); err != nil {
+		return nil, err
+	}
 
 	// Validate and cap timeout.
 	if params.TimeoutMilliseconds == 0 ||
@@ -169,18 +180,31 @@ func (q *Service) BeginView(
 
 // EndView implements the query-service interface.
 func (q *Service) EndView(
-	_ context.Context, view *committerpb.View,
+	ctx context.Context, envelope *common.Envelope,
 ) (*emptypb.Empty, error) {
 	q.metrics.requests.WithLabelValues(grpcEndView).Inc()
 	defer q.requestLatency(grpcEndView, time.Now())
+
+	// Extract view from envelope (includes ACL check)
+	view := &committerpb.View{}
+	if err := q.extractRequestFromEnvelope(envelope, view); err != nil {
+		return nil, err
+	}
+
 	return nil, grpcerror.WrapFailedPrecondition(q.batcher.removeViewID(view.Id))
 }
 
 // GetRows implements the query-service interface.
 func (q *Service) GetRows(
-	ctx context.Context, query *committerpb.Query,
+	ctx context.Context, envelope *common.Envelope,
 ) (*committerpb.Rows, error) {
 	q.metrics.requests.WithLabelValues(grpcGetRows).Inc()
+
+	// Extract query from envelope (includes ACL check)
+	query := &committerpb.Query{}
+	if err := q.extractRequestFromEnvelope(envelope, query); err != nil {
+		return nil, err
+	}
 
 	if len(query.Namespaces) == 0 {
 		return nil, grpcerror.WrapInvalidArgument(ErrEmptyNamespaces)
@@ -231,9 +255,15 @@ func (q *Service) GetRows(
 
 // GetTransactionStatus implements the query-service interface.
 func (q *Service) GetTransactionStatus(
-	ctx context.Context, query *committerpb.TxStatusQuery,
+	ctx context.Context, envelope *common.Envelope,
 ) (*committerpb.TxStatusResponse, error) {
 	q.metrics.requests.WithLabelValues(grpcGetTxStatus).Inc()
+
+	// Extract query from envelope (includes ACL check)
+	query := &committerpb.TxStatusQuery{}
+	if err := q.extractRequestFromEnvelope(envelope, query); err != nil {
+		return nil, err
+	}
 
 	if len(query.TxIds) == 0 {
 		return nil, grpcerror.WrapInvalidArgument(ErrEmptyTxIDs)
@@ -274,8 +304,13 @@ func (q *Service) GetTransactionStatus(
 // GetNamespacePolicies implements the query-service interface.
 func (q *Service) GetNamespacePolicies(
 	ctx context.Context,
-	_ *emptypb.Empty,
+	envelope *common.Envelope,
 ) (*applicationpb.NamespacePolicies, error) {
+	// Perform ACL check (no request data to extract)
+	if err := q.checkACL(envelope); err != nil {
+		return nil, err
+	}
+
 	res, err := queryPolicies(ctx, q.batcher.pool)
 	return res, grpcerror.WrapInternalError(err)
 }
@@ -283,8 +318,13 @@ func (q *Service) GetNamespacePolicies(
 // GetConfigTransaction implements the query-service interface.
 func (q *Service) GetConfigTransaction(
 	ctx context.Context,
-	_ *emptypb.Empty,
+	envelope *common.Envelope,
 ) (*applicationpb.ConfigTransaction, error) {
+	// Perform ACL check (no request data to extract)
+	if err := q.checkACL(envelope); err != nil {
+		return nil, err
+	}
+
 	res, err := queryConfig(ctx, q.batcher.pool)
 	return res, grpcerror.WrapInternalError(err)
 }
@@ -331,10 +371,10 @@ func (q *Service) requestLatency(method string, start time.Time) {
 	promutil.Observe(q.metrics.requestsLatency.WithLabelValues(method), time.Since(start))
 }
 
-// refreshTLSFromDB periodically polls the database for the config transaction
-// and updates the dynamic TLS CA certificates only when the config version changes.
-func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
-	if q.tlsUpdater == nil {
+// refreshTLSAndACLFromDB periodically polls the database for the config transaction
+// and updates both the dynamic TLS CA certificates and ACL bundles when the config version changes.
+func (q *Service) refreshTLSAndACLFromDB(ctx context.Context, pool querier) {
+	if q.tlsUpdater == nil && q.aclProvider == nil {
 		return
 	}
 
@@ -354,20 +394,32 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 			return
 		}
 
-		certs, err := connection.ExtractAppTLSCAsFromEnvelope(configTX.Envelope)
-		if err != nil {
-			logger.Errorf("Failed to extract TLS CAs from config envelope: %v", err)
-			return
+		// Update TLS certificates if TLS updater is configured
+		if q.tlsUpdater != nil {
+			certs, err := connection.ExtractAppTLSCAsFromEnvelope(configTX.Envelope)
+			if err != nil {
+				logger.Errorf("Failed to extract TLS CAs from config envelope: %v", err)
+				return
+			}
+
+			if err := q.tlsUpdater.SetClientRootCAs(certs); err != nil {
+				logger.Errorf("Failed to update dynamic TLS: %v", err)
+				return
+			}
+			logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), configTX.Version)
 		}
 
-		if err := q.tlsUpdater.SetClientRootCAs(certs); err != nil {
-			logger.Errorf("Failed to update dynamic TLS: %v", err)
-			return
+		// Update ACL bundles if ACL provider is configured
+		if q.aclProvider != nil {
+			if err := q.aclProvider.UpdateFromConfigEnvelope(configTX.Envelope); err != nil {
+				logger.Errorf("Failed to update ACL bundle from config envelope: %v", err)
+				return
+			}
+			logger.Infof("Updated ACL bundle from config version %d", configTX.Version)
 		}
 
 		seen = true
 		lastVersion = configTX.Version
-		logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), lastVersion)
 	}
 
 	// Attempt immediate refresh at startup to pick up existing config without waiting the

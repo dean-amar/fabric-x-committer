@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -28,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen"
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/acl"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -111,7 +115,7 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Query GetRows client", func(t *testing.T) {
 		t.Parallel()
-		ret, err := env.clientConn.GetRows(t.Context(), query)
+		ret, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, query))
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
 	})
@@ -120,7 +124,7 @@ func TestQuery(t *testing.T) {
 		t.Parallel()
 		badQuery, _, _ := makeQuery(requiredItems)
 		badQuery.Namespaces[0].NsId = "$1"
-		ret, err := env.clientConn.GetRows(t.Context(), badQuery)
+		ret, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, badQuery))
 		require.Error(t, err)
 		require.Nil(t, ret)
 		require.Contains(t, err.Error(), policy.ErrInvalidNamespaceID.Error())
@@ -128,9 +132,9 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Query GetTransactionStatus with non existing TX ID", func(t *testing.T) {
 		t.Parallel()
-		ret, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		ret, err := env.clientConn.GetTransactionStatus(t.Context(), wrapInEnvelope(t, &committerpb.TxStatusQuery{
 			TxIds: append(txIDs, "bad-id"),
-		})
+		}))
 		require.NoError(t, err)
 		require.NotNil(t, ret)
 		test.RequireProtoElementsMatch(t, expectedStatus, ret.Statuses)
@@ -138,10 +142,10 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Query GetRows client with view", func(t *testing.T) {
 		t.Parallel()
-		ret, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+		ret, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, &committerpb.Query{
 			View:       env.beginView(t, env.clientConn, defaultViewParams(time.Minute)),
 			Namespaces: query.Namespaces,
-		})
+		}))
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
 	})
@@ -153,26 +157,26 @@ func TestQuery(t *testing.T) {
 
 	t.Run("Bad view ID", func(t *testing.T) {
 		t.Parallel()
-		_, err := env.clientConn.EndView(t.Context(), &committerpb.View{Id: "bad"})
+		_, err := env.clientConn.EndView(t.Context(), wrapInEnvelope(t, &committerpb.View{Id: "bad"}))
 		require.Equal(t, ErrInvalidOrStaleView.Error(), status.Convert(err).Message())
 	})
 
 	t.Run("Cancelled view ID", func(t *testing.T) {
 		t.Parallel()
-		view, err := env.clientConn.BeginView(t.Context(), defaultViewParams(time.Minute))
+		view, err := env.clientConn.BeginView(t.Context(), wrapInEnvelope(t, defaultViewParams(time.Minute)))
 		require.NoError(t, err)
-		_, err = env.clientConn.EndView(t.Context(), view)
+		_, err = env.clientConn.EndView(t.Context(), wrapInEnvelope(t, view))
 		require.NoError(t, err)
-		_, err = env.clientConn.EndView(t.Context(), view)
+		_, err = env.clientConn.EndView(t.Context(), wrapInEnvelope(t, view))
 		require.Equal(t, ErrInvalidOrStaleView.Error(), status.Convert(err).Message())
 	})
 
 	t.Run("Expired view ID", func(t *testing.T) {
 		t.Parallel()
-		view, err := env.clientConn.BeginView(t.Context(), defaultViewParams(100*time.Millisecond))
+		view, err := env.clientConn.BeginView(t.Context(), wrapInEnvelope(t, defaultViewParams(100*time.Millisecond)))
 		require.NoError(t, err)
 		time.Sleep(150 * time.Millisecond)
-		_, err = env.clientConn.EndView(t.Context(), view)
+		_, err = env.clientConn.EndView(t.Context(), wrapInEnvelope(t, view))
 		require.ErrorContains(t, err, status.Convert(err).Message())
 	})
 }
@@ -192,7 +196,7 @@ func TestMaxRequestKeys(t *testing.T) {
 				{NsId: "1", Keys: strToBytes("item1", "item2", "item3")},
 			},
 		}
-		_, err := env.clientConn.GetRows(t.Context(), query)
+		_, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, query))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrTooManyKeys.Error())
 		require.ErrorContains(t, err, "requested 6 keys")
@@ -210,7 +214,7 @@ func TestMaxRequestKeys(t *testing.T) {
 				{NsId: "1", Keys: strToBytes("item1", "item2", "item3")},
 			},
 		}
-		ret, err := env.clientConn.GetRows(t.Context(), query)
+		ret, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, query))
 		require.NoError(t, err)
 		require.Len(t, ret.Namespaces, 2)
 	})
@@ -220,11 +224,11 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 10})
 		env.insertSampleKeysValueItems(t)
 
-		_, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+		_, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, &committerpb.Query{
 			Namespaces: []*committerpb.QueryNamespace{
 				{NsId: "0", Keys: [][]byte{}},
 			},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrEmptyKeys.Error())
 	})
@@ -234,9 +238,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 10})
 		env.insertSampleKeysValueItems(t)
 
-		_, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+		_, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, &committerpb.Query{
 			Namespaces: []*committerpb.QueryNamespace{},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrEmptyNamespaces.Error())
 	})
@@ -254,7 +258,7 @@ func TestMaxRequestKeys(t *testing.T) {
 				{NsId: "2", Keys: strToBytes("item1", "item2", "item3", "item4")},
 			},
 		}
-		ret, err := env.clientConn.GetRows(t.Context(), query)
+		ret, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, query))
 		require.NoError(t, err)
 		require.Len(t, ret.Namespaces, 3)
 	})
@@ -264,9 +268,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 2})
 
 		// Request with 3 transaction IDs should fail (limit is 2)
-		_, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		_, err := env.clientConn.GetTransactionStatus(t.Context(), wrapInEnvelope(t, &committerpb.TxStatusQuery{
 			TxIds: []string{"tx1", "tx2", "tx3"},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrTooManyKeys.Error())
 		require.ErrorContains(t, err, "requested 3 keys")
@@ -277,9 +281,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 5})
 
 		// Request with 2 transaction IDs should succeed (limit is 5)
-		ret, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		ret, err := env.clientConn.GetTransactionStatus(t.Context(), wrapInEnvelope(t, &committerpb.TxStatusQuery{
 			TxIds: []string{"tx1", "tx2"},
-		})
+		}))
 		require.NoError(t, err)
 		// The transactions don't exist, but the request should be accepted
 		require.Empty(t, ret.Statuses)
@@ -289,9 +293,9 @@ func TestMaxRequestKeys(t *testing.T) {
 		t.Parallel()
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxRequestKeys: 5})
 
-		_, err := env.clientConn.GetTransactionStatus(t.Context(), &committerpb.TxStatusQuery{
+		_, err := env.clientConn.GetTransactionStatus(t.Context(), wrapInEnvelope(t, &committerpb.TxStatusQuery{
 			TxIds: []string{},
-		})
+		}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, ErrEmptyTxIDs.Error())
 	})
@@ -304,11 +308,11 @@ func TestMaxActiveViews(t *testing.T) {
 		t.Parallel()
 		env := newQueryServiceTestEnv(t, &queryServiceTestOpts{maxActiveViews: 1})
 
-		view, err := env.clientConn.BeginView(t.Context(), defaultViewParams(time.Minute))
+		view, err := env.clientConn.BeginView(t.Context(), wrapInEnvelope(t, defaultViewParams(time.Minute)))
 		require.NoError(t, err)
 		require.NotNil(t, view)
 
-		_, err = env.clientConn.BeginView(t.Context(), defaultViewParams(time.Minute))
+		_, err = env.clientConn.BeginView(t.Context(), wrapInEnvelope(t, defaultViewParams(time.Minute)))
 		require.Error(t, err)
 		st := status.Convert(err)
 		require.Equal(t, codes.ResourceExhausted, st.Code())
@@ -353,10 +357,10 @@ func TestQueryMetrics(t *testing.T) {
 
 	t.Log("Query GetRows client with view")
 	view0 := env.beginView(t, env.clientConn, defaultViewParams(time.Minute))
-	ret, err := env.clientConn.GetRows(t.Context(), &committerpb.Query{
+	ret, err := env.clientConn.GetRows(t.Context(), wrapInEnvelope(t, &committerpb.Query{
 		View:       view0,
 		Namespaces: query.Namespaces,
-	})
+	}))
 	require.NoError(t, err)
 	requireResults(t, requiredItems, ret.Namespaces)
 
@@ -369,7 +373,7 @@ func TestQueryMetrics(t *testing.T) {
 	require.Equal(t, 0, env.qs.batcher.viewIDToViewHolder.Count())
 
 	for range 3 {
-		ret, err = env.qs.GetRows(t.Context(), query)
+		ret, err = env.qs.GetRows(t.Context(), wrapInEnvelope(t, query))
 		require.NoError(t, err)
 		requireResults(t, requiredItems, ret.Namespaces)
 	}
@@ -393,10 +397,10 @@ func TestQueryWithConsistentView(t *testing.T) {
 
 	t.Log("Query GetRows client with view")
 	view0 := env.beginView(t, client, defaultViewParams(time.Minute))
-	ret, err := client.GetRows(t.Context(), &committerpb.Query{
+	ret, err := client.GetRows(t.Context(), wrapInEnvelope(t, &committerpb.Query{
 		View:       view0,
 		Namespaces: query.Namespaces,
-	})
+	}))
 	require.NoError(t, err)
 	requireResults(t, requiredItems, ret.Namespaces)
 
@@ -408,13 +412,13 @@ func TestQueryWithConsistentView(t *testing.T) {
 	testItem1 := items{"0", t1.keys[:1], t1.values[:1], t1.versions[:1]}
 
 	view1 := env.beginView(t, client, defaultViewParams(time.Minute))
-	ret, err = client.GetRows(t.Context(), &committerpb.Query{
+	ret, err = client.GetRows(t.Context(), wrapInEnvelope(t, &committerpb.Query{
 		View: view1,
 		Namespaces: []*committerpb.QueryNamespace{{
 			NsId: testItem1.ns,
 			Keys: testItem1.keys,
 		}},
-	})
+	}))
 	require.NoError(t, err)
 
 	requireResults(t, []*items{&testItem1}, ret.Namespaces)
@@ -432,14 +436,14 @@ func TestQueryWithConsistentView(t *testing.T) {
 			Keys: testItem2.keys,
 		}},
 	}
-	ret2, err := client.GetRows(t.Context(), key2Query)
+	ret2, err := client.GetRows(t.Context(), wrapInEnvelope(t, key2Query))
 	require.NoError(t, err)
 	// This is the same view, so we expect the old version of item 2.
 	requireResults(t, []*items{&testItem2}, ret2.Namespaces)
 
 	view2 := env.beginView(t, client, defaultViewParams(time.Minute))
 	key2Query.View = view2
-	ret3, err := client.GetRows(t.Context(), key2Query)
+	ret3, err := client.GetRows(t.Context(), wrapInEnvelope(t, key2Query))
 	require.NoError(t, err)
 	// This is a new view, but it should be aggregated with the previous one.
 	// So we expect the old version of item 2.
@@ -451,7 +455,7 @@ func TestQueryWithConsistentView(t *testing.T) {
 
 	view3 := env.beginView(t, client, defaultViewParams(time.Minute))
 	key2Query.View = view3
-	ret4, err := client.GetRows(t.Context(), key2Query)
+	ret4, err := client.GetRows(t.Context(), wrapInEnvelope(t, key2Query))
 	require.NoError(t, err)
 	// After we cancelled the other views, a new view should create
 	// a new transactions. So we expect the new version of item 2.
@@ -537,7 +541,51 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		Monitoring:            test.NewLocalHostServer(test.InsecureTLSConfig),
 	}
 
-	qs := NewQueryService(config, nil)
+	qs := NewQueryService(config, nil, nil)
+	test.RunServiceAndGrpcForTest(t.Context(), t, qs, qs.config.Server)
+	clientConn := createQueryClientWithTLS(t, &qs.config.Server.Endpoint, opts.clientTLS)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	pool, err := vc.NewDatabasePool(ctx, config.Database)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	return &queryServiceTestEnv{
+		config:     config,
+		qs:         qs,
+		ns:         namespacesToTest,
+		clientConn: clientConn,
+		pool:       pool,
+	}
+}
+
+// newQueryServiceTestEnvWithACL creates a test environment with ACL provider and TLS updater.
+func newQueryServiceTestEnvWithACL(t *testing.T, opts *queryServiceTestOpts, aclProvider acl.Provider, tlsUpdater connection.TLSCertUpdater) *queryServiceTestEnv {
+	t.Helper()
+	if opts == nil {
+		opts = &queryServiceTestOpts{}
+	}
+
+	t.Log("generating config and namespaces")
+	namespacesToTest := []string{"0", "1", "2"}
+	dbConf := generateNamespacesUnderTest(t, namespacesToTest)
+
+	config := &Config{
+		MinBatchKeys:          5,
+		MaxBatchWait:          time.Second,
+		ViewAggregationWindow: time.Minute,
+		MaxViewTimeout:        time.Minute,
+		MaxAggregatedViews:    5,
+		MaxActiveViews:        opts.maxActiveViews,
+		Server:                test.NewLocalHostServer(opts.serverTLS),
+		MaxRequestKeys:        opts.maxRequestKeys,
+		Database:              dbConf,
+		Monitoring:            test.NewLocalHostServer(test.InsecureTLSConfig),
+		TLSRefreshInterval:    5 * time.Second,
+	}
+
+	qs := NewQueryService(config, aclProvider, tlsUpdater)
 	test.RunServiceAndGrpcForTest(t.Context(), t, qs, qs.config.Server)
 	clientConn := createQueryClientWithTLS(t, &qs.config.Server.Endpoint, opts.clientTLS)
 
@@ -676,7 +724,7 @@ func (q *queryServiceTestEnv) beginView(
 	params *committerpb.ViewParameters,
 ) *committerpb.View {
 	t.Helper()
-	view, err := client.BeginView(t.Context(), params)
+	view, err := client.BeginView(t.Context(), wrapInEnvelope(t, params))
 	require.NoError(t, err)
 	require.NotNil(t, view)
 	require.NotEmpty(t, view.Id)
@@ -693,7 +741,7 @@ func (q *queryServiceTestEnv) endView(
 	view *committerpb.View,
 ) {
 	t.Helper()
-	_, err := client.EndView(t.Context(), view)
+	_, err := client.EndView(t.Context(), wrapInEnvelope(t, view))
 	require.NoError(t, err)
 }
 
@@ -773,18 +821,18 @@ func TestRefreshTLSFromDB(t *testing.T) {
 			tlsUpdater: updater,
 		}
 
-		go qs.refreshTLSFromDB(ctx, pool)
+		go qs.refreshTLSAndACLFromDB(ctx, pool)
 
 		require.Eventually(t, func() bool {
 			return len(updater.LastCerts()) > 0
 		}, 10*time.Second, 100*time.Millisecond, "TLS updater should have been called with CAs from config")
 	})
 
-	t.Run("no-op when tlsUpdater is nil", func(t *testing.T) {
+	t.Run("no-op when tlsUpdater and aclProvider are nil", func(t *testing.T) {
 		t.Parallel()
 		qs := &Service{config: &Config{}}
 		// Should return immediately without panic.
-		qs.refreshTLSFromDB(t.Context(), nil)
+		qs.refreshTLSAndACLFromDB(t.Context(), nil)
 	})
 }
 
@@ -795,4 +843,36 @@ func createQueryClientWithTLS(
 ) committerpb.QueryServiceClient {
 	t.Helper()
 	return test.CreateClientWithTLS(t, ep, tlsCfg, committerpb.NewQueryServiceClient)
+}
+
+// wrapInEnvelope wraps a proto message in a common.Envelope for testing.
+// This is a simplified version that doesn't include signatures since ACL is disabled in tests (nil aclProvider).
+func wrapInEnvelope(t *testing.T, request proto.Message) *common.Envelope {
+	t.Helper()
+
+	// Marshal the request
+	requestBytes, err := proto.Marshal(request)
+	require.NoError(t, err)
+
+	// Create channel header
+	channelHeader := &common.ChannelHeader{
+		Type: int32(common.HeaderType_MESSAGE),
+	}
+	channelHeaderBytes, err := proto.Marshal(channelHeader)
+	require.NoError(t, err)
+
+	// Create payload
+	payload := &common.Payload{
+		Header: &common.Header{
+			ChannelHeader: channelHeaderBytes,
+		},
+		Data: requestBytes,
+	}
+	payloadBytes, err := proto.Marshal(payload)
+	require.NoError(t, err)
+
+	// Create envelope (unsigned for test simplicity since ACL is disabled)
+	return &common.Envelope{
+		Payload: payloadBytes,
+	}
 }

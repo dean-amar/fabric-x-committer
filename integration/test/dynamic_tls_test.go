@@ -168,7 +168,8 @@ func tryRPC(endpoint connection.WithAddress, tlsConfig connection.TLSConfig) err
 	defer cancel()
 
 	client := committerpb.NewQueryServiceClient(conn)
-	_, err = client.GetTransactionStatus(ctx, &committerpb.TxStatusQuery{})
+	envelope := wrapInEnvelope(&testing.T{}, "testchannel", &committerpb.TxStatusQuery{})
+	_, err = client.GetTransactionStatus(ctx, envelope)
 	// FilterUnavailableErrorCode returns nil for transient connectivity errors
 	// (Unavailable, DeadlineExceeded) and passes through application-level errors.
 	// An application-level error means TLS succeeded, so we invert: if the filter

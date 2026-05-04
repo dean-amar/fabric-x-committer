@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/hyperledger/fabric-x-committer/service/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
@@ -35,6 +38,7 @@ type (
 		maxActiveTxIDs     int
 		maxTxIDsPerRequest int
 		metrics            *perfMetrics
+		aclProvider        acl.Provider
 		// requestQueue receives requests from users.
 		requestQueue chan *notificationRequest
 	}
@@ -57,13 +61,14 @@ type (
 	}
 )
 
-func newNotifier(bufferSize int, conf *NotificationServiceConfig, metrics *perfMetrics) *notifier {
+func newNotifier(bufferSize int, conf *NotificationServiceConfig, metrics *perfMetrics, aclProvider acl.Provider) *notifier {
 	return &notifier{
 		bufferSize:         bufferSize,
 		maxTimeout:         conf.MaxTimeout,
 		maxActiveTxIDs:     conf.MaxActiveTxIDs,
 		maxTxIDsPerRequest: conf.MaxTxIDsPerRequest,
 		metrics:            metrics,
+		aclProvider:        aclProvider,
 		requestQueue:       make(chan *notificationRequest, bufferSize),
 	}
 }
@@ -140,10 +145,17 @@ func (n *notifier) OpenNotificationStream(stream committerpb.Notifier_OpenNotifi
 
 	g.Go(func() error {
 		for gCtx.Err() == nil {
-			req, err := stream.Recv()
+			envelope, err := stream.Recv()
 			if err != nil {
 				return errors.Wrap(err, "error receiving request")
 			}
+
+			// Extract and validate the notification request from the envelope
+			req, err := n.extractAndValidateRequest(envelope)
+			if err != nil {
+				return err
+			}
+
 			fixTimeout(req, n.maxTimeout)
 			requestQueue.Write(&notificationRequest{
 				request:          req,
@@ -165,6 +177,31 @@ func (n *notifier) OpenNotificationStream(stream committerpb.Notifier_OpenNotifi
 		return gCtx.Err()
 	})
 	return wrapNotifierError(g.Wait())
+}
+
+// extractAndValidateRequest extracts the NotificationRequest from an envelope and performs ACL check.
+func (n *notifier) extractAndValidateRequest(envelope *common.Envelope) (*committerpb.NotificationRequest, error) {
+	// Check ACL first
+	if n.aclProvider != nil {
+		if err := n.aclProvider.CheckReadAccess(envelope); err != nil {
+			logger.Warnw("ACL check failed for notification stream", "error", err)
+			return nil, grpcerror.WrapWithContext(err, "access denied")
+		}
+	}
+
+	// Extract payload from envelope
+	payload := &common.Payload{}
+	if err := proto.Unmarshal(envelope.Payload, payload); err != nil {
+		return nil, grpcerror.WrapInvalidArgument(errors.Wrap(err, "failed to unmarshal envelope payload"))
+	}
+
+	// Unmarshal notification request from payload data
+	req := &committerpb.NotificationRequest{}
+	if err := proto.Unmarshal(payload.Data, req); err != nil {
+		return nil, grpcerror.WrapInvalidArgument(errors.Wrap(err, "failed to unmarshal notification request"))
+	}
+
+	return req, nil
 }
 
 // wrapNotifierError wraps notifier errors with appropriate gRPC status codes.

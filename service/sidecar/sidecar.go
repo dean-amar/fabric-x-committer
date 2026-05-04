@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/hyperledger/fabric-x-committer/service/acl"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -53,11 +54,13 @@ type Service struct {
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 	tlsUpdater         connection.TLSCertUpdater
+	aclProvider        acl.Provider
 }
 
 // New creates a sidecar service. The tlsUpdater is optional; when non-nil,
 // it is used to push updated root CA certificates from config blocks.
-func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
+// The aclProvider is optional; when non-nil, it is used to enforce ACLs on notification stream messages.
+func New(c *Config, aclProvider acl.Provider, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 
 	// 1. Load the delivery parameters for the ordering service.
@@ -79,16 +82,17 @@ func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 	return &Service{
 		deliveryParams: deliveryParams,
 		relay:          relayService,
-		notifier:       newNotifier(c.ChannelBufferSize, &c.Notification, metrics),
+		notifier:       newNotifier(c.ChannelBufferSize, &c.Notification, metrics, aclProvider),
 		blockStore:     blockStoreInstance,
 		blockDelivery:  newBlockDelivery(blockStoreInstance),
-		blockQuery:     newBlockQuery(blockStoreInstance),
+		blockQuery:     newBlockQuery(blockStoreInstance, aclProvider),
 		healthcheck:    connection.DefaultHealthCheckService(),
 		config:         c,
 		metrics:        metrics,
 		committedBlock: make(chan *common.Block, c.ChannelBufferSize),
 		statusQueue:    make(chan []*committerpb.TxStatus, c.ChannelBufferSize),
 		tlsUpdater:     tlsUpdater,
+		aclProvider:    aclProvider,
 	}, nil
 }
 
@@ -171,25 +175,25 @@ func (s *Service) sendBlocksAndReceiveStatus(
 
 	// We drop all enqueued block if any before starting a new session.
 	blocksToBeCommitted := make(chan *common.Block, s.config.ChannelBufferSize)
-	s.blockToBeCommitted.Store(new(blocksToBeCommitted))
+	s.blockToBeCommitted.Store(&blocksToBeCommitted)
 
 	var configBlocks chan *common.Block
-	if s.tlsUpdater != nil {
+	if s.tlsUpdater != nil || s.aclProvider != nil {
 		// Config blocks are infrequent, but in rare cases a user may submit
 		// multiple config transactions in rapid succession. Buffer of 5 allows
-		// the relay to enqueue without blocking while TLS updater processes.
+		// the relay to enqueue without blocking while updaters process.
 		configBlocks = make(chan *common.Block, 5)
 		// Prime the channel with the latest config block from the store.
-		// This ensures TLS is initialized with current CAs before new blocks arrive.
+		// This ensures TLS and ACL are initialized with current config before new blocks arrive.
 		_, configBlk, err := s.getPrevBlockAndItsConfig(nextBlockNum)
 		if err != nil {
-			return errors.Wrap(err, "failed to fetch latest config block for TLS initialization")
+			return errors.Wrap(err, "failed to fetch latest config block for initialization")
 		}
 		if configBlk != nil {
 			configBlocks <- configBlk
 		}
 		g.Go(func() error {
-			return s.updateDynamicTLS(gCtx, configBlocks)
+			return s.updateDynamicTLSAndACL(gCtx, configBlocks)
 		})
 	}
 
@@ -425,10 +429,11 @@ func (s *Service) monitorQueues(ctx context.Context) {
 	}
 }
 
-// updateDynamicTLS reads config blocks from the relay and updates the
-// dynamic TLS CA certificates. Errors are non-retryable because a failure
-// to parse a validated config block indicates a serious problem.
-func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *common.Block) error {
+// updateDynamicTLSAndACL reads config blocks from the relay and updates both
+// the dynamic TLS CA certificates and ACL channel configuration bundles.
+// Errors are non-retryable because a failure to parse a validated config block
+// indicates a serious problem.
+func (s *Service) updateDynamicTLSAndACL(ctx context.Context, configBlocks <-chan *common.Block) error {
 	reader := channel.NewReader(ctx, configBlocks)
 	for ctx.Err() == nil {
 		configBlk, ok := reader.Read()
@@ -441,16 +446,28 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 				errors.Newf("config block %d has no data", configBlk.Header.Number))
 		}
 
-		certs, err := connection.ExtractAppTLSCAsFromEnvelope(configBlk.Data.Data[0])
-		if err != nil {
-			return errors.Join(retry.ErrNonRetryable,
-				errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
+		// Update TLS certificates if TLS updater is configured
+		if s.tlsUpdater != nil {
+			certs, err := connection.ExtractAppTLSCAsFromEnvelope(configBlk.Data.Data[0])
+			if err != nil {
+				return errors.Join(retry.ErrNonRetryable,
+					errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
+			}
+
+			if err := s.tlsUpdater.SetClientRootCAs(certs); err != nil {
+				return errors.Join(retry.ErrNonRetryable, errors.Wrap(err, "failed to update dynamic TLS"))
+			}
+			logger.Infof("Updated dynamic TLS with %d CA certificates", len(certs))
 		}
 
-		if err := s.tlsUpdater.SetClientRootCAs(certs); err != nil {
-			return errors.Join(retry.ErrNonRetryable, errors.Wrap(err, "failed to update dynamic TLS"))
+		// Update ACL bundles if ACL provider is configured
+		if s.aclProvider != nil {
+			if err := s.aclProvider.UpdateFromConfigBlock(configBlk); err != nil {
+				return errors.Join(retry.ErrNonRetryable,
+					errors.Wrapf(err, "failed to update ACL bundle from config block %d", configBlk.Header.Number))
+			}
+			logger.Infof("Updated ACL bundle from config block %d", configBlk.Header.Number)
 		}
-		logger.Infof("Updated dynamic TLS with %d CA certificates", len(certs))
 	}
 
 	return errors.Wrap(ctx.Err(), "context cancelled")

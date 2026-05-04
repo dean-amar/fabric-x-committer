@@ -307,12 +307,13 @@ func TestNotifierStream(t *testing.T) {
 	test.EventuallyIntMetric(t, 1, m.notifierActiveStreams, 5*time.Second, 100*time.Millisecond)
 
 	t.Log("Submitting requests")
-	err = stream.Send(&committerpb.NotificationRequest{
+	envelope := wrapNotificationInEnvelope(t, &committerpb.NotificationRequest{
 		TxStatusRequest: &committerpb.TxIDsBatch{
 			TxIds: []string{"1", "2", "3", "4", "5", "5", "5", "5", "6"},
 		},
 		Timeout: durationpb.New(5 * time.Minute),
 	})
+	err = stream.Send(envelope)
 	require.NoError(t, err)
 
 	// Wait for the request to process.
@@ -346,12 +347,13 @@ func TestNotifierStream(t *testing.T) {
 
 	t.Log("Submitting requests with short timeout - expecting notifications")
 	timeoutIDs := []string{"5", "6", "7", "8"}
-	err = stream.Send(&committerpb.NotificationRequest{
+	envelope = wrapNotificationInEnvelope(t, &committerpb.NotificationRequest{
 		TxStatusRequest: &committerpb.TxIDsBatch{
 			TxIds: timeoutIDs,
 		},
 		Timeout: durationpb.New(1 * time.Millisecond),
 	})
+	err = stream.Send(envelope)
 	require.NoError(t, err)
 
 	// Wait for the request to process.
@@ -481,7 +483,7 @@ func newNotifierTestEnvWithConfig(tb testing.TB, numOfClients int, conf *Notific
 	tb.Helper()
 	metrics := newPerformanceMetrics()
 	env := &notifierTestEnv{
-		n:              newNotifier(DefaultBufferSize, conf, metrics),
+		n:              newNotifier(DefaultBufferSize, conf, metrics, nil), // nil ACL provider for tests
 		metrics:        metrics,
 		responseQueues: make([]channel.ReaderWriter[*committerpb.NotificationResponse], numOfClients),
 	}

@@ -104,7 +104,7 @@ func newSidecarTestEnvWithTLS(
 		Monitoring:                    test.NewLocalHostServer(conf.ServerTLS),
 		Orderer:                       ordererEnv.OrdererConnConfig,
 	}
-	sidecar, err := New(sidecarConf, nil)
+	sidecar, err := New(sidecarConf, nil, nil)
 	require.NoError(t, err)
 	t.Cleanup(sidecar.Close)
 
@@ -317,7 +317,7 @@ func TestSidecarConfigRecovery(t *testing.T) {
 
 	var err error
 	t.Log("Create a new sidecar with the old configuration (only party 0)")
-	env.sidecar, err = New(&env.config, nil)
+	env.sidecar, err = New(&env.config, nil, nil)
 	require.NoError(t, err)
 	t.Cleanup(env.sidecar.Close)
 
@@ -385,8 +385,8 @@ func TestSidecarRecovery(t *testing.T) {
 	)
 	require.NoError(t, err)
 	env.sidecar.blockDelivery = newBlockDelivery(env.sidecar.blockStore)
-	env.sidecar.blockQuery = newBlockQuery(env.sidecar.blockStore)
-	ensureAtLeastHeight(t, env.sidecar.blockStore, 1) // back to block 0
+	env.sidecar.blockQuery = newBlockQuery(env.sidecar.blockStore, nil) // nil ACL provider for tests
+	ensureAtLeastHeight(t, env.sidecar.blockStore, 1)                   // back to block 0
 
 	t.Log("4. Make coordinator not idle to ensure sidecar is waiting")
 	env.coordinator.SetWaitingTxsCount(10)
@@ -563,12 +563,13 @@ func (env *sidecarTestEnv) submitTXs(ctx context.Context, t *testing.T, txs []*s
 	for i, tx := range txs {
 		txIDs[i] = tx.Id
 	}
-	err := env.notifyStream.Send(&committerpb.NotificationRequest{
+	envelope := wrapNotificationInEnvelope(t, &committerpb.NotificationRequest{
 		TxStatusRequest: &committerpb.TxIDsBatch{
 			TxIds: txIDs,
 		},
 		Timeout: durationpb.New(3 * time.Minute),
 	})
+	err := env.notifyStream.Send(envelope)
 	require.NoError(t, err)
 
 	// Allows processing the request before submitting the payload.
@@ -714,7 +715,7 @@ func TestUpdateDynamicTLS(t *testing.T) {
 			cancel()
 		}()
 
-		err := s.updateDynamicTLS(ctx, ch)
+		err := s.updateDynamicTLSAndACL(ctx, ch)
 		require.ErrorIs(t, err, context.Canceled)
 		require.NotEmpty(t, updater.LastCerts(), "should have received TLS CA certificates")
 	})
@@ -731,7 +732,7 @@ func TestUpdateDynamicTLS(t *testing.T) {
 		ch := make(chan *common.Block, 1)
 		ch <- block
 
-		err := s.updateDynamicTLS(t.Context(), ch)
+		err := s.updateDynamicTLSAndACL(t.Context(), ch)
 		require.Error(t, err)
 		require.Empty(t, updater.LastCerts())
 	})

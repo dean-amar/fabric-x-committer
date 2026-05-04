@@ -52,9 +52,10 @@ func TestRateLimit(t *testing.T) {
 			name:     "Query_WithoutRetry_ReturnsResourceExhausted",
 			endpoint: c.SystemConfig.Services.Query.GrpcEndpoint,
 			requestFn: func(ctx context.Context, conn *grpc.ClientConn) error {
-				_, err := committerpb.NewQueryServiceClient(conn).GetTransactionStatus(ctx, &committerpb.TxStatusQuery{
+				envelope := wrapInEnvelope(&testing.T{}, runner.TestChannelName, &committerpb.TxStatusQuery{
 					TxIds: []string{"test-tx-id"},
 				})
+				_, err := committerpb.NewQueryServiceClient(conn).GetTransactionStatus(ctx, envelope)
 				return err
 			},
 			timeout: 10 * time.Second,
@@ -64,7 +65,8 @@ func TestRateLimit(t *testing.T) {
 			endpoint: c.SystemConfig.Services.Query.GrpcEndpoint,
 			useRetry: true,
 			requestFn: func(ctx context.Context, conn *grpc.ClientConn) error {
-				_, err := committerpb.NewQueryServiceClient(conn).GetNamespacePolicies(ctx, &emptypb.Empty{})
+				envelope := wrapInEnvelope(&testing.T{}, runner.TestChannelName, &emptypb.Empty{})
+				_, err := committerpb.NewQueryServiceClient(conn).GetNamespacePolicies(ctx, envelope)
 				return err
 			},
 			expectAllSucceed: true,
@@ -74,7 +76,8 @@ func TestRateLimit(t *testing.T) {
 			name:     "Sidecar_WithoutRetry_ReturnsResourceExhausted",
 			endpoint: c.SystemConfig.Services.Sidecar.GrpcEndpoint,
 			requestFn: func(ctx context.Context, conn *grpc.ClientConn) error {
-				_, err := committerpb.NewBlockQueryServiceClient(conn).GetBlockchainInfo(ctx, &emptypb.Empty{})
+				envelope := wrapInEnvelope(&testing.T{}, runner.TestChannelName, &emptypb.Empty{})
+				_, err := committerpb.NewBlockQueryServiceClient(conn).GetBlockchainInfo(ctx, envelope)
 				return err
 			},
 			timeout: 10 * time.Second,
@@ -84,7 +87,8 @@ func TestRateLimit(t *testing.T) {
 			endpoint: c.SystemConfig.Services.Sidecar.GrpcEndpoint,
 			useRetry: true,
 			requestFn: func(ctx context.Context, conn *grpc.ClientConn) error {
-				_, err := committerpb.NewBlockQueryServiceClient(conn).GetBlockByNumber(ctx, &committerpb.BlockNumber{})
+				envelope := wrapInEnvelope(&testing.T{}, runner.TestChannelName, &committerpb.BlockNumber{})
+				_, err := committerpb.NewBlockQueryServiceClient(conn).GetBlockByNumber(ctx, envelope)
 				return err
 			},
 			expectAllSucceed: true,

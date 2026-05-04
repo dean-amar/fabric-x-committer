@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
+	"github.com/hyperledger/fabric-x-committer/service/acl"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/query"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
@@ -62,7 +63,10 @@ func startService(ctx context.Context, name, configPath string) error {
 		if err != nil {
 			return err
 		}
-		service, err := sidecar.New(c, tlsUpdater)
+		// Create ACL provider for access control
+		bundleManager := acl.NewBundleManager()
+		aclProvider := acl.NewProvider(bundleManager)
+		service, err := sidecar.New(c, aclProvider, tlsUpdater)
 		if err != nil {
 			return errors.Wrap(err, "failed to create sidecar service")
 		}
@@ -88,7 +92,10 @@ func startService(ctx context.Context, name, configPath string) error {
 		if err != nil {
 			return err
 		}
-		return grpcservice.StartAndServe(ctx, query.NewQueryService(c, tlsUpdater), tlsProvider, c.Server)
+		// Create ACL provider for access control
+		bundleManager := acl.NewBundleManager()
+		aclProvider := acl.NewProvider(bundleManager)
+		return grpcservice.StartAndServe(ctx, query.NewQueryService(c, aclProvider, tlsUpdater), tlsProvider, c.Server)
 
 	default:
 		return errors.Newf("unknown config type: %T", conf)

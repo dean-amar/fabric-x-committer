@@ -27,9 +27,10 @@ func TestQueryService(t *testing.T) {
 	c, ctx, txIDs := setupQueryService(t, 0)
 
 	t.Log("Query TXs status")
-	status, err := c.QueryServiceClient.GetTransactionStatus(ctx, &committerpb.TxStatusQuery{
+	envelope := wrapInEnvelope(t, runner.TestChannelName, &committerpb.TxStatusQuery{
 		TxIds: txIDs,
 	})
+	status, err := c.QueryServiceClient.GetTransactionStatus(ctx, envelope)
 	require.NoError(t, err)
 	require.Len(t, status.Statuses, len(txIDs))
 	test.RequireProtoElementsMatch(t, []*committerpb.TxStatus{
@@ -44,25 +45,23 @@ func TestQueryService(t *testing.T) {
 	}, status.Statuses)
 
 	t.Log("Query Rows")
-	ret, err := c.QueryServiceClient.GetRows(
-		ctx,
-		&committerpb.Query{
-			Namespaces: []*committerpb.QueryNamespace{
-				{
-					NsId: "1",
-					Keys: [][]byte{
-						[]byte("k1"), []byte("k2"),
-					},
+	envelope = wrapInEnvelope(t, runner.TestChannelName, &committerpb.Query{
+		Namespaces: []*committerpb.QueryNamespace{
+			{
+				NsId: "1",
+				Keys: [][]byte{
+					[]byte("k1"), []byte("k2"),
 				},
-				{
-					NsId: "2",
-					Keys: [][]byte{
-						[]byte("k3"), []byte("k4"),
-					},
+			},
+			{
+				NsId: "2",
+				Keys: [][]byte{
+					[]byte("k3"), []byte("k4"),
 				},
 			},
 		},
-	)
+	})
+	ret, err := c.QueryServiceClient.GetRows(ctx, envelope)
 	require.NoError(t, err)
 
 	testItemsVersion := uint64(0)
@@ -128,12 +127,13 @@ func TestQueryServiceMaxRequestKeys(t *testing.T) {
 	t.Run("GetRows within limit succeeds", func(t *testing.T) {
 		t.Parallel()
 		// Request 3 keys, which is exactly at the limit.
-		ret, err := c.QueryServiceClient.GetRows(ctx, &committerpb.Query{
+		envelope := wrapInEnvelope(t, runner.TestChannelName, &committerpb.Query{
 			Namespaces: []*committerpb.QueryNamespace{
 				{NsId: "1", Keys: [][]byte{[]byte("k1"), []byte("k2")}},
 				{NsId: "2", Keys: [][]byte{[]byte("k3")}},
 			},
 		})
+		ret, err := c.QueryServiceClient.GetRows(ctx, envelope)
 		require.NoError(t, err)
 		require.Len(t, ret.Namespaces, 2)
 	})
@@ -141,12 +141,13 @@ func TestQueryServiceMaxRequestKeys(t *testing.T) {
 	t.Run("GetRows exceeds limit returns error", func(t *testing.T) {
 		t.Parallel()
 		// Request 4 keys across namespaces, exceeding the limit of 3.
-		_, err := c.QueryServiceClient.GetRows(ctx, &committerpb.Query{
+		envelope := wrapInEnvelope(t, runner.TestChannelName, &committerpb.Query{
 			Namespaces: []*committerpb.QueryNamespace{
 				{NsId: "1", Keys: [][]byte{[]byte("k1"), []byte("k2")}},
 				{NsId: "2", Keys: [][]byte{[]byte("k3"), []byte("k4")}},
 			},
 		})
+		_, err := c.QueryServiceClient.GetRows(ctx, envelope)
 		require.Error(t, err)
 		st, ok := status.FromError(err)
 		require.True(t, ok)
@@ -157,9 +158,10 @@ func TestQueryServiceMaxRequestKeys(t *testing.T) {
 	t.Run("GetTransactionStatus within limit succeeds", func(t *testing.T) {
 		t.Parallel()
 		// Request 2 transaction IDs, which is within the limit of 3.
-		ret, err := c.QueryServiceClient.GetTransactionStatus(ctx, &committerpb.TxStatusQuery{
+		envelope := wrapInEnvelope(t, runner.TestChannelName, &committerpb.TxStatusQuery{
 			TxIds: txIDs,
 		})
+		ret, err := c.QueryServiceClient.GetTransactionStatus(ctx, envelope)
 		require.NoError(t, err)
 		require.Len(t, ret.Statuses, len(txIDs))
 	})
@@ -167,9 +169,10 @@ func TestQueryServiceMaxRequestKeys(t *testing.T) {
 	t.Run("GetTransactionStatus exceeds limit returns error", func(t *testing.T) {
 		t.Parallel()
 		// Request 4 transaction IDs, exceeding the limit of 3.
-		_, err := c.QueryServiceClient.GetTransactionStatus(ctx, &committerpb.TxStatusQuery{
+		envelope := wrapInEnvelope(t, runner.TestChannelName, &committerpb.TxStatusQuery{
 			TxIds: []string{"tx1", "tx2", "tx3", "tx4"},
 		})
+		_, err := c.QueryServiceClient.GetTransactionStatus(ctx, envelope)
 		require.Error(t, err)
 		st, ok := status.FromError(err)
 		require.True(t, ok)
