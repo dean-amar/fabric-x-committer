@@ -14,12 +14,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/service/vc"
@@ -62,19 +64,28 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  connection.TLSCertUpdater
+		aclUpdater  ACLUpdater
+	}
+
+	// ACLUpdater is an interface for updating ACL bundles from config blocks.
+	ACLUpdater interface {
+		UpdateFromConfigBlock(configBlock *common.Block) error
 	}
 )
 
 // NewQueryService create a new QueryService given a configuration.
 // The tlsUpdater is optional; when non-nil, it is used to push updated
 // root CA certificates read from the database.
-func NewQueryService(config *Config, tlsUpdater connection.TLSCertUpdater) *Service {
+// The aclUpdater is optional; when non-nil, it is used to update ACL bundles
+// from config blocks read from the database.
+func NewQueryService(config *Config, tlsUpdater connection.TLSCertUpdater, aclUpdater ACLUpdater) *Service {
 	return &Service{
 		config:      config,
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: connection.DefaultHealthCheckService(),
 		tlsUpdater:  tlsUpdater,
+		aclUpdater:  aclUpdater,
 	}
 }
 
@@ -332,9 +343,10 @@ func (q *Service) requestLatency(method string, start time.Time) {
 }
 
 // refreshTLSFromDB periodically polls the database for the config transaction
-// and updates the dynamic TLS CA certificates only when the config version changes.
+// refreshTLSFromDB periodically polls the database for config transaction updates
+// and updates the dynamic TLS CA certificates and ACL bundles when the config version changes.
 func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
-	if q.tlsUpdater == nil {
+	if q.tlsUpdater == nil && q.aclUpdater == nil {
 		return
 	}
 
@@ -354,20 +366,50 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 			return
 		}
 
-		certs, err := connection.ExtractAppTLSCAsFromEnvelope(configTX.Envelope)
-		if err != nil {
-			logger.Errorf("Failed to extract TLS CAs from config envelope: %v", err)
-			return
+		// Update TLS if updater is provided
+		if q.tlsUpdater != nil {
+			certs, err := connection.ExtractAppTLSCAsFromEnvelope(configTX.Envelope)
+			if err != nil {
+				logger.Errorf("Failed to extract TLS CAs from config envelope: %v", err)
+				return
+			}
+
+			if err := q.tlsUpdater.SetClientRootCAs(certs); err != nil {
+				logger.Errorf("Failed to update dynamic TLS: %v", err)
+				return
+			}
+			logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), lastVersion)
 		}
 
-		if err := q.tlsUpdater.SetClientRootCAs(certs); err != nil {
-			logger.Errorf("Failed to update dynamic TLS: %v", err)
-			return
+		// Update ACL if updater is provided
+		if q.aclUpdater != nil {
+			// Unmarshal envelope
+			envelope := &common.Envelope{}
+			if err := proto.Unmarshal(configTX.Envelope, envelope); err != nil {
+				logger.Errorf("Failed to unmarshal config envelope: %v", err)
+				return
+			}
+
+			// Create a minimal config block for ACL update
+			// The ACL provider only needs the envelope, not the full block structure
+			configBlock := &common.Block{
+				Header: &common.BlockHeader{
+					Number: 0, // Version is tracked separately
+				},
+				Data: &common.BlockData{
+					Data: [][]byte{configTX.Envelope},
+				},
+			}
+
+			if err := q.aclUpdater.UpdateFromConfigBlock(configBlock); err != nil {
+				logger.Errorf("Failed to update ACL bundle: %v", err)
+				return
+			}
+			logger.Infof("Updated ACL bundle from config version %d", configTX.Version)
 		}
 
 		seen = true
 		lastVersion = configTX.Version
-		logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), lastVersion)
 	}
 
 	// Attempt immediate refresh at startup to pick up existing config without waiting the

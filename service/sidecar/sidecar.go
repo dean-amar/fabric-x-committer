@@ -53,11 +53,19 @@ type Service struct {
 	healthcheck        *health.Server
 	metrics            *perfMetrics
 	tlsUpdater         connection.TLSCertUpdater
+	aclUpdater         ACLUpdater
+}
+
+// ACLUpdater is an interface for updating ACL bundles from config blocks.
+type ACLUpdater interface {
+	UpdateFromConfigBlock(configBlock *common.Block) error
 }
 
 // New creates a sidecar service. The tlsUpdater is optional; when non-nil,
 // it is used to push updated root CA certificates from config blocks.
-func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
+// The aclUpdater is optional; when non-nil, it is used to update ACL bundles
+// from config blocks.
+func New(c *Config, tlsUpdater connection.TLSCertUpdater, aclUpdater ACLUpdater) (*Service, error) {
 	logger.Info("Initializing new sidecar")
 
 	// 1. Load the delivery parameters for the ordering service.
@@ -89,6 +97,7 @@ func New(c *Config, tlsUpdater connection.TLSCertUpdater) (*Service, error) {
 		committedBlock: make(chan *common.Block, c.ChannelBufferSize),
 		statusQueue:    make(chan []*committerpb.TxStatus, c.ChannelBufferSize),
 		tlsUpdater:     tlsUpdater,
+		aclUpdater:     aclUpdater,
 	}, nil
 }
 
@@ -426,7 +435,7 @@ func (s *Service) monitorQueues(ctx context.Context) {
 }
 
 // updateDynamicTLS reads config blocks from the relay and updates the
-// dynamic TLS CA certificates. Errors are non-retryable because a failure
+// dynamic TLS CA certificates and ACL bundles. Errors are non-retryable because a failure
 // to parse a validated config block indicates a serious problem.
 func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *common.Block) error {
 	reader := channel.NewReader(ctx, configBlocks)
@@ -441,16 +450,27 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 				errors.Newf("config block %d has no data", configBlk.Header.Number))
 		}
 
-		certs, err := connection.ExtractAppTLSCAsFromEnvelope(configBlk.Data.Data[0])
-		if err != nil {
-			return errors.Join(retry.ErrNonRetryable,
-				errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
+		// Update TLS if updater is provided
+		if s.tlsUpdater != nil {
+			certs, err := connection.ExtractAppTLSCAsFromEnvelope(configBlk.Data.Data[0])
+			if err != nil {
+				return errors.Join(retry.ErrNonRetryable,
+					errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
+			}
+
+			if err := s.tlsUpdater.SetClientRootCAs(certs); err != nil {
+				return errors.Join(retry.ErrNonRetryable, errors.Wrap(err, "failed to update dynamic TLS"))
+			}
+			logger.Infof("Updated dynamic TLS with %d CA certificates from block %d", len(certs), configBlk.Header.Number)
 		}
 
-		if err := s.tlsUpdater.SetClientRootCAs(certs); err != nil {
-			return errors.Join(retry.ErrNonRetryable, errors.Wrap(err, "failed to update dynamic TLS"))
+		// Update ACL if updater is provided
+		if s.aclUpdater != nil {
+			if err := s.aclUpdater.UpdateFromConfigBlock(configBlk); err != nil {
+				return errors.Join(retry.ErrNonRetryable, errors.Wrap(err, "failed to update ACL bundle"))
+			}
+			logger.Infof("Updated ACL bundle from config block %d", configBlk.Header.Number)
 		}
-		logger.Infof("Updated dynamic TLS with %d CA certificates", len(certs))
 	}
 
 	return errors.Wrap(ctx.Err(), "context cancelled")

@@ -41,6 +41,8 @@ type Registerer interface {
 // if either the service or any server exits.
 func StartAndServe(
 	ctx context.Context, service Service, tlsProvider connection.TLSConfigProvider,
+	additionalUnaryInterceptors []grpc.UnaryServerInterceptor,
+	additionalStreamInterceptors []grpc.StreamServerInterceptor,
 	serverConfigs ...*connection.ServerConfig,
 ) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -64,7 +66,7 @@ func StartAndServe(
 		g.Go(func() error {
 			// If the GRPC servers stop, there is no reason to continue the service.
 			defer cancel()
-			return Serve(gCtx, service, sc, tlsProvider)
+			return Serve(gCtx, service, sc, tlsProvider, additionalUnaryInterceptors, additionalStreamInterceptors)
 		})
 	}
 	return g.Wait()
@@ -76,12 +78,14 @@ func StartAndServe(
 func Serve(
 	ctx context.Context, service Registerer, serverConfig *connection.ServerConfig,
 	tlsProvider connection.TLSConfigProvider,
+	additionalUnaryInterceptors []grpc.UnaryServerInterceptor,
+	additionalStreamInterceptors []grpc.StreamServerInterceptor,
 ) error {
 	listener, err := serverConfig.Listener(ctx)
 	if err != nil {
 		return err
 	}
-	server, err := serverConfig.GrpcServer(tlsProvider)
+	server, err := serverConfig.GrpcServer(tlsProvider, additionalUnaryInterceptors, additionalStreamInterceptors)
 	if err != nil {
 		return errors.Wrapf(err, "failed creating grpc server")
 	}

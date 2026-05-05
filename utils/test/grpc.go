@@ -97,7 +97,7 @@ func RunGrpcServerForTest(
 	tb.Helper()
 	listener, err := serverConfig.Listener(ctx)
 	require.NoError(tb, err)
-	server, err := serverConfig.GrpcServer(nil)
+	server, err := serverConfig.GrpcServer(nil, nil, nil)
 	require.NoError(tb, err)
 
 	if register != nil {

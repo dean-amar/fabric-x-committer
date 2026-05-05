@@ -537,7 +537,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		Monitoring:            test.NewLocalHostServer(test.InsecureTLSConfig),
 	}
 
-	qs := NewQueryService(config, nil)
+	qs := NewQueryService(config, nil, nil)
 	test.RunServiceAndGrpcForTest(t.Context(), t, qs, qs.config.Server)
 	clientConn := createQueryClientWithTLS(t, &qs.config.Server.Endpoint, opts.clientTLS)
 

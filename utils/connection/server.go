@@ -39,8 +39,14 @@ var (
 	portConflictRegex = regexp.MustCompile(`(?i)(address\s+already\s+in\s+use|port\s+is\s+already\s+allocated)`)
 )
 
-// GrpcServer instantiate a [grpc.Server].
-func (c *ServerConfig) GrpcServer(tlsProvider TLSConfigProvider) (*grpc.Server, error) {
+// GrpcServer instantiate a [grpc.Server] with optional additional interceptors.
+// The additionalUnaryInterceptors and additionalStreamInterceptors are prepended
+// to the built-in interceptors (rate limiting, concurrency control).
+func (c *ServerConfig) GrpcServer(
+	tlsProvider TLSConfigProvider,
+	additionalUnaryInterceptors []grpc.UnaryServerInterceptor,
+	additionalStreamInterceptors []grpc.StreamServerInterceptor,
+) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize)}
 	serverGrpcTransportCreds, err := c.serverCredentials(tlsProvider)
 	if err != nil {
@@ -52,15 +58,31 @@ func (c *ServerConfig) GrpcServer(tlsProvider TLSConfigProvider) (*grpc.Server, 
 		return nil, errors.Wrap(err, "invalid rate limit configuration")
 	}
 
+	// Collect unary interceptors: additional interceptors first, then built-in ones
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	unaryInterceptors = append(unaryInterceptors, additionalUnaryInterceptors...)
+
 	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
-		opts = append(opts, grpc.UnaryInterceptor(RateLimitInterceptor(limiter)))
+		unaryInterceptors = append(unaryInterceptors, RateLimitInterceptor(limiter))
 		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
 			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
 	}
 
+	// Collect stream interceptors: additional interceptors first, then built-in ones
+	var streamInterceptors []grpc.StreamServerInterceptor
+	streamInterceptors = append(streamInterceptors, additionalStreamInterceptors...)
+
 	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
-		opts = append(opts, grpc.StreamInterceptor(StreamConcurrencyInterceptor(sem)))
+		streamInterceptors = append(streamInterceptors, StreamConcurrencyInterceptor(sem))
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
+	}
+
+	// Chain interceptors if we have multiple
+	if len(unaryInterceptors) > 0 {
+		opts = append(opts, grpc.ChainUnaryInterceptor(unaryInterceptors...))
+	}
+	if len(streamInterceptors) > 0 {
+		opts = append(opts, grpc.ChainStreamInterceptor(streamInterceptors...))
 	}
 
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
