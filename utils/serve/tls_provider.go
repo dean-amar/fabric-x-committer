@@ -12,7 +12,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 )
 
 type (
@@ -34,6 +36,7 @@ type (
 	DynamicTLSUpdater struct {
 		certs              atomic.Pointer[[][]byte]
 		certsUpdateVersion atomic.Uint64
+		bundle             atomic.Pointer[channelconfig.Bundle]
 	}
 )
 
@@ -70,6 +73,17 @@ func NewTLSProvider(tlsConfig connection.TLSConfig) (*TLSProvider, error) {
 	}
 
 	return d, nil
+}
+
+func (d *TLSProvider) GetBundle() (*channelconfig.Bundle, error) {
+	if d.updater == nil {
+		return nil, auth.ErrNoUpdater
+	}
+	bundle := d.updater.bundle.Load()
+	if bundle == nil {
+		return nil, auth.ErrNoBundle
+	}
+	return bundle, nil
 }
 
 // GetServerTLSCredentials returns the TLS credentials for the server.
@@ -117,6 +131,11 @@ func (d *TLSProvider) updateNoLock() bool {
 func (d *DynamicTLSUpdater) UpdateClientRootCAs(certs [][]byte) {
 	d.certs.Store(&certs)
 	d.certsUpdateVersion.Add(1)
+}
+
+// UpdateBundle updates the client root CAs with the given certificates.
+func (d *DynamicTLSUpdater) UpdateBundle(bund *channelconfig.Bundle) {
+	d.bundle.Store(bund)
 }
 
 // Load loads the dynamic certificates.

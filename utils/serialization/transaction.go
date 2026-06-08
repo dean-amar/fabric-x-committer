@@ -51,3 +51,18 @@ func ExtractAppTLSCAsFromEnvelope(envelopeBytes []byte) ([][]byte, error) {
 
 	return certs, nil
 }
+
+// ExtractAppBundle gets the bundle from the config envelope and extracts the application config section.
+func ExtractAppBundle(envelopeBytes []byte) (*channelconfig.Bundle, error) {
+	envelope, err := protoutil.UnmarshalEnvelope(envelopeBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
+	if err != nil {
+		return nil, err
+	}
+
+	return bundle, nil
+}

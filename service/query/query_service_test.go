@@ -15,6 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
+	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"google.golang.org/grpc"
+
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/prometheus/client_golang/prometheus"
@@ -45,6 +49,8 @@ type (
 		ns           []string
 		clientConn   committerpb.QueryServiceClient
 		pool         *pgxpool.Pool
+		conn         *grpc.ClientConn
+		cryptoPath   string
 	}
 
 	queryServiceTestOpts struct {
@@ -54,6 +60,38 @@ type (
 		maxActiveViews int
 	}
 )
+
+func TestQueryTest(t *testing.T) {
+	env := newQueryServiceTestEnv(t, nil)
+	requiredItems := env.insertSampleKeysValueItems(t)
+	query, _, _ := makeQuery(requiredItems)
+	txIDs := env.insertSampleTxsStatus(t)
+	expectedStatus := make([]*committerpb.TxStatus, len(txIDs))
+	for i, txID := range txIDs {
+		expectedStatus[i] = &committerpb.TxStatus{
+			Ref:    committerpb.NewTxRef(txID, 0, uint32(i)),
+			Status: committerpb.Status_COMMITTED,
+		}
+	}
+
+	// Create a test signer using the same crypto path as the database
+	signer := auth.CreateTestSigner(t, env.cryptoPath)
+
+	authClient := committerpb.NewAuthServiceClient(env.conn)
+	envelope1 := auth.CreateSignedEnvelope(t, signer, "channel", &committerpb.AuthorizeRequest{})
+	response1, err := authClient.Authorize(t.Context(), &committerpb.AuthorizeRequest{
+		SignedEnvelope: envelope1,
+	})
+	require.NoError(t, err)
+	t.Log("Authorize response:", response1.Message)
+
+	queryClient := committerpb.NewQueryServiceClient(env.conn)
+	_, err = queryClient.GetRows(t.Context(), &committerpb.Query{
+		View:       env.beginView(t, queryClient, defaultViewParams(time.Minute)),
+		Namespaces: query.Namespaces,
+	})
+	require.NoError(t, err)
+}
 
 // TestQuerySecureConnection verifies the query service gRPC server's behavior
 // under various client TLS configurations.
@@ -526,7 +564,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 
 	t.Log("generating config and namespaces")
 	namespacesToTest := []string{"0", "1", "2"}
-	dbConf := generateNamespacesUnderTest(t, namespacesToTest)
+	dbConf, cryptoPath := generateNamespacesUnderTest(t, namespacesToTest)
 
 	config := &Config{
 		MinBatchKeys:          5,
@@ -558,10 +596,15 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		ns:           namespacesToTest,
 		clientConn:   clientConn,
 		pool:         pool,
+		cryptoPath:   cryptoPath,
+		conn: test.NewSecuredConnectionWithRetry(t, &serverConfig.GRPC.Endpoint, opts.clientTLS, retry.Profile{
+			// prevents secure connection tests from hanging until the context times out.
+			MaxElapsedTime: 3 * time.Second,
+		}),
 	}
 }
 
-func generateNamespacesUnderTest(t *testing.T, namespaces []string) *vc.DatabaseConfig {
+func generateNamespacesUnderTest(t *testing.T, namespaces []string) (*vc.DatabaseConfig, string) {
 	t.Helper()
 	env := vc.NewValidatorAndCommitServiceTestEnv(t, nil)
 	env.SetupSystemTablesAndNamespaces(t.Context(), t)
@@ -581,7 +624,7 @@ func generateNamespacesUnderTest(t *testing.T, namespaces []string) *vc.Database
 	require.NoError(t, err)
 	err = client.Run(t.Context())
 	require.NoError(t, connection.FilterStreamRPCError(err))
-	return env.DBEnv.DBConf
+	return env.DBEnv.DBConf, clientConf.LoadProfile.Policy.ArtifactsPath
 }
 
 type items struct {
@@ -764,7 +807,7 @@ func TestRefreshTLSFromDB(t *testing.T) {
 	t.Run("updates TLS from config in DB", func(t *testing.T) {
 		t.Parallel()
 		// generateNamespacesUnderTest sets up DB with system tables and a config block.
-		dbConf := generateNamespacesUnderTest(t, []string{"0"})
+		dbConf, _ := generateNamespacesUnderTest(t, []string{"0"})
 
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		t.Cleanup(cancel)

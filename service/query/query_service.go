@@ -21,6 +21,7 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
@@ -63,6 +64,7 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  serve.DynamicTLSUpdater
+		authService *auth.Service
 	}
 )
 
@@ -124,6 +126,7 @@ func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
 	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
+	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService(s.GrpcTLSProvider))
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 }
 
@@ -358,6 +361,13 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 		seen = true
 		lastVersion = configTX.Version
 		q.tlsUpdater.UpdateClientRootCAs(certs)
+
+		bundle, err := serialization.ExtractAppBundle(configTX.Envelope)
+		if err != nil {
+			return
+		}
+		q.tlsUpdater.UpdateBundle(bundle)
+
 		logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), lastVersion)
 	}
 

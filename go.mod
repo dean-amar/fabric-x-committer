@@ -54,6 +54,8 @@ tool (
 	mvdan.cc/gofumpt
 )
 
+replace github.com/hyperledger/fabric-x-common => /Users/deanamar/fabric-x-common
+
 require (
 	bitbucket.org/creachadair/stringset v0.0.14 // indirect
 	cloud.google.com/go/longrunning v1.0.0 // indirect

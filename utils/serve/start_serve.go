@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -258,7 +259,21 @@ func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider) (*grpc.Server, err
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),
 	}
-	opts = append(opts, grpc.Creds(newCredentials(tlsProvider.GetServerTLSCredentials())))
+
+	opts = append(opts, grpc.Creds(
+		auth.NewCustomCredentials(
+			newCredentials(tlsProvider.GetServerTLSCredentials()),
+		),
+	))
+
+	opts = append(opts,
+		grpc.UnaryInterceptor(
+			auth.MSPUnaryServerInterceptor(tlsProvider),
+		),
+		grpc.StreamInterceptor(
+			auth.MSPStreamServerInterceptor(tlsProvider),
+		),
+	)
 
 	if err := c.RateLimit.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid rate limit configuration")

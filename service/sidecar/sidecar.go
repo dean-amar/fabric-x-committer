@@ -34,6 +34,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -68,6 +69,7 @@ type Service struct {
 	metrics            *perfMetrics
 	tlsUpdater         serve.DynamicTLSUpdater
 	ready              *channel.Ready
+	authService        *auth.Service
 }
 
 var (
@@ -174,6 +176,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	committerpb.RegisterNotifierServer(srv.GRPC, s.notifier)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
 	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
+	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcTLSProvider))
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 }
 
