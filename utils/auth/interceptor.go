@@ -43,15 +43,97 @@ var (
 	logger = flogging.MustGetLogger("authentication")
 )
 
-// MSPUnaryServerInterceptor creates a gRPC interceptor for MSP-based access control.
+// AuthorizeInterceptor creates a gRPC interceptor specifically for the Authorize RPC.
+// This interceptor validates the signed envelope and binds the MSP identity to the connection.
+//
+// Behavior:
+//   - Services with registered DynamicTLSUpdater: Processes authorization
+//   - Services without updater (internal services): Returns error (should not call Authorize)
+//   - Missing bundle when updater is registered: Returns error (configuration problem)
+func AuthorizeInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		// Only intercept Authorize RPC
+		if !strings.EqualFold(info.FullMethod, AuthenticationResource) {
+			return handler(ctx, req)
+		}
+
+		p, ok := peer.FromContext(ctx)
+		if !ok {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: ErrNoPeerInfo.Error(),
+			}, nil
+		}
+
+		authInfo, ok := p.AuthInfo.(*MSPAuthInfo)
+		if !ok {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: ErrNoMSPAuthInfo.Error(),
+			}, nil
+		}
+
+		bundle, err := provider.GetBundle()
+		if errors.Is(err, ErrNoUpdater) {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: "Authorization not available for internal services",
+			}, nil
+		}
+		if err != nil {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: "Channel configuration not available: " + err.Error(),
+			}, nil
+		}
+
+		logger.Info("Processing Authorize request")
+
+		authReq, ok := req.(*committerpb.AuthorizeRequest)
+		if !ok {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: "Invalid request type",
+			}, nil
+		}
+
+		signedEnvelope := authReq.GetSignedEnvelope()
+		if signedEnvelope == nil {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: "Signed envelope is required",
+			}, nil
+		}
+
+		logger.Info("Extracting identity from envelope")
+		identity, mspID, _, err := ExtractIdentityFromEnvelope(signedEnvelope, bundle)
+		if err != nil {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: "Failed to extract identity: " + err.Error(),
+			}, nil
+		}
+
+		logger.Infof("Binding identity to connection: identity=%s, mspID=%s", identity.GetIdentifier(), mspID)
+		authInfo.SetIdentity(identity, bundle.ConfigtxValidator().Sequence())
+
+		return handler(ctx, req)
+	}
+}
+
+// MSPUnaryServerInterceptor creates a gRPC interceptor for MSP-based access control on unary RPCs.
 //
 // Behavior:
 //   - Services with registered DynamicTLSUpdater: Enforces MSP authentication and ACL policies
 //   - Services without updater (internal services): Bypasses MSP authentication
 //   - Missing bundle when updater is registered: Returns error (strict enforcement)
 //
-// For Authorize RPC: Validates signed envelope and binds MSP identity to the connection.
-// For other RPCs: Verifies bound identity against ACL policies.
+// This interceptor verifies that the connection has a bound identity and evaluates it against ACL policies.
 func MSPUnaryServerInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -69,65 +151,7 @@ func MSPUnaryServerInterceptor(provider BundleProvider) grpc.UnaryServerIntercep
 			return nil, status.Error(codes.Internal, ErrNoMSPAuthInfo.Error())
 		}
 
-		logger.Infof("interceptor-details: %+v", authInfo)
-
-		if strings.EqualFold(info.FullMethod, "/servicepb.AuthService/Authorize") {
-			bundle, err := provider.GetBundle()
-			if errors.Is(err, ErrNoUpdater) {
-				// No updater = internal service = should not call Authorize
-				return &committerpb.AuthorizeResponse{
-					Success: false,
-					Message: "Authorization not available for internal services",
-				}, nil
-			}
-			if err != nil {
-				// ErrNoBundle or any other error = configuration problem
-				return &committerpb.AuthorizeResponse{
-					Success: false,
-					Message: "Channel configuration not available: " + err.Error(),
-				}, nil
-			}
-
-			logger.Info("processing after bundle getter")
-			// Extract and validate the signed envelope
-			if authReq, ok := req.(*committerpb.AuthorizeRequest); ok {
-				signedEnvelope := authReq.GetSignedEnvelope()
-				if signedEnvelope == nil {
-					return &committerpb.AuthorizeResponse{
-						Success: false,
-						Message: "Signed envelope is required",
-					}, nil
-				}
-
-				logger.Info("extracting-identity")
-				// Extract identity and TLS cert hash from envelope
-				identity, mspID, _, err := ExtractIdentityFromEnvelope(signedEnvelope, bundle)
-				if err != nil {
-					return &committerpb.AuthorizeResponse{
-						Success: false,
-						Message: "Failed to extract identity: " + err.Error(),
-					}, nil
-				}
-
-				logger.Info("verifying-tls-cert-binding")
-
-				//// Verify TLS cert binding
-				//if err := VerifyTLSCertBinding(envelopeTLSCertHash, authInfo.TLSCertHash); err != nil {
-				//	return &committerpb.AuthorizeResponse{
-				//		Success: false,
-				//		Message: "TLS cert binding verification failed: " + err.Error(),
-				//	}, nil
-				//}
-
-				logger.Infof("Editing-auth-info: identity=%s, mspID=%s", identity.GetIdentifier(), mspID)
-
-				authInfo.SetIdentity(identity, bundle.ConfigtxValidator().Sequence())
-			}
-
-			return handler(ctx, req)
-		}
-
-		// For all other RPCs, check if connection is authenticated
+		// Check if connection is authenticated
 		bundle, err := provider.GetBundle()
 		if errors.Is(err, ErrNoUpdater) {
 			// No updater = internal service = bypass MSP auth check

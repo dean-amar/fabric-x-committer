@@ -107,4 +107,15 @@ func AuthorizeTestClient(t *testing.T, client committerpb.AuthServiceClient, sig
 	require.True(t, resp.Success, "Authorization failed: %s", resp.Message)
 }
 
-// Made with Bob
+// AuthorizeTestConnection is a convenience function that creates a signer from the crypto path
+// and authorizes the connection in one call. This is useful for test environments where the
+// crypto path is already known.
+func AuthorizeTestConnection(t *testing.T, conn interface {
+	committerpb.AuthServiceClient
+}, cryptoPath, channelID string) {
+	t.Helper()
+
+	signer := CreateTestSigner(t, cryptoPath)
+	authClient := conn.(committerpb.AuthServiceClient)
+	AuthorizeTestClient(t, authClient, signer, channelID)
+}

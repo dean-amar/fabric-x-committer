@@ -267,7 +267,8 @@ func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider) (*grpc.Server, err
 	))
 
 	opts = append(opts,
-		grpc.UnaryInterceptor(
+		grpc.ChainUnaryInterceptor(
+			auth.AuthorizeInterceptor(tlsProvider),
 			auth.MSPUnaryServerInterceptor(tlsProvider),
 		),
 		grpc.StreamInterceptor(

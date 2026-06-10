@@ -74,19 +74,13 @@ func TestQueryTest(t *testing.T) {
 		}
 	}
 
-	// Create a test signer using the same crypto path as the database
+	// Authorize the connection using the same crypto path as the database
 	signer := auth.CreateTestSigner(t, env.cryptoPath)
-
 	authClient := committerpb.NewAuthServiceClient(env.conn)
-	envelope1 := auth.CreateSignedEnvelope(t, signer, "channel", &committerpb.AuthorizeRequest{})
-	response1, err := authClient.Authorize(t.Context(), &committerpb.AuthorizeRequest{
-		SignedEnvelope: envelope1,
-	})
-	require.NoError(t, err)
-	t.Log("Authorize response:", response1.Message)
+	auth.AuthorizeTestClient(t, authClient, signer, "testchannel")
 
 	queryClient := committerpb.NewQueryServiceClient(env.conn)
-	_, err = queryClient.GetRows(t.Context(), &committerpb.Query{
+	_, err := queryClient.GetRows(t.Context(), &committerpb.Query{
 		View:       env.beginView(t, queryClient, defaultViewParams(time.Minute)),
 		Namespaces: query.Namespaces,
 	})
@@ -581,13 +575,24 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 
 	qs := NewQueryService(config)
 	test.RunServiceAndServeForTest(t.Context(), t, qs, serverConfig)
-	clientConn := createQueryClientWithTLS(t, &serverConfig.GRPC.Endpoint, opts.clientTLS)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	pool, err := vc.NewDatabasePool(ctx, config.Database)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+
+	conn := test.NewSecuredConnectionWithRetry(t, &serverConfig.GRPC.Endpoint, opts.clientTLS, retry.Profile{
+		// prevents secure connection tests from hanging until the context times out.
+		MaxElapsedTime: 3 * time.Second,
+	})
+
+	// Authorize the connection using the same crypto path as the database
+	signer := auth.CreateTestSigner(t, cryptoPath)
+	auth.AuthorizeTestClient(t, committerpb.NewAuthServiceClient(conn), signer, "testchannel")
+
+	// Create clientConn from the authorized connection
+	clientConn := committerpb.NewQueryServiceClient(conn)
 
 	return &queryServiceTestEnv{
 		config:       config,
@@ -597,10 +602,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		clientConn:   clientConn,
 		pool:         pool,
 		cryptoPath:   cryptoPath,
-		conn: test.NewSecuredConnectionWithRetry(t, &serverConfig.GRPC.Endpoint, opts.clientTLS, retry.Profile{
-			// prevents secure connection tests from hanging until the context times out.
-			MaxElapsedTime: 3 * time.Second,
-		}),
+		conn:         conn,
 	}
 }
 
