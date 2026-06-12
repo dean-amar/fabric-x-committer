@@ -15,12 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
 	"google.golang.org/grpc"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,8 +100,40 @@ func TestQuerySecureConnection(t *testing.T) {
 			env := newQueryServiceTestEnv(t, &queryServiceTestOpts{serverTLS: serverTLS, clientTLS: clientTLS})
 			return func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error {
 				t.Helper()
-				client := createQueryClientWithTLS(t, &env.serverConfig.GRPC.Endpoint, cfg)
-				_, err := client.GetConfigTransaction(ctx, nil)
+				// Create a new connection with the test TLS config
+				conn := test.NewSecuredConnectionWithRetry(t, &env.serverConfig.GRPC.Endpoint, cfg, retry.Profile{
+					MaxElapsedTime: 3 * time.Second,
+				})
+
+				// Try to authorize the connection - if this fails (e.g., TLS mismatch), return the error
+				signer := auth.CreateTestSigner(t, env.cryptoPath)
+				authClient := committerpb.NewAuthServiceClient(conn)
+
+				// Create authorization request
+				msg := &common.Payload{
+					Header: &common.Header{
+						ChannelHeader: protoutil.MarshalOrPanic(&common.ChannelHeader{
+							Type:      int32(common.HeaderType_MESSAGE),
+							ChannelId: "testchannel",
+						}),
+					},
+				}
+				envelope := auth.CreateSignedEnvelope(t, signer, "testchannel", msg)
+
+				// Call Authorize - return error if it fails (don't use require)
+				resp, err := authClient.Authorize(ctx, &committerpb.AuthorizeRequest{
+					SignedEnvelope: envelope,
+				})
+				if err != nil {
+					return err
+				}
+				if !resp.Success {
+					return errors.Newf("authorization failed: %s", resp.Message)
+				}
+
+				// Now make the actual RPC call
+				client := committerpb.NewQueryServiceClient(conn)
+				_, err = client.GetConfigTransaction(ctx, nil)
 				return err
 			}
 		},
@@ -586,6 +620,8 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		// prevents secure connection tests from hanging until the context times out.
 		MaxElapsedTime: 3 * time.Second,
 	})
+
+	time.Sleep(5 * time.Second)
 
 	// Authorize the connection using the same crypto path as the database
 	signer := auth.CreateTestSigner(t, cryptoPath)

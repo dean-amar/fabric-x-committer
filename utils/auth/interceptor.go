@@ -132,6 +132,7 @@ func AuthorizeInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
 //   - Services with registered DynamicTLSUpdater: Enforces MSP authentication and ACL policies
 //   - Services without updater (internal services): Bypasses MSP authentication
 //   - Missing bundle when updater is registered: Returns error (strict enforcement)
+//   - Authorize RPC is exempt from authorization checks (handled by AuthorizeInterceptor)
 //
 // This interceptor verifies that the connection has a bound identity and evaluates it against ACL policies.
 func MSPUnaryServerInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
@@ -141,6 +142,11 @@ func MSPUnaryServerInterceptor(provider BundleProvider) grpc.UnaryServerIntercep
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
+		// Skip authorization check for Authorize RPC (handled by AuthorizeInterceptor)
+		if strings.EqualFold(info.FullMethod, AuthenticationResource) {
+			return handler(ctx, req)
+		}
+
 		p, ok := peer.FromContext(ctx)
 		if !ok {
 			return nil, status.Error(codes.Unauthenticated, ErrNoPeerInfo.Error())
