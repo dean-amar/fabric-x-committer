@@ -5,11 +5,20 @@
 {{ include "service" . | indent 0 }}
   keep-alive:
     params:
-      time: 300s
-      timeout: 600s
+      {{- if .SidecarKeepAliveMaxConnectionIdle }}
+      max-connection-idle: {{ .SidecarKeepAliveMaxConnectionIdle }}
+      {{- end }}
+      {{- if .SidecarKeepAliveMaxConnectionAge }}
+      max-connection-age: {{ .SidecarKeepAliveMaxConnectionAge }}
+      {{- end }}
+      {{- if .SidecarKeepAliveMaxConnectionAgeGrace }}
+      max-connection-age-grace: {{ .SidecarKeepAliveMaxConnectionAgeGrace }}
+      {{- end }}
+      time: {{ if .SidecarKeepAliveTime }}{{ .SidecarKeepAliveTime }}{{ else }}300s{{ end }}
+      timeout: {{ if .SidecarKeepAliveTimeout }}{{ .SidecarKeepAliveTimeout }}{{ else }}600s{{ end }}
     enforcement-policy:
-      min-time: 60s
-      permit-without-stream: false
+      min-time: {{ if .SidecarKeepAliveMinTime }}{{ .SidecarKeepAliveMinTime }}{{ else }}60s{{ end }}
+      permit-without-stream: {{ if .SidecarKeepAlivePermitWithoutStream }}true{{ else }}false{{ end }}
 {{ include "rateLimit" . | indent 2 }}
   max-concurrent-streams: {{ .MaxConcurrentStreams | default 0 }}
 

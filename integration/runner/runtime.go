@@ -95,6 +95,16 @@ type (
 		// If not explicitly set in config, viper default of 10 is used.
 		MaxConcurrentStreams int
 
+		// SidecarKeepAlive configures gRPC keep-alive parameters for the sidecar server.
+		// These settings control connection health monitoring and enforcement policies.
+		SidecarKeepAliveTime                  time.Duration // Time after which server sends keepalive ping
+		SidecarKeepAliveTimeout               time.Duration // How long server waits for keepalive acknowledgment
+		SidecarKeepAliveMaxConnectionIdle     time.Duration // Max time connection can be idle before server closes it
+		SidecarKeepAliveMaxConnectionAge      time.Duration // Max lifetime of a connection before server closes it
+		SidecarKeepAliveMaxConnectionAgeGrace time.Duration // Grace period for active RPCs after MaxConnectionAge
+		SidecarKeepAliveMinTime               time.Duration // Minimum time clients must wait between pings
+		SidecarKeepAlivePermitWithoutStream   bool          // Allow clients to ping without active streams
+
 		// VCMinTransactionBatchSize configures the minimum batch size for VC service.
 		VCMinTransactionBatchSize int
 		// VCTimeoutForMinTransactionBatchSize configures the timeout for min batch size
@@ -210,7 +220,16 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			MaxConcurrentStreams: conf.MaxConcurrentStreams,
 			ClientTLS:            clientTLS,
 
-			// Batching configuration for testing.
+			// Sidecar keep-alive configuration (for testing).
+			SidecarKeepAliveTime:                  conf.SidecarKeepAliveTime,
+			SidecarKeepAliveTimeout:               conf.SidecarKeepAliveTimeout,
+			SidecarKeepAliveMaxConnectionIdle:     conf.SidecarKeepAliveMaxConnectionIdle,
+			SidecarKeepAliveMaxConnectionAge:      conf.SidecarKeepAliveMaxConnectionAge,
+			SidecarKeepAliveMaxConnectionAgeGrace: conf.SidecarKeepAliveMaxConnectionAgeGrace,
+			SidecarKeepAliveMinTime:               conf.SidecarKeepAliveMinTime,
+			SidecarKeepAlivePermitWithoutStream:   conf.SidecarKeepAlivePermitWithoutStream,
+
+			// Batching configuration for testing).
 			VCMinTransactionBatchSize:           conf.VCMinTransactionBatchSize,
 			VCTimeoutForMinTransactionBatchSize: conf.VCTimeoutForMinTransactionBatchSize,
 			VerifierBatchTimeCutoff:             conf.VerifierBatchTimeCutoff,

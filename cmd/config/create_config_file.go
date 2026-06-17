@@ -56,6 +56,15 @@ type (
 		QueryTLSRefreshInterval time.Duration           // query
 		MaxConcurrentStreams    int                     // sidecar
 
+		// Sidecar keep-alive configuration (for testing).
+		SidecarKeepAliveTime                  time.Duration // sidecar - time after which server sends keepalive ping
+		SidecarKeepAliveTimeout               time.Duration // sidecar - how long server waits for keepalive acknowledgment
+		SidecarKeepAliveMaxConnectionIdle     time.Duration // sidecar - max time connection can be idle before server closes it
+		SidecarKeepAliveMaxConnectionAge      time.Duration // sidecar - max lifetime of a connection before server closes it
+		SidecarKeepAliveMaxConnectionAgeGrace time.Duration // sidecar - grace period for active RPCs after MaxConnectionAge
+		SidecarKeepAliveMinTime               time.Duration // sidecar - minimum time clients must wait between pings
+		SidecarKeepAlivePermitWithoutStream   bool          // sidecar - allow clients to ping without active streams
+
 		// VC service batching configuration (for testing).
 		VCMinTransactionBatchSize           int           // vc
 		VCTimeoutForMinTransactionBatchSize time.Duration // vc
