@@ -26,7 +26,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator/dependencygraph"
-	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
@@ -45,8 +44,8 @@ type (
 		client                 servicepb.CoordinatorClient
 		csStream               servicepb.Coordinator_BlockProcessingClient
 		streamCancel           context.CancelFunc
-		dbEnv                  *vc.DatabaseTestEnv
 		verifier               *mock.Verifier
+		vc                     *mock.VcService
 		sigVerifierGrpcServers *test.Servers
 		serverTLS              connection.TLSConfig
 		clientTLS              connection.TLSConfig
@@ -55,7 +54,6 @@ type (
 	testConfig struct {
 		numSigService int
 		numVcService  int
-		mockVcService bool
 
 		serverTLS connection.TLSConfig
 		clientTLS connection.TLSConfig
@@ -73,7 +71,6 @@ func TestCoordinatorSecureConnection(t *testing.T) {
 			env := newCoordinatorTestEnv(t, &testConfig{
 				numSigService: 1,
 				numVcService:  1,
-				mockVcService: true,
 				serverTLS:     serverTLSCfg,
 				clientTLS:     clientTLSCfg,
 			})
@@ -97,29 +94,14 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 		NumService: tConfig.numSigService,
 		TLSConfig:  tConfig.serverTLS,
 	})
-
-	var vcServerConfigs []*serve.Config
-	var vcsTestEnv *vc.ValidatorAndCommitterServiceTestEnv
-	var dbEnv *vc.DatabaseTestEnv
-
-	if !tConfig.mockVcService {
-		vcsTestEnv = vc.NewValidatorAndCommitServiceTestEnv(t, &vc.TestEnvOpts{
-			NumServices: tConfig.numVcService,
-			ServerCreds: tConfig.serverTLS,
-		})
-		vcServerConfigs = vcsTestEnv.ServerConfigs
-		dbEnv = vcsTestEnv.GetDBEnv()
-	} else {
-		_, vcServers := mock.StartMockVCService(t, test.StartServerParameters{
-			NumService: tConfig.numVcService,
-			TLSConfig:  tConfig.serverTLS,
-		})
-		vcServerConfigs = vcServers.Configs
-	}
+	vcService, vcServers := mock.StartMockVCService(t, test.StartServerParameters{
+		NumService: tConfig.numVcService,
+		TLSConfig:  tConfig.serverTLS,
+	})
 
 	c := &Config{
 		Verifier:           *test.ServerToMultiClientConfig(tConfig.clientTLS, svServers.Configs...),
-		ValidatorCommitter: *test.ServerToMultiClientConfig(tConfig.clientTLS, vcServerConfigs...),
+		ValidatorCommitter: *test.ServerToMultiClientConfig(tConfig.clientTLS, vcServers.Configs...),
 		DependencyGraph: &DependencyGraphConfig{
 			NumOfLocalDepConstructors: 3,
 			WaitingTxsLimit:           10,
@@ -129,8 +111,8 @@ func newCoordinatorTestEnv(t *testing.T, tConfig *testConfig) *coordinatorTestEn
 	return &coordinatorTestEnv{
 		coordinator:            NewCoordinatorService(c),
 		config:                 c,
-		dbEnv:                  dbEnv,
 		verifier:               verifier,
+		vc:                     vcService,
 		sigVerifierGrpcServers: svServers,
 		serverTLS:              tConfig.serverTLS,
 		clientTLS:              tConfig.clientTLS,
@@ -238,7 +220,7 @@ func (e *coordinatorTestEnv) createNamespaces(t *testing.T, blkNum int, nsIDs ..
 
 func TestCoordinatorOneActiveStreamOnly(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
@@ -253,7 +235,7 @@ func TestCoordinatorOneActiveStreamOnly(t *testing.T) {
 
 func TestGetNextBlockNumWithActiveStream(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
@@ -266,7 +248,7 @@ func TestGetNextBlockNumWithActiveStream(t *testing.T) {
 
 func TestCoordinatorServiceValidTx(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
@@ -331,55 +313,38 @@ func TestCoordinatorServiceValidTx(t *testing.T) {
 	require.Equal(t, uint64(2), nextBlock.Number)
 }
 
-func TestCoordinatorServiceRejectedTx(t *testing.T) {
+func TestNoPendingTransactionProcessing(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2, mockVcService: true})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-	t.Cleanup(cancel)
-	env.startServiceAndOpenStream(ctx, t)
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 
-	env.createNamespaces(t, 0, "1")
+	// Seven transactions are still waiting for sidecar-visible final status. Five of
+	// those statuses are already queued in two batches. One queued status is a
+	// rejected transaction, proving rejected statuses are counted in the same unit
+	// as committed statuses.
+	env.coordinator.numTxsInProgress.Store(7)
 
-	preMetricsValue := test.GetIntMetricValue(t, env.coordinator.metrics.transactionReceivedTotal)
-
-	err := env.csStream.Send(&servicepb.CoordinatorBatch{
-		Rejected: []*committerpb.TxStatus{
-			{
-				Ref:    committerpb.NewTxRef("rejected", 1, 0),
-				Status: committerpb.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD,
-			},
+	require.True(t, env.coordinator.queues.vcServiceToCoordinatorTxStatus.write(t.Context(), &committerpb.TxStatusBatch{
+		Status: []*committerpb.TxStatus{
+			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-1", 2, 0),
+			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-2", 2, 1),
 		},
-	})
+	}))
+	require.True(t, env.coordinator.queues.vcServiceToCoordinatorTxStatus.write(t.Context(), &committerpb.TxStatusBatch{
+		Status: []*committerpb.TxStatus{
+			committerpb.NewTxStatus(committerpb.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD, "queued-rejected", 2, 2),
+			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-4", 2, 3),
+			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-5", 2, 4),
+		},
+	}))
+
+	idle, err := env.coordinator.NoPendingTransactionProcessing(t.Context(), nil)
 	require.NoError(t, err)
-	test.EventuallyIntMetric(
-		t, preMetricsValue+1, env.coordinator.metrics.transactionReceivedTotal,
-		1*time.Second, 100*time.Millisecond,
-	)
-
-	env.requireStatus(ctx, t, []*committerpb.TxStatus{
-		committerpb.NewTxStatus(committerpb.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD, "rejected", 1, 0),
-	}, nil)
-
-	test.RequireIntMetricValue(t, 1, env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(
-		committerpb.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD.String(),
-	))
-	test.RequireIntMetricValue(t, preMetricsValue, env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(
-		committerpb.Status_COMMITTED.String(),
-	))
-
-	_, err = env.coordinator.SetLastCommittedBlockNumber(ctx, &servicepb.BlockRef{Number: 1})
-	require.NoError(t, err)
-
-	nextBlock, err := env.coordinator.GetNextBlockNumberToCommit(ctx, nil)
-	require.NoError(t, err)
-	require.NotNil(t, nextBlock)
-	require.Equal(t, uint64(2), nextBlock.Number)
+	require.False(t, idle.GetValue())
 }
 
 func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 	t.Parallel()
-	// TODO: Use real signature verifier instead of mocks.
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2, mockVcService: false})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
@@ -459,7 +424,7 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 						ReadWrites: []*applicationpb.ReadWrite{{
 							Key:     mainKey,
 							Value:   []byte("value of version 1"),
-							Version: applicationpb.NewVersion(0),
+							Version: new(uint64(0)),
 						}},
 					}},
 				},
@@ -485,7 +450,7 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 						NsVersion: utNsVersion,
 						ReadsOnly: []*applicationpb.Read{{
 							Key:     mainKey,
-							Version: applicationpb.NewVersion(2),
+							Version: new(uint64(2)),
 						}},
 						ReadWrites: []*applicationpb.ReadWrite{{
 							Key:   subKey,
@@ -502,7 +467,7 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 						NsVersion: utNsVersion,
 						ReadWrites: []*applicationpb.ReadWrite{{
 							Key:     mainKey,
-							Version: applicationpb.NewVersion(2),
+							Version: new(uint64(2)),
 							Value:   []byte("Value of version 3"),
 						}},
 					}},
@@ -531,19 +496,36 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 			env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(committerpb.Status_COMMITTED.String()))
 	}
 
-	res := env.dbEnv.FetchKeys(t, utNsID, [][]byte{mainKey, subKey})
-	mainValue, ok := res[string(mainKey)]
-	require.True(t, ok)
-	require.EqualValues(t, 3, mainValue.Version)
+	// Assert that the dependent TX chain reached the mock VC in the correct
+	// relative order. The dependency graph releases a TX to the VC only after
+	// its predecessor commits, so arrival order at the VC reflects execution order.
+	// idx 5 and idx 6 both depend only on idx 4 (both read main-key v2); their
+	// order relative to each other is not guaranteed, so we only assert both come
+	// after idx 4.
+	order := env.vc.GetReceivedTxOrder()
+	pos := func(txID string) int {
+		p := slices.Index(order, txID)
+		require.GreaterOrEqualf(t, p, 0, "dependent TX %q never received by VC; order: %v", txID, order)
+		return p
+	}
 
-	subValue, ok := res[string(subKey)]
-	require.True(t, ok)
-	require.EqualValues(t, 0, subValue.Version)
+	ns := pos("create namespace 1")
+	create := pos("create main key (read-write version 0)")
+	updateV1 := pos("update main key (read-write version 1)")
+	blindV2 := pos("update main key (blind-write version 2)")
+	readV2 := pos("read main key, create sub key (read version 2, read-write version 0)")
+	updateV3 := pos("update main key (read-write version 3)")
+
+	require.Less(t, ns, create, "namespace must precede main-key TXs; order: %v", order)
+	require.Less(t, create, updateV1, "order: %v", order)
+	require.Less(t, updateV1, blindV2, "order: %v", order)
+	require.Less(t, blindV2, readV2, "v2 reader must follow blind-write; order: %v", order)
+	require.Less(t, blindV2, updateV3, "v2 writer must follow blind-write; order: %v", order)
 }
 
 func TestQueueSize(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 2, numVcService: 2})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	go env.coordinator.monitorQueues(ctx)
@@ -553,7 +535,7 @@ func TestQueueSize(t *testing.T) {
 	q.depGraphToSigVerifierFreeTxs <- dependencygraph.TxNodeBatch{}
 	q.sigVerifierToVCServiceValidatedTxs <- dependencygraph.TxNodeBatch{}
 	q.vcServiceToDepGraphValidatedTxs <- dependencygraph.TxNodeBatch{}
-	q.vcServiceToCoordinatorTxStatus <- &committerpb.TxStatusBatch{}
+	require.True(t, q.vcServiceToCoordinatorTxStatus.write(t.Context(), &committerpb.TxStatusBatch{}))
 
 	require.Eventually(t, func() bool {
 		return test.GetIntMetricValue(t, m.sigverifierInputTxBatchQueueSize) == 1 &&
@@ -565,7 +547,8 @@ func TestQueueSize(t *testing.T) {
 	<-q.depGraphToSigVerifierFreeTxs
 	<-q.sigVerifierToVCServiceValidatedTxs
 	<-q.vcServiceToDepGraphValidatedTxs
-	<-q.vcServiceToCoordinatorTxStatus
+	_, ok := q.vcServiceToCoordinatorTxStatus.read(t.Context())
+	require.True(t, ok)
 
 	require.Eventually(t, func() bool {
 		return test.GetIntMetricValue(t, m.sigverifierInputTxBatchQueueSize) == 0 &&
@@ -577,10 +560,15 @@ func TestQueueSize(t *testing.T) {
 
 func TestCoordinatorRecovery(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: false})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
+
+	// The mock VC does not validate; the test injects the non-committed outcomes it expects.
+	// "mvcc conflict" (2,2) conflicts, and "tx1" (2,5) reuses the TX ID committed in block 1.
+	env.vc.SetTxStatus(committerpb.NewTxRef("mvcc conflict", 2, 2), committerpb.Status_ABORTED_MVCC_CONFLICT)
+	env.vc.SetTxStatus(committerpb.NewTxRef("tx1", 2, 5), committerpb.Status_REJECTED_DUPLICATE_TX_ID)
 
 	env.createNamespaces(t, 0, "1")
 
@@ -676,17 +664,12 @@ func TestCoordinatorRecovery(t *testing.T) {
 
 	cancel()
 
-	vcEnv := vc.NewValidatorAndCommitServiceTestEnv(t, &vc.TestEnvOpts{
-		DBEnv:       env.dbEnv,
-		ServerCreds: env.serverTLS,
-	})
-	env.config.ValidatorCommitter = *test.ServerToMultiClientConfig(env.clientTLS, vcEnv.ServerConfigs...)
 	env.coordinator = NewCoordinatorService(env.config)
 	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
 
-	env.dbEnv.StatusExistsForNonDuplicateTxID(ctx, t, expectedTxStatus)
+	statusExistsForNonDuplicateTxID(t, env.vc, expectedTxStatus)
 
 	// Now, we are sending the full block 2.
 	block2 = &servicepb.CoordinatorBatch{
@@ -787,9 +770,30 @@ func TestCoordinatorRecovery(t *testing.T) {
 	})
 }
 
+// statusExistsForNonDuplicateTxID ensures that the given statuses and height
+// exist for the corresponding txIDs in the mock VC, excluding any
+// duplicate txID statuses.
+func statusExistsForNonDuplicateTxID(t *testing.T, vc *mock.VcService, expectedStatuses []*committerpb.TxStatus) {
+	t.Helper()
+	persistedTxIDs := make([]string, 0, len(expectedStatuses))
+	persistedExpectedStatuses := make([]*committerpb.TxStatus, 0, len(expectedStatuses))
+	for _, s := range expectedStatuses {
+		if s.Status < committerpb.Status_REJECTED_DUPLICATE_TX_ID {
+			persistedTxIDs = append(persistedTxIDs, s.Ref.TxId)
+			persistedExpectedStatuses = append(persistedExpectedStatuses, s)
+		}
+	}
+
+	actualStatuses, err := vc.GetTransactionsStatus(t.Context(), &committerpb.TxIDsBatch{
+		TxIds: persistedTxIDs,
+	})
+	require.NoError(t, err)
+	test.RequireProtoElementsMatch(t, persistedExpectedStatuses, actualStatuses.Status)
+}
+
 func TestCoordinatorStreamFailureWithSidecar(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
@@ -821,9 +825,9 @@ func TestCoordinatorStreamFailureWithSidecar(t *testing.T) {
 
 	env.streamCancel() // simulate the failure of sidecar
 
-	// only when the stream is inactive, we do not get an error for NumberOfWaitingTransactionsForStatus.
+	// only when the stream is inactive, we do not get an error for NoPendingTransactionProcessing.
 	require.Eventually(t, func() bool {
-		_, err := env.client.NumberOfWaitingTransactionsForStatus(ctx, nil)
+		_, err := env.client.NoPendingTransactionProcessing(ctx, nil)
 		return err == nil
 	}, 5*time.Second, 10*time.Millisecond)
 
@@ -902,7 +906,7 @@ func TestConnectionReadyWithTimeout(t *testing.T) {
 
 func TestChunkSizeSentForDepGraph(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 	env.startServiceAndOpenStream(ctx, t)
@@ -931,7 +935,7 @@ func TestChunkSizeSentForDepGraph(t *testing.T) {
 
 func TestWaitingTxsCountReturnsToZeroForBlockWithRejectedTxs(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
@@ -953,12 +957,12 @@ func TestWaitingTxsCountReturnsToZeroForBlockWithRejectedTxs(t *testing.T) {
 
 	actualTxsStatus := readTxStatus(t, env.csStream, len(expectedTxsStatus))
 	test.RequireProtoElementsMatch(t, expectedTxsStatus, actualTxsStatus)
-	require.Equal(t, int32(0), env.coordinator.numWaitingTxsForStatus.Load())
+	require.Equal(t, int32(0), env.coordinator.numTxsInProgress.Load())
 }
 
 func TestWaitingTxsCount(t *testing.T) {
 	t.Parallel()
-	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1, mockVcService: true})
+	env := newCoordinatorTestEnv(t, &testConfig{numSigService: 1, numVcService: 1})
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
@@ -969,7 +973,7 @@ func TestWaitingTxsCount(t *testing.T) {
 	success := channel.Make[bool](ctx, 1)
 	go func() {
 		success.Write(assert.Eventually(t, func() bool {
-			return env.coordinator.numWaitingTxsForStatus.Load() == int32(2)
+			return env.coordinator.numTxsInProgress.Load() == int32(2)
 		}, 1*time.Minute, 100*time.Millisecond))
 	}()
 
@@ -981,10 +985,10 @@ func TestWaitingTxsCount(t *testing.T) {
 	require.True(t, ok, "timed out waiting for tx count")
 	require.True(t, isSuccess)
 
-	count, err := env.client.NumberOfWaitingTransactionsForStatus(t.Context(), nil)
+	result, err := env.client.NoPendingTransactionProcessing(t.Context(), nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), ErrActiveStreamWaitingTransactions.Error())
-	require.Nil(t, count)
+	require.Contains(t, err.Error(), ErrActiveStreamPendingTxProcessing.Error())
+	require.Nil(t, result)
 
 	env.sigVerifierGrpcServers.ServersStop[0]()
 	require.Eventually(t, func() bool {
@@ -1016,11 +1020,11 @@ func TestWaitingTxsCount(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond)
 
 	require.Eventually(t, func() bool {
-		wTxs, err := env.client.NumberOfWaitingTransactionsForStatus(t.Context(), nil)
+		idle, err := env.client.NoPendingTransactionProcessing(t.Context(), nil)
 		if err != nil {
 			return false
 		}
-		return wTxs.GetCount() == 0
+		return idle.GetValue()
 	}, 2*time.Second, 100*time.Millisecond)
 }
 

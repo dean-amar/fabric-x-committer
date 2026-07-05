@@ -38,7 +38,7 @@ type vcMgrTestEnv struct {
 	validatorCommitterManager *validatorCommitterManager
 	inputTxs                  chan dependencygraph.TxNodeBatch
 	outputTxs                 chan dependencygraph.TxNodeBatch
-	outputTxsStatus           chan *committerpb.TxStatusBatch
+	outputTxsStatus           *txStatusQueue
 	mockVcService             *mock.VcService
 	mockVCGrpcServers         *test.Servers
 	sigVerTestEnv             *svMgrTestEnv
@@ -51,7 +51,7 @@ func newVcMgrTestEnv(t *testing.T, numVCService int) *vcMgrTestEnv {
 
 	inputTxs := make(chan dependencygraph.TxNodeBatch, 10)
 	outputTxs := make(chan dependencygraph.TxNodeBatch, 10)
-	outputTxsStatus := make(chan *committerpb.TxStatusBatch, 10)
+	outputTxsStatus := newTxStatusQueue(10)
 
 	vcm := newValidatorCommitterManager(
 		&validatorCommitterManagerConfig{
@@ -121,7 +121,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 		outTxs := <-env.outputTxs
 		require.ElementsMatch(t, txBatch, outTxs)
 
-		outTxsStatus := <-env.outputTxsStatus
+		outTxsStatus := env.readOutputTxsStatus(t)
 
 		test.RequireProtoElementsMatch(t, expectedTxsStatus, outTxsStatus.Status)
 
@@ -150,10 +150,10 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 		outTxs = append(outTxs, <-env.outputTxs...)
 		require.ElementsMatch(t, txBatches, outTxs)
 
-		outTxsStatus = <-env.outputTxsStatus
-		status := <-env.outputTxsStatus
+		outTxsStatus = env.readOutputTxsStatus(t)
+		status := env.readOutputTxsStatus(t)
 		outTxsStatus.Status = append(outTxsStatus.Status, status.Status...)
-		status = <-env.outputTxsStatus
+		status = env.readOutputTxsStatus(t)
 		outTxsStatus.Status = append(outTxsStatus.Status, status.Status...)
 		test.RequireProtoElementsMatch(t, expectedTxsStatus, outTxsStatus.Status)
 
@@ -180,8 +180,8 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 			outputTxBatch1 := <-env.outputTxs
 			outputTxBatch2 := <-env.outputTxs
 
-			outTxsStatus1 := <-env.outputTxsStatus
-			outTxsStatus2 := <-env.outputTxsStatus
+			outTxsStatus1 := env.readOutputTxsStatus(t)
+			outTxsStatus2 := env.readOutputTxsStatus(t)
 
 			require.ElementsMatch(
 				t,
@@ -218,7 +218,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 
 		txBatch := []*dependencygraph.TransactionNode{
 			{
-				Tx: &servicepb.VcTx{
+				VCTx: &servicepb.VcTx{
 					Ref: committerpb.NewTxRef("create config", 100, 63),
 					Namespaces: []*applicationpb.TxNamespace{{
 						NsId: committerpb.ConfigNamespaceID,
@@ -230,7 +230,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 				},
 			},
 			{
-				Tx: &servicepb.VcTx{
+				VCTx: &servicepb.VcTx{
 					Ref: committerpb.NewTxRef("create ns 1", 100, 64),
 					Namespaces: []*applicationpb.TxNamespace{{
 						NsId: committerpb.MetaNamespaceID,
@@ -244,7 +244,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 		}
 		env.inputTxs <- txBatch
 
-		outTxsStatus := <-env.outputTxsStatus
+		outTxsStatus := env.readOutputTxsStatus(t)
 
 		require.Len(t, outTxsStatus.Status, 2)
 		expectedConfig := committerpb.NewTxStatus(committerpb.Status_COMMITTED, "create config", 100, 63)
@@ -305,7 +305,7 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 
 	actualTxsStatus := make([]*committerpb.TxStatus, 0, numTxs)
 	for range 2 {
-		result := <-env.outputTxsStatus
+		result := env.readOutputTxsStatus(t)
 		actualTxsStatus = append(actualTxsStatus, result.Status...)
 	}
 	test.RequireProtoElementsMatch(t, expectedTxsStatus, actualTxsStatus)
@@ -329,6 +329,13 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 	}, 2*time.Second, 1*time.Second)
 }
 
+func (e *vcMgrTestEnv) readOutputTxsStatus(t *testing.T) *committerpb.TxStatusBatch {
+	t.Helper()
+	batch, ok := e.outputTxsStatus.read(t.Context())
+	require.True(t, ok)
+	return batch
+}
+
 func createInputTxsNodeForTest(t *testing.T, numTxs, valueSize int, blkNum uint64) (
 	[]*dependencygraph.TransactionNode, []*committerpb.TxStatus,
 ) {
@@ -340,7 +347,7 @@ func createInputTxsNodeForTest(t *testing.T, numTxs, valueSize int, blkNum uint6
 	for i := range numTxs {
 		id := uuid.NewString()
 		txsNode[i] = &dependencygraph.TransactionNode{
-			Tx: &servicepb.VcTx{
+			VCTx: &servicepb.VcTx{
 				Ref: committerpb.NewTxRef(id, blkNum, uint32(i)), //nolint:gosec
 				Namespaces: []*applicationpb.TxNamespace{{
 					BlindWrites: []*applicationpb.Write{{
