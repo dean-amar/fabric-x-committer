@@ -37,15 +37,20 @@ type (
 		certs              atomic.Pointer[[][]byte]
 		certsUpdateVersion atomic.Uint64
 		bundle             atomic.Pointer[channelconfig.Bundle]
+		requiresACL        bool // Whether this service requires ACL enforcement
 	}
 )
 
 // RegisterDynamicTLSUpdater registers a DynamicTLSUpdater with a GRPCTLSProvider.
 // It uses the similar signature as GRPC server registration to allow common
 // language for all server<->service interfaces.
-func RegisterDynamicTLSUpdater(d *TLSProvider, updater *DynamicTLSUpdater) {
+// The requiresACL parameter indicates whether this service requires ACL enforcement.
+// Services that need ACL enforcement (sidecar, query) should set this to true.
+// Services that only need dynamic TLS CAs (orderer) should set this to false.
+func RegisterDynamicTLSUpdater(d *TLSProvider, updater *DynamicTLSUpdater, requiresACL bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	updater.requiresACL = requiresACL
 	d.updater = updater
 }
 
@@ -84,6 +89,14 @@ func (d *TLSProvider) GetBundle() (*channelconfig.Bundle, error) {
 		return nil, auth.ErrNoBundle
 	}
 	return bundle, nil
+}
+
+// RequiresACL returns whether this service requires ACL enforcement.
+func (d *TLSProvider) RequiresACL() bool {
+	if d.updater == nil {
+		return false
+	}
+	return d.updater.requiresACL
 }
 
 // GetServerTLSCredentials returns the TLS credentials for the server.

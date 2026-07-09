@@ -186,7 +186,7 @@ func newTestDynamicTLS(t *testing.T, ca tlsgen.CA) (*TLSProvider, *DynamicTLSUpd
 	require.NoError(t, err)
 
 	var updater DynamicTLSUpdater
-	RegisterDynamicTLSUpdater(dtls, &updater)
+	RegisterDynamicTLSUpdater(dtls, &updater, true) // Test with ACL enforcement enabled
 	return dtls, &updater
 }
 

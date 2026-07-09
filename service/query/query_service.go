@@ -125,7 +125,7 @@ func (q *Service) Run(ctx context.Context) error {
 func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
-	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
+	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater, true) // Query service requires ACL enforcement
 	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService(s.GrpcTLSProvider))
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 }

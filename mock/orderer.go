@@ -472,7 +472,8 @@ func (*Orderer) WaitForReady(context.Context) bool {
 func (o *Orderer) RegisterService(s serve.Servers) {
 	ab.RegisterAtomicBroadcastServer(s.GRPC, o)
 	healthgrpc.RegisterHealthServer(s.GRPC, o.healthcheck)
-	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &o.tlsUpdater)
+	// Orderer needs dynamic TLS CA updates but NOT ACL enforcement
+	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &o.tlsUpdater, false)
 }
 
 // SubmitBlock allows submitting blocks directly for testing other packages.

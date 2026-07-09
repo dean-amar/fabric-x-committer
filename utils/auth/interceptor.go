@@ -25,6 +25,7 @@ import (
 // BundleProvider provides access to the channel configuration bundle.
 type BundleProvider interface {
 	GetBundle() (*channelconfig.Bundle, error)
+	RequiresACL() bool
 }
 
 var (
@@ -111,7 +112,7 @@ func AuthorizeInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
 		}
 
 		logger.Info("Extracting identity from envelope")
-		identity, mspID, _, err := ExtractIdentityFromEnvelope(signedEnvelope, bundle)
+		identity, _, _, err := ExtractIdentityFromEnvelope(signedEnvelope, bundle)
 		if err != nil {
 			return &committerpb.AuthorizeResponse{
 				Success: false,
@@ -119,7 +120,7 @@ func AuthorizeInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
 			}, nil
 		}
 
-		logger.Infof("Binding identity to connection: identity=%s, mspID=%s", identity.GetIdentifier(), mspID)
+		logger.Infof("Binding identity to connection: identity=%s, mspID=%s", identity.GetIdentifier(), identity.GetMSPIdentifier())
 		authInfo.SetIdentity(identity, bundle.ConfigtxValidator().Sequence())
 
 		return handler(ctx, req)
@@ -163,9 +164,18 @@ func MSPUnaryServerInterceptor(provider BundleProvider) grpc.UnaryServerIntercep
 			// No updater = internal service = bypass MSP auth check
 			return handler(ctx, req)
 		}
-		if err != nil {
-			// ErrNoBundle or any other error = FAIL (enforce ACL)
+		if errors.Is(err, ErrNoBundle) {
+			// Bundle not loaded yet - check if service requires ACL enforcement
+			if !provider.RequiresACL() {
+				// Service doesn't require ACL (e.g., orderer) = bypass MSP auth check
+				return handler(ctx, req)
+			}
+			// Service requires ACL but bundle not loaded = FAIL
 			return nil, status.Error(codes.Internal, "channel configuration not available: "+err.Error())
+		}
+		if err != nil {
+			// Any other error = FAIL
+			return nil, status.Error(codes.Internal, "channel configuration error: "+err.Error())
 		}
 
 		// Bundle exists = public service = ENFORCE MSP auth
@@ -218,16 +228,25 @@ func MSPStreamServerInterceptor(provider BundleProvider) grpc.StreamServerInterc
 			// Internal service - bypass authentication
 			return handler(srv, ss)
 		}
-		if err != nil {
-			// Public service with missing config - fail
+		if errors.Is(err, ErrNoBundle) {
+			// Bundle not loaded yet - check if service requires ACL enforcement
+			if !provider.RequiresACL() {
+				// Service doesn't require ACL (e.g., orderer) = bypass MSP auth check
+				return handler(srv, ss)
+			}
+			// Service requires ACL but bundle not loaded = FAIL
 			return status.Error(codes.Internal, "channel configuration not available: "+err.Error())
+		}
+		if err != nil {
+			// Any other error = FAIL
+			return status.Error(codes.Internal, "channel configuration error: "+err.Error())
 		}
 
 		// Public service - enforce ACL
 		identity, _ := authInfo.GetIdentity()
 		if identity == nil {
 			return status.Error(codes.Unauthenticated,
-				"connection not authorized: call Authorize RPC first")
+				"connection not authorized: call Authorize RPC first, Denied for "+info.FullMethod)
 		}
 
 		// Initial policy evaluation

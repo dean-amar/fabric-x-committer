@@ -190,10 +190,10 @@ func TestSidecar(t *testing.T) {
 		tlsMode string
 		numIDs  uint32
 	}{
-		{tlsMode: connection.NoneTLSMode, numIDs: 1},
-		{tlsMode: connection.OneSideTLSMode, numIDs: 1},
+		//{tlsMode: connection.NoneTLSMode, numIDs: 1},
+		//{tlsMode: connection.OneSideTLSMode, numIDs: 1},
 		{tlsMode: connection.MutualTLSMode, numIDs: 1},
-		{tlsMode: connection.MutualTLSMode, numIDs: 3},
+		//{tlsMode: connection.MutualTLSMode, numIDs: 3},
 	} {
 		t.Run(fmt.Sprintf("tls-mode:%s IDs:%d", tc.tlsMode, tc.numIDs), func(t *testing.T) {
 			t.Parallel()

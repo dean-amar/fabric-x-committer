@@ -177,7 +177,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	committerpb.RegisterBlockQueryServiceServer(srv.GRPC, s)
 	committerpb.RegisterNotifierServer(srv.GRPC, s.notifier)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
-	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
+	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater, true) // Sidecar requires ACL enforcement
 	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcTLSProvider))
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 }
@@ -475,7 +475,14 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 
 		s.tlsUpdater.UpdateClientRootCAs(certs)
 
-		logger.Infof("Updated dynamic TLS with %d CA certificates", len(certs))
+		bundle, err := serialization.ExtractAppBundle(configBlk.Data.Data[0])
+		if err != nil {
+			logger.Errorf("Failed to extract bundle from config envelope: %v", err)
+		} else {
+			s.tlsUpdater.UpdateBundle(bundle)
+		}
+
+		logger.Infof("Updated dynamic TLS with %d CA certificates from config block %d", len(certs), configBlk.Header.Number)
 	}
 
 	return errors.Wrap(ctx.Err(), "context cancelled")
