@@ -76,8 +76,7 @@ func NewValidatorCommitterService(
 	logger.Info("Initializing new validator committer service.")
 	l := config.ResourceLimits
 
-	// TODO: make queueMultiplier configurable
-	queueMultiplier := 1
+	queueMultiplier := l.QueueMultiplier
 	receivedTxBatch := make(chan *servicepb.VcBatch, l.MaxWorkersForPreparer*queueMultiplier)
 	toPrepareTxs := make(chan *servicepb.VcBatch, l.MaxWorkersForPreparer*queueMultiplier)
 	preparedTxs := make(chan *preparedTransactions, l.MaxWorkersForValidator*queueMultiplier)
@@ -166,8 +165,7 @@ func (vc *ValidatorCommitterService) RegisterService(s serve.Servers) {
 }
 
 func (vc *ValidatorCommitterService) monitorQueues(ctx context.Context) {
-	// TODO: make sampling time configurable
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(vc.config.ResourceLimits.QueueMonitorSamplingTime)
 	defer ticker.Stop()
 	for {
 		select {

@@ -59,6 +59,8 @@ type (
 		// VC service batching configuration (for testing).
 		VCMinTransactionBatchSize           int           // vc
 		VCTimeoutForMinTransactionBatchSize time.Duration // vc
+		VCQueueMultiplier                   int           // vc
+		VCQueueMonitorSamplingTime          time.Duration // vc
 
 		// Verifier batching configuration (for testing).
 		VerifierBatchTimeCutoff time.Duration // verifier

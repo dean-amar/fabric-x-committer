@@ -430,6 +430,8 @@ func TestValidatorAndCommitterService(t *testing.T) {
 				MaxWorkersForCommitter:            2,
 				MinTransactionBatchSize:           100,
 				TimeoutForMinTransactionBatchSize: 1 * time.Hour,
+				QueueMultiplier:                   DefaultQueueMultiplier,
+				QueueMonitorSamplingTime:          DefaultQueueMonitorSamplingTime,
 			},
 		})
 

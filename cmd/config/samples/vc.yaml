@@ -158,6 +158,15 @@ resource-limits:
   # Balances latency vs. batching efficiency.
   # Default: 5s
   timeout-for-min-transaction-batch-size: 2s
+  # Multiplier applied to the worker counts to size the buffers of the internal pipeline
+  # channels between stages (preparer, validator, committer). Larger values buffer more
+  # transactions between stages, smoothing throughput at the cost of memory.
+  # Default: 1
+  queue-multiplier: 1
+  # Sampling interval for the background monitor that reports the internal queue sizes as
+  # metrics. Shorter intervals give finer-grained observability at the cost of overhead.
+  # Default: 250ms
+  queue-monitor-sampling-time: 250ms
 
 # Logging configuration
 logging:

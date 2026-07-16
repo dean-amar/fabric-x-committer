@@ -114,6 +114,8 @@ func defaultVCTestEnvOpts() *TestEnvOpts {
 			MaxWorkersForCommitter:            2,
 			MinTransactionBatchSize:           1,
 			TimeoutForMinTransactionBatchSize: 20 * time.Second,
+			QueueMultiplier:                   DefaultQueueMultiplier,
+			QueueMonitorSamplingTime:          DefaultQueueMonitorSamplingTime,
 		},
 	}
 }

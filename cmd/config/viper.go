@@ -75,6 +75,8 @@ func NewViperWithVCDefaults() *viper.Viper {
 	v.SetDefault(limitPrefix+"max-workers-for-committer", vc.DefaultMaxWorkersForCommitter)
 	v.SetDefault(limitPrefix+"min-transaction-batch-size", vc.DefaultMinTransactionBatchSize)
 	v.SetDefault(limitPrefix+"timeout-for-min-transaction-batch-size", vc.DefaultTimeoutForMinBatchSize)
+	v.SetDefault(limitPrefix+"queue-multiplier", vc.DefaultQueueMultiplier)
+	v.SetDefault(limitPrefix+"queue-monitor-sampling-time", vc.DefaultQueueMonitorSamplingTime)
 	return v
 }
 

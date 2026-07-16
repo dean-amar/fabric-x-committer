@@ -208,6 +208,8 @@ func TestReadConfigVC(t *testing.T) {
 				MaxWorkersForCommitter:            vc.DefaultMaxWorkersForCommitter,
 				MinTransactionBatchSize:           vc.DefaultMinTransactionBatchSize,
 				TimeoutForMinTransactionBatchSize: vc.DefaultTimeoutForMinBatchSize,
+				QueueMultiplier:                   vc.DefaultQueueMultiplier,
+				QueueMonitorSamplingTime:          vc.DefaultQueueMonitorSamplingTime,
 			},
 		},
 	}, {
@@ -222,6 +224,8 @@ func TestReadConfigVC(t *testing.T) {
 				MaxWorkersForCommitter:            vc.DefaultMaxWorkersForCommitter,
 				MinTransactionBatchSize:           vc.DefaultMinTransactionBatchSize,
 				TimeoutForMinTransactionBatchSize: 2 * time.Second,
+				QueueMultiplier:                   vc.DefaultQueueMultiplier,
+				QueueMonitorSamplingTime:          vc.DefaultQueueMonitorSamplingTime,
 			},
 		},
 	}}

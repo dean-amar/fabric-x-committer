@@ -12,3 +12,5 @@ resource-limits:
   max-workers-for-committer: 20
   min-transaction-batch-size: {{ .VCMinTransactionBatchSize | default 1 }}
   timeout-for-min-transaction-batch-size: {{ .VCTimeoutForMinTransactionBatchSize | default "2s" }}
+  queue-multiplier: {{ .VCQueueMultiplier | default 1 }}
+  queue-monitor-sampling-time: {{ .VCQueueMonitorSamplingTime | default "250ms" }}

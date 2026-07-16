@@ -58,6 +58,12 @@ type ResourceLimitsConfig struct {
 	MaxWorkersForCommitter            int           `mapstructure:"max-workers-for-committer" validate:"required,gt=0"`
 	MinTransactionBatchSize           int           `mapstructure:"min-transaction-batch-size" validate:"required,gt=0"`
 	TimeoutForMinTransactionBatchSize time.Duration `mapstructure:"timeout-for-min-transaction-batch-size" validate:"required,gt=0"` //nolint:lll,revive
+	// QueueMultiplier scales the buffer size of the internal pipeline channels relative to the
+	// number of workers feeding them. Larger values allow more transactions to be buffered between
+	// pipeline stages, smoothing throughput at the cost of memory.
+	QueueMultiplier int `mapstructure:"queue-multiplier" validate:"required,gt=0"`
+	// QueueMonitorSamplingTime defines the sampling interval for monitoring the internal queue sizes.
+	QueueMonitorSamplingTime time.Duration `mapstructure:"queue-monitor-sampling-time" validate:"required,gt=0"`
 }
 
 // Default configuration values for the validator-committer service and database.
@@ -73,6 +79,8 @@ const (
 	DefaultMaxWorkersForCommitter      = 20
 	DefaultMinTransactionBatchSize     = 1
 	DefaultTimeoutForMinBatchSize      = 5 * time.Second
+	DefaultQueueMultiplier             = 1
+	DefaultQueueMonitorSamplingTime    = 250 * time.Millisecond
 	DefaultDatabaseEndpointHost        = "localhost"
 	DefaultDatabaseEndpointPort        = 5433
 )
