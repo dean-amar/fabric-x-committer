@@ -109,9 +109,9 @@ func defaultVCTestEnvOpts() *TestEnvOpts {
 		NumServices: 1,
 		ServerCreds: test.InsecureTLSConfig,
 		ResourceLimits: &ResourceLimitsConfig{
-			MaxWorkersForPreparer:             2,
-			MaxWorkersForValidator:            2,
-			MaxWorkersForCommitter:            2,
+			WorkersForPreparer:                2,
+			WorkersForValidator:               2,
+			WorkersForCommitter:               2,
 			MinTransactionBatchSize:           1,
 			TimeoutForMinTransactionBatchSize: 20 * time.Second,
 			QueueMultiplier:                   DefaultQueueMultiplier,

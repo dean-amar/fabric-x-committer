@@ -203,9 +203,9 @@ func TestReadConfigVC(t *testing.T) {
 		expectedServiceConfig: &vc.Config{
 			Database: defaultDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
-				MaxWorkersForPreparer:             vc.DefaultMaxWorkersForPreparer,
-				MaxWorkersForValidator:            vc.DefaultMaxWorkersForValidator,
-				MaxWorkersForCommitter:            vc.DefaultMaxWorkersForCommitter,
+				WorkersForPreparer:                vc.DefaultWorkersForPreparer,
+				WorkersForValidator:               vc.DefaultWorkersForValidator,
+				WorkersForCommitter:               vc.DefaultWorkersForCommitter,
 				MinTransactionBatchSize:           vc.DefaultMinTransactionBatchSize,
 				TimeoutForMinTransactionBatchSize: vc.DefaultTimeoutForMinBatchSize,
 				QueueMultiplier:                   vc.DefaultQueueMultiplier,
@@ -219,9 +219,9 @@ func TestReadConfigVC(t *testing.T) {
 		expectedServiceConfig: &vc.Config{
 			Database: defaultSampleDBConfig(),
 			ResourceLimits: &vc.ResourceLimitsConfig{
-				MaxWorkersForPreparer:             vc.DefaultMaxWorkersForPreparer,
-				MaxWorkersForValidator:            vc.DefaultMaxWorkersForValidator,
-				MaxWorkersForCommitter:            vc.DefaultMaxWorkersForCommitter,
+				WorkersForPreparer:                vc.DefaultWorkersForPreparer,
+				WorkersForValidator:               vc.DefaultWorkersForValidator,
+				WorkersForCommitter:               vc.DefaultWorkersForCommitter,
 				MinTransactionBatchSize:           vc.DefaultMinTransactionBatchSize,
 				TimeoutForMinTransactionBatchSize: 2 * time.Second,
 				QueueMultiplier:                   vc.DefaultQueueMultiplier,

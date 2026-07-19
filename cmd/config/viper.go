@@ -70,9 +70,9 @@ func NewViperWithVCDefaults() *viper.Viper {
 	defaultDBFlags(v)
 	// defaults for ResourceLimitsConfig
 	limitPrefix := "resource-limits."
-	v.SetDefault(limitPrefix+"max-workers-for-preparer", vc.DefaultMaxWorkersForPreparer)
-	v.SetDefault(limitPrefix+"max-workers-for-validator", vc.DefaultMaxWorkersForValidator)
-	v.SetDefault(limitPrefix+"max-workers-for-committer", vc.DefaultMaxWorkersForCommitter)
+	v.SetDefault(limitPrefix+"workers-for-preparer", vc.DefaultWorkersForPreparer)
+	v.SetDefault(limitPrefix+"workers-for-validator", vc.DefaultWorkersForValidator)
+	v.SetDefault(limitPrefix+"workers-for-committer", vc.DefaultWorkersForCommitter)
 	v.SetDefault(limitPrefix+"min-transaction-batch-size", vc.DefaultMinTransactionBatchSize)
 	v.SetDefault(limitPrefix+"timeout-for-min-transaction-batch-size", vc.DefaultTimeoutForMinBatchSize)
 	v.SetDefault(limitPrefix+"queue-multiplier", vc.DefaultQueueMultiplier)

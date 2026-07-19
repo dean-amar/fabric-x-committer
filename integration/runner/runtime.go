@@ -99,10 +99,6 @@ type (
 		VCMinTransactionBatchSize int
 		// VCTimeoutForMinTransactionBatchSize configures the timeout for min batch size
 		VCTimeoutForMinTransactionBatchSize time.Duration
-		// VCQueueMultiplier configures the buffer-size multiplier for the VC internal pipeline channels.
-		VCQueueMultiplier int
-		// VCQueueMonitorSamplingTime configures the sampling interval for the VC queue-size monitor.
-		VCQueueMonitorSamplingTime time.Duration
 
 		// VerifierBatchTimeCutoff configures the batch time cutoff for verifier service
 		VerifierBatchTimeCutoff time.Duration
@@ -217,8 +213,6 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			// Batching configuration for testing.
 			VCMinTransactionBatchSize:           conf.VCMinTransactionBatchSize,
 			VCTimeoutForMinTransactionBatchSize: conf.VCTimeoutForMinTransactionBatchSize,
-			VCQueueMultiplier:                   conf.VCQueueMultiplier,
-			VCQueueMonitorSamplingTime:          conf.VCQueueMonitorSamplingTime,
 			VerifierBatchTimeCutoff:             conf.VerifierBatchTimeCutoff,
 			VerifierBatchSizeCutoff:             conf.VerifierBatchSizeCutoff,
 			QueryTLSRefreshInterval:             conf.QueryTLSRefreshInterval,

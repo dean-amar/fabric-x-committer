@@ -53,16 +53,19 @@ func (d *DatabaseConfig) EndpointsString() string {
 
 // ResourceLimitsConfig is the configuration for the resource limits.
 type ResourceLimitsConfig struct {
-	MaxWorkersForPreparer             int           `mapstructure:"max-workers-for-preparer" validate:"required,gt=0"`
-	MaxWorkersForValidator            int           `mapstructure:"max-workers-for-validator" validate:"required,gt=0"`
-	MaxWorkersForCommitter            int           `mapstructure:"max-workers-for-committer" validate:"required,gt=0"`
+	// WorkersForPreparer, WorkersForValidator, and WorkersForCommitter set the exact number
+	// of goroutines spawned for each pipeline stage. They are exact counts, not upper bounds.
+	WorkersForPreparer                int           `mapstructure:"workers-for-preparer" validate:"required,gt=0"`
+	WorkersForValidator               int           `mapstructure:"workers-for-validator" validate:"required,gt=0"`
+	WorkersForCommitter               int           `mapstructure:"workers-for-committer" validate:"required,gt=0"`
 	MinTransactionBatchSize           int           `mapstructure:"min-transaction-batch-size" validate:"required,gt=0"`
-	TimeoutForMinTransactionBatchSize time.Duration `mapstructure:"timeout-for-min-transaction-batch-size" validate:"required,gt=0"` //nolint:lll,revive
-	// QueueMultiplier scales the buffer size of the internal pipeline channels relative to the
-	// number of workers feeding them. Larger values allow more transactions to be buffered between
-	// pipeline stages, smoothing throughput at the cost of memory.
+	TimeoutForMinTransactionBatchSize time.Duration `mapstructure:"timeout-for-min-transaction-batch-size" validate:"required,gt=0"` //nolint:lll
+	// QueueMultiplier scales the buffer size of the internal pipeline channels; larger values
+	// allow more transactions to be buffered between pipeline stages. Most channels are sized
+	// as workers * QueueMultiplier, but the validator-to-committer channel is sized by
+	// QueueMultiplier alone to bound memory usage (see NewValidatorCommitterService).
 	QueueMultiplier int `mapstructure:"queue-multiplier" validate:"required,gt=0"`
-	// QueueMonitorSamplingTime defines the sampling interval for monitoring the internal queue sizes.
+	// QueueMonitorSamplingTime defines the sampling interval for monitoring queue sizes.
 	QueueMonitorSamplingTime time.Duration `mapstructure:"queue-monitor-sampling-time" validate:"required,gt=0"`
 }
 
@@ -74,13 +77,13 @@ const (
 	DefaultDatabaseMaxConnections      = 20
 	DefaultDatabaseMinConnections      = 1
 	DefaultDatabaseRetryMaxElapsedTime = 10 * time.Minute
-	DefaultMaxWorkersForPreparer       = 1
-	DefaultMaxWorkersForValidator      = 1
-	DefaultMaxWorkersForCommitter      = 20
+	DefaultWorkersForPreparer          = 1
+	DefaultWorkersForValidator         = 1
+	DefaultWorkersForCommitter         = 20
 	DefaultMinTransactionBatchSize     = 1
 	DefaultTimeoutForMinBatchSize      = 5 * time.Second
 	DefaultQueueMultiplier             = 1
-	DefaultQueueMonitorSamplingTime    = 250 * time.Millisecond
+	DefaultQueueMonitorSamplingTime    = 100 * time.Millisecond
 	DefaultDatabaseEndpointHost        = "localhost"
 	DefaultDatabaseEndpointPort        = 5433
 )
