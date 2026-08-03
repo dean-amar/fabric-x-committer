@@ -17,8 +17,11 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -28,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
@@ -282,12 +286,14 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	c.CoordinatorClient = servicepb.NewCoordinatorClient(
 		test.NewSecuredConnection(t, services.Coordinator.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
-	c.QueryServiceClient = committerpb.NewQueryServiceClient(
-		test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS),
-	)
-	c.NotifyClient = committerpb.NewNotifierClient(
-		test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS),
-	)
+	queryConn := test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS)
+	c.QueryServiceClient = committerpb.NewQueryServiceClient(queryConn)
+	sidecarConn := test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS)
+	// The sidecar and query services enforce ACL, so authorize each connection with a
+	// channel-member identity before issuing RPCs on it.
+	c.authorizeConn(ctx, t, queryConn)
+	c.authorizeConn(ctx, t, sidecarConn)
+	c.NotifyClient = committerpb.NewNotifierClient(sidecarConn)
 	var err error
 	c.OrdererStream, err = adapters.NewBroadcastStream(ctx, &c.OrdererEnv.OrdererConnConfig)
 	require.NoError(t, err)
@@ -296,6 +302,31 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	})
 
 	c.SidecarClientConfig = test.NewTLSClientConfig(c.SystemConfig.ClientTLS, services.Sidecar.GrpcEndpoint)
+}
+
+// authSigner loads the channel-member MSP signing identity used to authorize client
+// connections to the ACL-enforced query and sidecar services.
+//
+//nolint:ireturn // msp.SigningIdentity is an interface by design.
+func (c *CommitterRuntime) authSigner(t *testing.T) msp.SigningIdentity {
+	t.Helper()
+	identities, err := testcrypto.GetPeersIdentities(c.OrdererEnv.ArtifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+	return identities[0]
+}
+
+// authorizeConn authorizes a client connection against the ACL-enforced services, binding the
+// client TLS cert hash under mTLS.
+func (c *CommitterRuntime) authorizeConn(ctx context.Context, t *testing.T, conn *grpc.ClientConn) {
+	t.Helper()
+	tlsCertHash, err := auth.ClientTLSCertHash(c.SystemConfig.ClientTLS)
+	require.NoError(t, err)
+	require.NoError(t, auth.AuthorizeConnection(ctx, conn, auth.AuthorizeParameters{
+		Signer:      c.authSigner(t),
+		ChannelID:   c.SystemConfig.Policy.ChannelID,
+		TLSCertHash: tlsCertHash,
+	}))
 }
 
 // OpenNotificationStream starts a notification stream.
@@ -397,6 +428,8 @@ func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
 		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx, delivercommitter.Parameters{
 			ClientConfig: c.SidecarClientConfig,
 			OutputBlock:  c.CommittedBlock,
+			Signer:       c.authSigner(t),
+			ChannelID:    c.SystemConfig.Policy.ChannelID,
 		}))
 	}, func(ctx context.Context) bool {
 		select {

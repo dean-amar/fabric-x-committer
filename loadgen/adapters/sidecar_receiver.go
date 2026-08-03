@@ -14,9 +14,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -38,12 +41,34 @@ const (
 
 // runSidecarReceiver start receiving blocks from the sidecar.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
+	// The sidecar enforces ACL on block delivery, so authorize with a channel-member identity.
+	// A nil signer (no artifacts / no identities) leaves the connection unauthorized, which is
+	// correct for servers that do not enforce ACL.
+	signer := loadDeliverySigner(params.Res.Profile.Policy)
 	return runDeliveryReceiver(ctx, params.Res, func(gCtx context.Context, committedBlock chan *common.Block) error {
 		return delivercommitter.ToQueue(gCtx, delivercommitter.Parameters{
 			ClientConfig: params.ClientConfig,
 			OutputBlock:  committedBlock,
+			Signer:       signer,
+			ChannelID:    params.Res.Profile.Policy.ChannelID,
 		})
 	})
+}
+
+// loadDeliverySigner loads the first channel-member signing identity from the policy's
+// artifacts. It returns nil when no artifacts or identities are configured, which is correct
+// for servers that do not enforce ACL.
+//
+//nolint:ireturn // msp.SigningIdentity is an interface by design.
+func loadDeliverySigner(policy workload.PolicyProfile) msp.SigningIdentity {
+	if policy.ArtifactsPath == "" {
+		return nil
+	}
+	identities, err := testcrypto.GetPeersIdentities(policy.ArtifactsPath)
+	if err != nil || len(identities) == 0 {
+		return nil
+	}
+	return identities[0]
 }
 
 // runOrdererReceiver start receiving blocks from the orderer.

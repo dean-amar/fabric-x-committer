@@ -136,7 +136,9 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			// Adding namespace policy and creating transaction builder
 			runtime.AddOrUpdateNamespaces(t, "1")
 
-			runtime.CommittedBlock = delivercommitter.Start(ctx, t, runtime.SidecarClientConfig, 0)
+			runtime.CommittedBlock = delivercommitter.Start(
+				ctx, t, runtime.SidecarClientConfig, 0, deliverySigner(t, artifactsPath), testChannelName,
+			)
 
 			t.Log("Try to fetch the first block")
 			b, ok := channel.NewReader(ctx, runtime.CommittedBlock).Read()
@@ -225,7 +227,12 @@ func TestStartTestNode(t *testing.T) {
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint := mustGetEndpoint(ctx, t, containerName, sidecarPort)
 	committerClient := test.NewInsecureClientConfig(sidecarEndpoint)
-	committedBlock := delivercommitter.Start(ctx, t, committerClient, 0)
+	// The sidecar enforces ACL on block delivery, so authorize with a channel-member identity
+	// loaded from the container's crypto artifacts.
+	artifactsPath := copyArtifactsFromContainer(ctx, t, containerName)
+	committedBlock := delivercommitter.Start(
+		ctx, t, committerClient, 0, deliverySigner(t, artifactsPath), testChannelName,
+	)
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))

@@ -8,14 +8,13 @@ package auth
 
 import (
 	"context"
-	"strings"
-
-	"github.com/hyperledger/fabric-lib-go/common/flogging"
-	"github.com/hyperledger/fabric-x-common/msp"
+	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
+	"github.com/hyperledger/fabric-x-common/msp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
@@ -35,346 +34,319 @@ var (
 	// ErrNoMSPAuthInfo is returned when MSPAuthInfo is not found.
 	ErrNoMSPAuthInfo = errors.New("no MSP auth info found")
 
-	// ErrNoUpdater indicates no DynamicTLSUpdater is registered (internal service)
-	ErrNoUpdater = errors.New("no DynamicTLSUpdater registered")
+	// ErrNoUpdater indicates no ACLUpdater is registered (internal service).
+	ErrNoUpdater = errors.New("no ACLUpdater registered")
 
-	// ErrNoBundle indicates no channelconfig.Bundle is loaded
+	// ErrNoBundle indicates no channelconfig.Bundle is loaded.
 	ErrNoBundle = errors.New("no channelconfig.Bundle loaded")
 
 	logger = flogging.MustGetLogger("authentication")
 )
 
 // AuthorizeInterceptor creates a gRPC interceptor specifically for the Authorize RPC.
-// This interceptor validates the signed envelope and binds the MSP identity to the connection.
+// It validates the signed envelope — including replay-prevention checks (timestamp
+// freshness always, and TLS cert-hash binding under mTLS) — and binds the resolved MSP
+// identity to the connection so subsequent RPCs on that connection reuse it.
 //
 // Behavior:
-//   - Services with registered DynamicTLSUpdater: Processes authorization
-//   - Services without updater (internal services): Returns error (should not call Authorize)
-//   - Missing bundle when updater is registered: Returns error (configuration problem)
+//   - Services with a registered ACLUpdater: processes authorization.
+//   - Services without an updater (internal services): rejects (should not call Authorize).
+//   - Missing bundle on an ACL-enforced service: rejects (configuration not ready).
 func AuthorizeInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
-		req interface{},
+		req any,
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
-	) (interface{}, error) {
-		// Only intercept Authorize RPC
-		if !strings.EqualFold(info.FullMethod, AuthenticationResource) {
+	) (any, error) {
+		// Only intercept the Authorize RPC; everything else is handled downstream.
+		if info.FullMethod != AuthenticationResource {
 			return handler(ctx, req)
 		}
 
-		p, ok := peer.FromContext(ctx)
-		if !ok {
-			return &committerpb.AuthorizeResponse{
-				Success: false,
-				Message: ErrNoPeerInfo.Error(),
-			}, nil
-		}
-
-		authInfo, ok := p.AuthInfo.(*MSPAuthInfo)
-		if !ok {
-			return &committerpb.AuthorizeResponse{
-				Success: false,
-				Message: ErrNoMSPAuthInfo.Error(),
-			}, nil
-		}
-
-		bundle, err := provider.GetBundle()
-		if errors.Is(err, ErrNoUpdater) {
-			return &committerpb.AuthorizeResponse{
-				Success: false,
-				Message: "Authorization not available for internal services",
-			}, nil
-		}
+		authInfo, err := authInfoFromContext(ctx)
 		if err != nil {
-			return &committerpb.AuthorizeResponse{
-				Success: false,
-				Message: "Channel configuration not available: " + err.Error(),
-			}, nil
+			return nil, status.Error(codes.Internal, err.Error())
 		}
 
-		logger.Info("Processing Authorize request")
+		// Resolve the bundle. A not-yet-loaded bundle on an ACL-enforced service returns
+		// codes.Unavailable so the client retries during the bootstrap window; an internal
+		// service (no updater / no ACL) has nothing to authorize against.
+		bundle, enforce, err := bundleForEnforcement(provider)
+		if err != nil {
+			return nil, err
+		}
+		if !enforce {
+			return &committerpb.AuthorizeResponse{
+				Success: false,
+				Message: "authorization not available for this service",
+			}, nil
+		}
 
 		authReq, ok := req.(*committerpb.AuthorizeRequest)
 		if !ok {
-			return &committerpb.AuthorizeResponse{
-				Success: false,
-				Message: "Invalid request type",
-			}, nil
+			return &committerpb.AuthorizeResponse{Success: false, Message: "invalid request type"}, nil
 		}
-
 		signedEnvelope := authReq.GetSignedEnvelope()
 		if signedEnvelope == nil {
-			return &committerpb.AuthorizeResponse{
-				Success: false,
-				Message: "Signed envelope is required",
-			}, nil
+			return &committerpb.AuthorizeResponse{Success: false, Message: "signed envelope is required"}, nil
 		}
 
-		logger.Info("Extracting identity from envelope")
-		identity, _, _, err := ExtractIdentityFromEnvelope(signedEnvelope, bundle)
+		identity, mspID, err := ValidateAuthEnvelope(
+			signedEnvelope, bundle, authInfo, DefaultEnvelopeFreshnessWindow, time.Now(),
+		)
 		if err != nil {
+			// Report the denial in-band via the response, not as a gRPC error, so the client
+			// gets a structured, permanent "not authorized" signal (and does not retry it as a
+			// transport failure). This is intentional; the client inspects resp.Success.
+			//nolint:nilerr // failure is reported in-band via AuthorizeResponse.Success=false.
 			return &committerpb.AuthorizeResponse{
 				Success: false,
-				Message: "Failed to extract identity: " + err.Error(),
+				Message: "failed to authorize: " + err.Error(),
 			}, nil
 		}
 
-		logger.Infof("Binding identity to connection: identity=%s, mspID=%s", identity.GetIdentifier(), identity.GetMSPIdentifier())
-		authInfo.SetIdentity(identity, bundle.ConfigtxValidator().Sequence())
+		sequence := bundle.ConfigtxValidator().Sequence()
+		authInfo.SetIdentity(identity, sequence)
+		logger.Infof("Bound identity to connection: mspID=%s, identity=%s, configSequence=%d",
+			mspID, identity.GetIdentifier(), sequence)
 
-		return handler(ctx, req)
+		return &committerpb.AuthorizeResponse{
+			Success:        true,
+			Message:        "authorized",
+			MspId:          mspID,
+			ConfigSequence: sequence,
+		}, nil
 	}
 }
 
 // MSPUnaryServerInterceptor creates a gRPC interceptor for MSP-based access control on unary RPCs.
 //
 // Behavior:
-//   - Services with registered DynamicTLSUpdater: Enforces MSP authentication and ACL policies
-//   - Services without updater (internal services): Bypasses MSP authentication
-//   - Missing bundle when updater is registered: Returns error (strict enforcement)
-//   - Authorize RPC is exempt from authorization checks (handled by AuthorizeInterceptor)
-//
-// This interceptor verifies that the connection has a bound identity and evaluates it against ACL policies.
+//   - Exempt methods (Authorize, health, reflection): always pass through.
+//   - Internal services (no ACLUpdater) or services that don't require ACL: bypass.
+//   - ACL-enforced services: require a bound identity and evaluate it against the ACL policy.
 func MSPUnaryServerInterceptor(provider BundleProvider) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
-		req interface{},
+		req any,
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
-	) (interface{}, error) {
-		// Skip authorization check for Authorize RPC (handled by AuthorizeInterceptor)
-		if strings.EqualFold(info.FullMethod, AuthenticationResource) {
+	) (any, error) {
+		if isExemptMethod(info.FullMethod) {
 			return handler(ctx, req)
 		}
 
-		p, ok := peer.FromContext(ctx)
-		if !ok {
-			return nil, status.Error(codes.Unauthenticated, ErrNoPeerInfo.Error())
-		}
-
-		authInfo, ok := p.AuthInfo.(*MSPAuthInfo)
-		if !ok {
-			return nil, status.Error(codes.Internal, ErrNoMSPAuthInfo.Error())
-		}
-
-		// Check if connection is authenticated
-		bundle, err := provider.GetBundle()
-		if errors.Is(err, ErrNoUpdater) {
-			// No updater = internal service = bypass MSP auth check
-			return handler(ctx, req)
-		}
-		if errors.Is(err, ErrNoBundle) {
-			// Bundle not loaded yet - check if service requires ACL enforcement
-			if !provider.RequiresACL() {
-				// Service doesn't require ACL (e.g., orderer) = bypass MSP auth check
-				return handler(ctx, req)
-			}
-			// Service requires ACL but bundle not loaded = FAIL
-			return nil, status.Error(codes.Internal, "channel configuration not available: "+err.Error())
-		}
+		bundle, enforce, err := bundleForEnforcement(provider)
 		if err != nil {
-			// Any other error = FAIL
-			return nil, status.Error(codes.Internal, "channel configuration error: "+err.Error())
+			return nil, err
+		}
+		if !enforce {
+			return handler(ctx, req)
 		}
 
-		// Bundle exists = public service = ENFORCE MSP auth
-		identity, _ := authInfo.GetIdentity()
-		if identity == nil {
-			return nil, status.Error(codes.Unauthenticated, "connection not authorized: call Authorize first")
-		}
-
-		// Evaluate policy on every unary call (no caching needed for short-lived RPCs)
-		if err := evaluatePolicy(bundle, identity, info.FullMethod); err != nil {
+		identity, err := boundIdentity(ctx)
+		if err != nil {
 			return nil, err
 		}
 
-		// Proceed with the handler
+		// Evaluate the policy on every unary call; short-lived RPCs need no caching.
+		if err := evaluatePolicy(bundle, identity, info.FullMethod); err != nil {
+			return nil, err
+		}
 		return handler(ctx, req)
 	}
 }
 
 // MSPStreamServerInterceptor creates a gRPC stream interceptor for MSP-based access control.
 //
-// Behavior:
-//   - Services with registered DynamicTLSUpdater: Enforces MSP authentication and ACL policies
-//   - Services without updater (internal services): Bypasses MSP authentication
-//   - Missing bundle when updater is registered: Returns error (strict enforcement)
-//   - Wraps the stream to periodically re-evaluate identity when config changes
-//
-// The wrapped stream checks for config sequence changes on every RecvMsg/SendMsg call.
-// If the config changed, it re-evaluates the identity against the new policy.
+// The wrapped stream re-checks the config sequence on every RecvMsg/SendMsg. If the config
+// advanced, it re-evaluates the bound identity against the new policy, terminating the stream
+// if access was revoked (e.g. the client's organization was removed from the channel).
 func MSPStreamServerInterceptor(provider BundleProvider) grpc.StreamServerInterceptor {
 	return func(
-		srv interface{},
+		srv any,
 		ss grpc.ServerStream,
 		info *grpc.StreamServerInfo,
 		handler grpc.StreamHandler,
 	) error {
-		ctx := ss.Context()
-		p, ok := peer.FromContext(ctx)
-		if !ok {
-			return status.Error(codes.Unauthenticated, ErrNoPeerInfo.Error())
-		}
-
-		authInfo, ok := p.AuthInfo.(*MSPAuthInfo)
-		if !ok {
-			return status.Error(codes.Internal, ErrNoMSPAuthInfo.Error())
-		}
-
-		// Check service type
-		bundle, err := provider.GetBundle()
-		if errors.Is(err, ErrNoUpdater) {
-			// Internal service - bypass authentication
+		if isExemptMethod(info.FullMethod) {
 			return handler(srv, ss)
 		}
-		if errors.Is(err, ErrNoBundle) {
-			// Bundle not loaded yet - check if service requires ACL enforcement
-			if !provider.RequiresACL() {
-				// Service doesn't require ACL (e.g., orderer) = bypass MSP auth check
-				return handler(srv, ss)
-			}
-			// Service requires ACL but bundle not loaded = FAIL
-			return status.Error(codes.Internal, "channel configuration not available: "+err.Error())
-		}
+
+		bundle, enforce, err := bundleForEnforcement(provider)
 		if err != nil {
-			// Any other error = FAIL
-			return status.Error(codes.Internal, "channel configuration error: "+err.Error())
+			return err
+		}
+		if !enforce {
+			return handler(srv, ss)
 		}
 
-		// Public service - enforce ACL
-		identity, _ := authInfo.GetIdentity()
-		if identity == nil {
-			return status.Error(codes.Unauthenticated,
-				"connection not authorized: call Authorize RPC first, Denied for "+info.FullMethod)
+		identity, err := boundIdentity(ss.Context())
+		if err != nil {
+			return err
 		}
 
-		// Initial policy evaluation
+		// Initial policy evaluation at stream establishment.
 		if err := evaluatePolicy(bundle, identity, info.FullMethod); err != nil {
 			return err
 		}
 
-		// Wrap stream for config change detection and re-evaluation
-		// Cache the current bundle to detect changes
-		wrappedStream := &authServerStream{
+		authInfo, _ := GetMSPAuthInfoFromContext(ss.Context())
+		return handler(srv, &authServerStream{
 			ServerStream:  ss,
 			authInfo:      authInfo,
 			provider:      provider,
 			fullMethod:    info.FullMethod,
 			currentBundle: bundle,
-		}
-
-		return handler(srv, wrappedStream)
+		})
 	}
 }
 
-// authServerStream wraps grpc.ServerStream to add config change detection
-// and identity re-evaluation on every message.
+// bundleForEnforcement resolves whether ACL enforcement applies for the current request
+// and returns the bundle to evaluate against. enforce is false when the service is internal
+// or otherwise does not require ACL. A non-nil error is a gRPC status ready to return.
+func bundleForEnforcement(provider BundleProvider) (bundle *channelconfig.Bundle, enforce bool, err error) {
+	b, e := provider.GetBundle()
+	switch {
+	case errors.Is(e, ErrNoUpdater):
+		// No ACLUpdater registered → internal service → no ACL.
+		return nil, false, nil
+	case errors.Is(e, ErrNoBundle):
+		if !provider.RequiresACL() {
+			// Service doesn't enforce ACL (e.g. orderer) → bypass.
+			return nil, false, nil
+		}
+		// ACL-enforced service, but the bundle hasn't been loaded yet. Fail closed;
+		// Unavailable signals the client to retry once bootstrap completes.
+		return nil, false, status.Error(codes.Unavailable, "channel configuration not available yet")
+	case e != nil:
+		return nil, false, status.Error(codes.Internal, "channel configuration error: "+e.Error())
+	}
+	return b, true, nil
+}
+
+// boundIdentity returns the MSP identity bound to the connection by a prior Authorize call,
+// or an Unauthenticated status if the connection has not been authorized.
+//
+//nolint:ireturn // msp.Identity is an interface by design.
+func boundIdentity(ctx context.Context) (msp.Identity, error) {
+	authInfo, err := authInfoFromContext(ctx)
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, err.Error())
+	}
+	identity, _ := authInfo.GetIdentity()
+	if identity == nil {
+		return nil, status.Error(codes.Unauthenticated, "connection not authorized: call Authorize first")
+	}
+	return identity, nil
+}
+
+// authInfoFromContext extracts the connection's *MSPAuthInfo from the gRPC context.
+func authInfoFromContext(ctx context.Context) (*MSPAuthInfo, error) {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return nil, ErrNoPeerInfo
+	}
+	authInfo, ok := p.AuthInfo.(*MSPAuthInfo)
+	if !ok {
+		return nil, ErrNoMSPAuthInfo
+	}
+	return authInfo, nil
+}
+
+// authServerStream wraps grpc.ServerStream to detect config-sequence changes and
+// re-evaluate the bound identity against the current policy on every message.
 type authServerStream struct {
 	grpc.ServerStream
 	authInfo      *MSPAuthInfo
 	provider      BundleProvider
 	fullMethod    string
-	currentBundle *channelconfig.Bundle // Cached bundle to detect changes
+	currentBundle *channelconfig.Bundle // last bundle the identity was evaluated against
 }
 
-// RecvMsg intercepts incoming messages to perform config change detection.
-func (s *authServerStream) RecvMsg(m interface{}) error {
+// RecvMsg re-checks the config before receiving.
+func (s *authServerStream) RecvMsg(m any) error {
 	if err := s.checkConfigAndRevalidate(); err != nil {
 		return err
 	}
 	return s.ServerStream.RecvMsg(m)
 }
 
-// SendMsg intercepts outgoing messages to perform config change detection.
-func (s *authServerStream) SendMsg(m interface{}) error {
+// SendMsg re-checks the config before sending.
+func (s *authServerStream) SendMsg(m any) error {
 	if err := s.checkConfigAndRevalidate(); err != nil {
 		return err
 	}
 	return s.ServerStream.SendMsg(m)
 }
 
-// checkConfigAndRevalidate checks if the config sequence changed and re-evaluates
-// the identity against the new policy if it did.
+// checkConfigAndRevalidate re-evaluates the bound identity only when the config sequence
+// has advanced since the last evaluation. On an unchanged sequence it is a cheap no-op.
 func (s *authServerStream) checkConfigAndRevalidate() error {
-	// Get latest bundle from provider
 	latestBundle, err := s.provider.GetBundle()
 	if err != nil {
 		return status.Error(codes.Internal, "config not available: "+err.Error())
 	}
 
-	// Get identity
 	identity, _ := s.authInfo.GetIdentity()
 	if identity == nil {
 		return status.Error(codes.Unauthenticated, "identity no longer bound to connection")
 	}
 
-	// Compare cached bundle sequence with latest
 	cachedSeq := s.currentBundle.ConfigtxValidator().Sequence()
 	latestSeq := latestBundle.ConfigtxValidator().Sequence()
-
-	// Only re-evaluate if config changed
-	if latestSeq != cachedSeq {
-		logger.Infof("Config sequence changed from %d to %d, re-evaluating identity for %s",
-			cachedSeq, latestSeq, s.fullMethod)
-
-		// Re-evaluate identity against new policy
-		if err := evaluatePolicy(latestBundle, identity, s.fullMethod); err != nil {
-			return errors.Wrapf(err, "access revoked due to config change (seq %d -> %d)",
-				cachedSeq, latestSeq)
-		}
-
-		// Update cached bundle and sequence in AuthInfo
-		s.currentBundle = latestBundle
-		s.authInfo.SetIdentity(identity, latestSeq)
-		logger.Infof("Identity re-validated successfully for config sequence %d", latestSeq)
+	if latestSeq == cachedSeq {
+		return nil
 	}
 
+	logger.Infof("Config sequence advanced %d -> %d, re-evaluating identity for %s",
+		cachedSeq, latestSeq, s.fullMethod)
+	if err := evaluatePolicy(latestBundle, identity, s.fullMethod); err != nil {
+		return errors.Wrapf(err, "access revoked due to config change (seq %d -> %d)", cachedSeq, latestSeq)
+	}
+
+	s.currentBundle = latestBundle
+	s.authInfo.SetIdentity(identity, latestSeq)
 	return nil
 }
 
-// evaluatePolicy evaluates an identity against the policy for a given method.
+// evaluatePolicy evaluates an identity against the policy for a given method. Policy
+// resolution is fail-closed: a method with no policy in the channel config and no default
+// mapping is denied, so a newly-added RPC cannot be silently reachable.
 func evaluatePolicy(bundle *channelconfig.Bundle, identity msp.Identity, fullMethod string) error {
 	appConfig, exists := bundle.ApplicationConfig()
 	if !exists {
 		return status.Error(codes.Internal, "no application config in bundle")
 	}
 
-	// Get policy reference from API mapper or default ACL
+	// 1. Channel configuration ACLs section. 2. Hard-coded default map.
 	policyRef := appConfig.APIPolicyMapper().PolicyRefForAPI(fullMethod)
 	if policyRef == "" {
 		policyRef = DefaultACL[fullMethod]
 	}
-
 	if policyRef == "" {
-		// No policy defined - default to Readers
-		policyRef = ReaderPolicy
-		logger.Infof("No policy defined for %s, using default: %s", fullMethod, policyRef)
+		return status.Errorf(codes.PermissionDenied, "no ACL policy defined for resource %s", fullMethod)
 	}
 
-	logger.Infof("Evaluating policy %s for method %s", policyRef, fullMethod)
-
-	policyMgr := bundle.PolicyManager()
-	policy, exists := policyMgr.GetPolicy(policyRef)
+	policy, exists := bundle.PolicyManager().GetPolicy(policyRef)
 	if !exists {
 		return status.Errorf(codes.PermissionDenied, "no policy named %s", policyRef)
 	}
 
 	if err := policy.EvaluateIdentities([]msp.Identity{identity}); err != nil {
-		return status.Errorf(codes.PermissionDenied,
-			"access denied for %s: %v", fullMethod, err)
+		return status.Errorf(codes.PermissionDenied, "access denied for %s: %v", fullMethod, err)
 	}
 
+	logger.Debugf("Policy %s satisfied for method %s", policyRef, fullMethod)
 	return nil
 }
 
 // GetMSPAuthInfoFromContext extracts MSPAuthInfo from the gRPC context.
 func GetMSPAuthInfoFromContext(ctx context.Context) (*MSPAuthInfo, bool) {
-	p, ok := peer.FromContext(ctx)
-	if !ok {
+	authInfo, err := authInfoFromContext(ctx)
+	if err != nil {
 		return nil, false
 	}
-
-	authInfo, ok := p.AuthInfo.(*MSPAuthInfo)
-	return authInfo, ok
+	return authInfo, true
 }

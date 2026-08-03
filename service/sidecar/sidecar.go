@@ -68,9 +68,8 @@ type Service struct {
 	config                *Config
 	healthcheck           *health.Server
 	metrics               *perfMetrics
-	tlsUpdater            serve.DynamicTLSUpdater
+	aclUpdater            serve.ACLUpdater
 	ready                 *channel.Ready
-	authService           *auth.Service
 }
 
 var (
@@ -177,8 +176,8 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	committerpb.RegisterBlockQueryServiceServer(srv.GRPC, s)
 	committerpb.RegisterNotifierServer(srv.GRPC, s.notifier)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
-	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater, true) // Sidecar requires ACL enforcement
-	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcTLSProvider))
+	serve.RegisterACLUpdater(srv.GrpcACLProvider, &s.aclUpdater, true) // Sidecar requires ACL enforcement
+	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcACLProvider))
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 }
 
@@ -473,16 +472,17 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 				errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
 		}
 
-		s.tlsUpdater.UpdateClientRootCAs(certs)
+		s.aclUpdater.UpdateClientRootCAs(certs)
 
 		bundle, err := serialization.ExtractAppBundle(configBlk.Data.Data[0])
 		if err != nil {
 			logger.Errorf("Failed to extract bundle from config envelope: %v", err)
 		} else {
-			s.tlsUpdater.UpdateBundle(bundle)
+			s.aclUpdater.UpdateBundle(bundle)
 		}
 
-		logger.Infof("Updated dynamic TLS with %d CA certificates from config block %d", len(certs), configBlk.Header.Number)
+		logger.Infof("Updated dynamic TLS with %d CA certificates from config block %d",
+			len(certs), configBlk.Header.Number)
 	}
 
 	return errors.Wrap(ctx.Err(), "context cancelled")

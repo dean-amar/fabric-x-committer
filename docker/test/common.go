@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
@@ -78,7 +80,22 @@ const (
 
 	// containerArtifactsPath is the path to the artifacts directory inside the container.
 	containerArtifactsPath = "/root/artifacts"
+
+	// testChannelName is the channel the test committer container is configured with.
+	testChannelName = "channel1"
 )
+
+// deliverySigner loads a channel-member MSP signing identity from crypto artifacts, used to
+// authorize block-delivery and notification connections against the sidecar's ACL.
+//
+//nolint:ireturn // msp.SigningIdentity is an interface by design.
+func deliverySigner(t *testing.T, artifactsPath string) msp.SigningIdentity {
+	t.Helper()
+	identities, err := testcrypto.GetPeersIdentities(artifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+	return identities[0]
+}
 
 var localHostBind = []network.PortBinding{{
 	HostIP:   netip.MustParseAddr("127.0.0.1"),

@@ -63,8 +63,7 @@ type (
 		metrics     *perfMetrics
 		ready       *channel.Ready
 		healthcheck *health.Server
-		tlsUpdater  serve.DynamicTLSUpdater
-		authService *auth.Service
+		aclUpdater  serve.ACLUpdater
 	}
 )
 
@@ -125,8 +124,8 @@ func (q *Service) Run(ctx context.Context) error {
 func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
-	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater, true) // Query service requires ACL enforcement
-	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService(s.GrpcTLSProvider))
+	serve.RegisterACLUpdater(s.GrpcACLProvider, &q.aclUpdater, true) // Query service requires ACL enforcement
+	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService(s.GrpcACLProvider))
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 }
 
@@ -358,15 +357,19 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 			return
 		}
 
-		seen = true
-		lastVersion = configTX.Version
-		q.tlsUpdater.UpdateClientRootCAs(certs)
-
+		// Extract the ACL bundle before committing the version, so a transient failure here
+		// does not advance lastVersion and permanently skip this config version's bundle
+		// (which would leave ACL enforcement without policies while TLS CAs updated).
 		bundle, err := serialization.ExtractAppBundle(configTX.Envelope)
 		if err != nil {
+			logger.Errorf("Failed to extract ACL bundle from config envelope: %v", err)
 			return
 		}
-		q.tlsUpdater.UpdateBundle(bundle)
+
+		seen = true
+		lastVersion = configTX.Version
+		q.aclUpdater.UpdateClientRootCAs(certs)
+		q.aclUpdater.UpdateBundle(bundle)
 
 		logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), lastVersion)
 	}

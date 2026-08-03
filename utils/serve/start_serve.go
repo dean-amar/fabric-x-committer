@@ -49,7 +49,7 @@ type (
 	Servers struct {
 		GRPC            *grpc.Server
 		HTTP            *http.ServeMux
-		GrpcTLSProvider *TLSProvider
+		GrpcACLProvider *ACLProvider
 
 		httpServer *http.Server
 
@@ -129,12 +129,13 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
 	s.stopOnce = &sync.Once{}
 
-	s.GrpcTLSProvider, err = NewTLSProvider(conf.GRPC.TLS)
+	s.GrpcACLProvider, err = NewACLProvider(conf.GRPC.TLS)
 	if err != nil {
 		return s, errors.Wrap(err, "failed to create TLS provider")
 	}
 
-	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider)
+	//nolint:contextcheck // ACL stream interceptor re-checks config via a context-free atomic load.
+	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcACLProvider)
 	if err != nil {
 		return s, errors.Wrapf(err, "failed creating GRPC server")
 	}
@@ -254,7 +255,7 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 }
 
 // newGRPCServer instantiate a [grpc.Server].
-func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider) (*grpc.Server, error) {
+func newGRPCServer(c *ServerConfig, tlsProvider *ACLProvider) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),

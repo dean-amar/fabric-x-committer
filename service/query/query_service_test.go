@@ -15,19 +15,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-committer/utils/auth"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"google.golang.org/grpc"
-
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -37,7 +32,9 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/retry"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
@@ -53,6 +50,7 @@ type (
 		pool         *pgxpool.Pool
 		conn         *grpc.ClientConn
 		cryptoPath   string
+		clientTLS    connection.TLSConfig
 	}
 
 	queryServiceTestOpts struct {
@@ -62,32 +60,6 @@ type (
 		maxActiveViews int
 	}
 )
-
-func TestQueryTest(t *testing.T) {
-	env := newQueryServiceTestEnv(t, nil)
-	requiredItems := env.insertSampleKeysValueItems(t)
-	query, _, _ := makeQuery(requiredItems)
-	txIDs := env.insertSampleTxsStatus(t)
-	expectedStatus := make([]*committerpb.TxStatus, len(txIDs))
-	for i, txID := range txIDs {
-		expectedStatus[i] = &committerpb.TxStatus{
-			Ref:    committerpb.NewTxRef(txID, 0, uint32(i)),
-			Status: committerpb.Status_COMMITTED,
-		}
-	}
-
-	// Authorize the connection using the same crypto path as the database
-	signer := auth.CreateTestSigner(t, env.cryptoPath)
-	authClient := committerpb.NewAuthServiceClient(env.conn)
-	auth.AuthorizeTestClient(t, authClient, signer, "testchannel")
-
-	queryClient := committerpb.NewQueryServiceClient(env.conn)
-	_, err := queryClient.GetRows(t.Context(), &committerpb.Query{
-		View:       env.beginView(t, queryClient, defaultViewParams(time.Minute)),
-		Namespaces: query.Namespaces,
-	})
-	require.NoError(t, err)
-}
 
 // TestQuerySecureConnection verifies the query service gRPC server's behavior
 // under various client TLS configurations.
@@ -105,30 +77,18 @@ func TestQuerySecureConnection(t *testing.T) {
 					MaxElapsedTime: 3 * time.Second,
 				})
 
-				// Try to authorize the connection - if this fails (e.g., TLS mismatch), return the error
-				signer := auth.CreateTestSigner(t, env.cryptoPath)
-				authClient := committerpb.NewAuthServiceClient(conn)
-
-				// Create authorization request
-				msg := &common.Payload{
-					Header: &common.Header{
-						ChannelHeader: protoutil.MarshalOrPanic(&common.ChannelHeader{
-							Type:      int32(common.HeaderType_MESSAGE),
-							ChannelId: "testchannel",
-						}),
-					},
-				}
-				envelope := auth.CreateSignedEnvelope(t, signer, "testchannel", msg)
-
-				// Call Authorize - return error if it fails (don't use require)
-				resp, err := authClient.Authorize(ctx, &committerpb.AuthorizeRequest{
-					SignedEnvelope: envelope,
-				})
+				// Try to authorize the connection - if this fails (e.g., TLS mismatch), return
+				// the error so the secure-connection matrix can assert on it.
+				tlsCertHash, err := auth.ClientTLSCertHash(cfg)
 				if err != nil {
 					return err
 				}
-				if !resp.Success {
-					return errors.Newf("authorization failed: %s", resp.Message)
+				if authErr := auth.AuthorizeConnection(ctx, conn, auth.AuthorizeParameters{
+					Signer:      auth.CreateTestSigner(t, env.cryptoPath),
+					ChannelID:   "testchannel",
+					TLSCertHash: tlsCertHash,
+				}); authErr != nil {
+					return authErr
 				}
 
 				// Now make the actual RPC call
@@ -621,11 +581,10 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		MaxElapsedTime: 3 * time.Second,
 	})
 
-	time.Sleep(5 * time.Second)
-
-	// Authorize the connection using the same crypto path as the database
-	signer := auth.CreateTestSigner(t, cryptoPath)
-	auth.AuthorizeTestClient(t, committerpb.NewAuthServiceClient(conn), signer, "testchannel")
+	// Authorize the connection using the same crypto path as the database. The query service
+	// loads its ACL bundle asynchronously from the DB; AuthorizeConnection retries internally
+	// until the bundle is available.
+	auth.AuthorizeTestConn(t, conn, cryptoPath, "testchannel", opts.clientTLS)
 
 	// Create clientConn from the authorized connection
 	clientConn := committerpb.NewQueryServiceClient(conn)
@@ -639,6 +598,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		pool:         pool,
 		cryptoPath:   cryptoPath,
 		conn:         conn,
+		clientTLS:    opts.clientTLS,
 	}
 }
 
@@ -865,7 +825,7 @@ func TestRefreshTLSFromDB(t *testing.T) {
 		})
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
-			require.NotEmpty(ct, qs.tlsUpdater.Load())
+			require.NotEmpty(ct, qs.aclUpdater.Load())
 		}, 10*time.Second, 100*time.Millisecond, "TLS updater should have been called with CAs from config")
 	})
 }

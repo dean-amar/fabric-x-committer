@@ -74,7 +74,7 @@ type (
 		cutBlock             chan any
 		cache                *blockCache
 		healthcheck          *health.Server
-		tlsUpdater           serve.DynamicTLSUpdater
+		aclUpdater           serve.ACLUpdater
 
 		// config uses atomic.Pointer to allow safe concurrent reads by the Run() goroutine
 		// while supporting runtime updates (e.g., BlockTimeout changes in tests).
@@ -473,7 +473,7 @@ func (o *Orderer) RegisterService(s serve.Servers) {
 	ab.RegisterAtomicBroadcastServer(s.GRPC, o)
 	healthgrpc.RegisterHealthServer(s.GRPC, o.healthcheck)
 	// Orderer needs dynamic TLS CA updates but NOT ACL enforcement
-	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &o.tlsUpdater, false)
+	serve.RegisterACLUpdater(s.GrpcACLProvider, &o.aclUpdater, false)
 }
 
 // SubmitBlock allows submitting blocks directly for testing other packages.
@@ -616,7 +616,7 @@ func (o *Orderer) updateTLSFromConfigBlock(configBlock *common.Block) error {
 		return errors.Wrap(err, "failed to extract TLS CAs from config envelope")
 	}
 
-	o.tlsUpdater.UpdateClientRootCAs(certs)
+	o.aclUpdater.UpdateClientRootCAs(certs)
 
 	logger.Infof("Updated dynamic TLS with %d CA certificates from config block %d",
 		len(certs), configBlock.Header.Number)

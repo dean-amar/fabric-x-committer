@@ -21,6 +21,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/common/ledger/blkstorage"
+	"github.com/hyperledger/fabric-x-common/msp"
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	authutil "github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -145,7 +147,7 @@ func (env *sidecarTestEnv) startSidecarClient(
 ) {
 	t.Helper()
 	committerClient := test.NewTLSClientConfig(sidecarClientCreds, &env.serverConfig.GRPC.Endpoint)
-	env.committedBlock = delivercommitter.Start(ctx, t, committerClient, startBlkNum)
+	env.committedBlock = delivercommitter.Start(ctx, t, committerClient, startBlkNum, env.clientSigner(t), env.ChanID)
 }
 
 func (env *sidecarTestEnv) startNotificationStream(
@@ -155,9 +157,35 @@ func (env *sidecarTestEnv) startNotificationStream(
 ) {
 	t.Helper()
 	conn := test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, sidecarClientCreds)
+	require.NoError(t, authutil.AuthorizeConnection(ctx, conn, env.authParams(t, sidecarClientCreds)))
 	var err error
 	env.notifyStream, err = committerpb.NewNotifierClient(conn).OpenNotificationStream(ctx)
 	require.NoError(t, err)
+}
+
+// clientSigner loads a channel-member MSP signing identity from the test crypto artifacts.
+// It satisfies the Readers policy the sidecar's ACL enforces on block-deliver and notifications.
+//
+//nolint:ireturn // msp.SigningIdentity is an interface by design.
+func (env *sidecarTestEnv) clientSigner(t *testing.T) msp.SigningIdentity {
+	t.Helper()
+	identities, err := testcrypto.GetPeersIdentities(env.ArtifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+	return identities[0]
+}
+
+// authParams builds the ACL authorization parameters for a client connection, deriving the
+// client's TLS cert hash from its credentials so the binding holds under mTLS.
+func (env *sidecarTestEnv) authParams(t *testing.T, clientCreds connection.TLSConfig) authutil.AuthorizeParameters {
+	t.Helper()
+	tlsCertHash, err := authutil.ClientTLSCertHash(clientCreds)
+	require.NoError(t, err)
+	return authutil.AuthorizeParameters{
+		Signer:      env.clientSigner(t),
+		ChannelID:   env.ChanID,
+		TLSCertHash: tlsCertHash,
+	}
 }
 
 func TestSidecarSecureConnection(t *testing.T) {
@@ -190,10 +218,10 @@ func TestSidecar(t *testing.T) {
 		tlsMode string
 		numIDs  uint32
 	}{
-		//{tlsMode: connection.NoneTLSMode, numIDs: 1},
-		//{tlsMode: connection.OneSideTLSMode, numIDs: 1},
+		{tlsMode: connection.NoneTLSMode, numIDs: 1},
+		{tlsMode: connection.OneSideTLSMode, numIDs: 1},
 		{tlsMode: connection.MutualTLSMode, numIDs: 1},
-		//{tlsMode: connection.MutualTLSMode, numIDs: 3},
+		{tlsMode: connection.MutualTLSMode, numIDs: 3},
 	} {
 		t.Run(fmt.Sprintf("tls-mode:%s IDs:%d", tc.tlsMode, tc.numIDs), func(t *testing.T) {
 			t.Parallel()
@@ -471,8 +499,11 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	coordLabel := env.getCoordinatorLabel(t)
 	test.CheckServerStopped(t, coordLabel)
 
+	// Start only the sidecar service here. The ACL bundle loads from the genesis block, whose
+	// commit requires the coordinator, so authorized client streams cannot be established until
+	// the coordinator is back — they are started after the restart below.
 	t.Log("Start the service")
-	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
+	env.startSidecarService(ctx, t)
 	monitoring.RequireConnectionMetrics(
 		t, coordLabel,
 		env.sidecar.metrics.coordConnection,
@@ -487,6 +518,10 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 		env.sidecar.metrics.coordConnection,
 		monitoring.ExpectedConn{Status: connection.Connected},
 	)
+
+	t.Log("Start the authorized client and notification stream now that the coordinator is back")
+	env.startSidecarClient(ctx, t, 0, test.InsecureTLSConfig)
+	env.startNotificationStream(ctx, t, test.InsecureTLSConfig)
 
 	t.Log("Wait for block 0")
 	env.requireBlock(ctx, t, 0)
@@ -717,13 +752,13 @@ func TestUpdateDynamicTLS(t *testing.T) {
 		})
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
-			require.NotEmpty(ct, s.tlsUpdater.Load())
+			require.NotEmpty(ct, s.aclUpdater.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 		// Cancel after the envelope is processed.
 		cancel()
 
 		require.ErrorIs(t, g.Wait(), context.Canceled)
-		require.NotEmpty(t, s.tlsUpdater.Load(), "should have received TLS CA certificates")
+		require.NotEmpty(t, s.aclUpdater.Load(), "should have received TLS CA certificates")
 	})
 
 	t.Run("returns non-retryable error for invalid envelope", func(t *testing.T) {
@@ -739,7 +774,7 @@ func TestUpdateDynamicTLS(t *testing.T) {
 
 		err := s.updateDynamicTLS(t.Context(), ch)
 		require.Error(t, err)
-		require.Empty(t, s.tlsUpdater.Load())
+		require.Empty(t, s.aclUpdater.Load())
 	})
 }
 

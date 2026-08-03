@@ -12,56 +12,63 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/hyperledger/fabric-x-common/common/channelconfig"
+
 	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 )
 
 type (
-	// TLSProvider holds a dynamically updatable TLS configuration.
+	// ACLProvider holds the dynamically updatable channel-configuration state that the gRPC
+	// server reads on each connection: the TLS client-CA pool (for mutual TLS) and the channel
+	// configuration bundle (for ACL enforcement). Both derive from the same configuration
+	// blocks and are refreshed together via the ACLUpdater.
 	//
 	// The design separates writers (services) from readers (server), ensuring a linear dependency flow:
 	//
-	//	Service -> DynamicTLSUpdater <- TLSProvider <- Server
-	TLSProvider struct {
+	//	Service -> ACLUpdater <- ACLProvider <- Server
+	ACLProvider struct {
 		serverConfig        *tls.Config
 		clientConfig        *tls.Config
 		clientConfigVersion uint64
 		staticCertPool      *x509.CertPool
-		updater             *DynamicTLSUpdater
+		updater             *ACLUpdater
 		mu                  sync.Mutex
 	}
 
-	// DynamicTLSUpdater is a TLS CA handler that can be used to update the GRPCTLSProvider.
-	DynamicTLSUpdater struct {
+	// ACLUpdater is the write side of an ACLProvider. A service pushes the latest TLS client-CA
+	// certificates and channel-configuration bundle here as new configuration blocks arrive.
+	// requiresACL marks whether the owning service enforces ACL (sidecar, query) or only needs
+	// dynamic TLS CA refresh (orderer).
+	ACLUpdater struct {
 		certs              atomic.Pointer[[][]byte]
 		certsUpdateVersion atomic.Uint64
 		bundle             atomic.Pointer[channelconfig.Bundle]
-		requiresACL        bool // Whether this service requires ACL enforcement
+		requiresACL        bool
 	}
 )
 
-// RegisterDynamicTLSUpdater registers a DynamicTLSUpdater with a GRPCTLSProvider.
-// It uses the similar signature as GRPC server registration to allow common
+// RegisterACLUpdater registers an ACLUpdater with an ACLProvider.
+// It uses a signature similar to gRPC server registration to allow common
 // language for all server<->service interfaces.
 // The requiresACL parameter indicates whether this service requires ACL enforcement.
 // Services that need ACL enforcement (sidecar, query) should set this to true.
 // Services that only need dynamic TLS CAs (orderer) should set this to false.
-func RegisterDynamicTLSUpdater(d *TLSProvider, updater *DynamicTLSUpdater, requiresACL bool) {
+func RegisterACLUpdater(d *ACLProvider, updater *ACLUpdater, requiresACL bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	updater.requiresACL = requiresACL
 	d.updater = updater
 }
 
-// NewTLSProvider loads TLS credentials from a TLSConfig.
-func NewTLSProvider(tlsConfig connection.TLSConfig) (*TLSProvider, error) {
+// NewACLProvider loads TLS credentials from a TLSConfig.
+func NewACLProvider(tlsConfig connection.TLSConfig) (*ACLProvider, error) {
 	creds, err := connection.NewServerTLSCredentials(tlsConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	d := &TLSProvider{}
+	d := &ACLProvider{}
 	d.clientConfig, err = creds.CreateServerTLSConfig()
 	if err != nil {
 		return nil, err
@@ -80,7 +87,10 @@ func NewTLSProvider(tlsConfig connection.TLSConfig) (*TLSProvider, error) {
 	return d, nil
 }
 
-func (d *TLSProvider) GetBundle() (*channelconfig.Bundle, error) {
+// GetBundle returns the latest channel-configuration bundle for ACL evaluation.
+// It returns auth.ErrNoUpdater when no updater is registered (internal service), or
+// auth.ErrNoBundle when a bundle has not been loaded yet (still bootstrapping).
+func (d *ACLProvider) GetBundle() (*channelconfig.Bundle, error) {
 	if d.updater == nil {
 		return nil, auth.ErrNoUpdater
 	}
@@ -92,7 +102,7 @@ func (d *TLSProvider) GetBundle() (*channelconfig.Bundle, error) {
 }
 
 // RequiresACL returns whether this service requires ACL enforcement.
-func (d *TLSProvider) RequiresACL() bool {
+func (d *ACLProvider) RequiresACL() bool {
 	if d.updater == nil {
 		return false
 	}
@@ -100,21 +110,21 @@ func (d *TLSProvider) RequiresACL() bool {
 }
 
 // GetServerTLSCredentials returns the TLS credentials for the server.
-func (d *TLSProvider) GetServerTLSCredentials() *tls.Config {
+func (d *ACLProvider) GetServerTLSCredentials() *tls.Config {
 	return d.serverConfig
 }
 
 // GetConfigForClient returns the current TLS config for a new client connection.
 // This is a single atomic pointer load with no allocations, making it safe and
 // efficient to call on every TLS handshake.
-func (d *TLSProvider) GetConfigForClient(*tls.ClientHelloInfo) (*tls.Config, error) {
+func (d *ACLProvider) GetConfigForClient(*tls.ClientHelloInfo) (*tls.Config, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.updateNoLock()
 	return d.clientConfig, nil
 }
 
-func (d *TLSProvider) updateNoLock() bool {
+func (d *ACLProvider) updateNoLock() bool {
 	if d.updater == nil || d.clientConfig == nil || d.staticCertPool == nil {
 		return false
 	}
@@ -141,18 +151,18 @@ func (d *TLSProvider) updateNoLock() bool {
 }
 
 // UpdateClientRootCAs updates the client root CAs with the given certificates.
-func (d *DynamicTLSUpdater) UpdateClientRootCAs(certs [][]byte) {
+func (d *ACLUpdater) UpdateClientRootCAs(certs [][]byte) {
 	d.certs.Store(&certs)
 	d.certsUpdateVersion.Add(1)
 }
 
-// UpdateBundle updates the client root CAs with the given certificates.
-func (d *DynamicTLSUpdater) UpdateBundle(bund *channelconfig.Bundle) {
+// UpdateBundle stores the latest channel-configuration bundle for ACL evaluation.
+func (d *ACLUpdater) UpdateBundle(bund *channelconfig.Bundle) {
 	d.bundle.Store(bund)
 }
 
 // Load loads the dynamic certificates.
-func (d *DynamicTLSUpdater) Load() [][]byte {
+func (d *ACLUpdater) Load() [][]byte {
 	certs := d.certs.Load()
 	if certs == nil {
 		return nil

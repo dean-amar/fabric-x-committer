@@ -164,7 +164,7 @@ func TestExtractAppTLSCAsFromEnvelope(t *testing.T) {
 
 // newTestDynamicTLS creates a DynamicTLS via NewDynamicTLSFromConfig using the given CA
 // for both server credentials and client CA trust.
-func newTestDynamicTLS(t *testing.T, ca tlsgen.CA) (*TLSProvider, *DynamicTLSUpdater) {
+func newTestDynamicTLS(t *testing.T, ca tlsgen.CA) (*ACLProvider, *ACLUpdater) {
 	t.Helper()
 	keyPair, err := ca.NewServerCertKeyPair(localHost)
 	require.NoError(t, err)
@@ -177,7 +177,7 @@ func newTestDynamicTLS(t *testing.T, ca tlsgen.CA) (*TLSProvider, *DynamicTLSUpd
 	require.NoError(t, os.WriteFile(keyPath, keyPair.Key, 0o600))
 	require.NoError(t, os.WriteFile(caPath, ca.CertBytes(), 0o600))
 
-	dtls, err := NewTLSProvider(connection.TLSConfig{
+	dtls, err := NewACLProvider(connection.TLSConfig{
 		Mode:        connection.MutualTLSMode,
 		CertPath:    certPath,
 		KeyPath:     keyPath,
@@ -185,8 +185,8 @@ func newTestDynamicTLS(t *testing.T, ca tlsgen.CA) (*TLSProvider, *DynamicTLSUpd
 	})
 	require.NoError(t, err)
 
-	var updater DynamicTLSUpdater
-	RegisterDynamicTLSUpdater(dtls, &updater, true) // Test with ACL enforcement enabled
+	var updater ACLUpdater
+	RegisterACLUpdater(dtls, &updater, true) // Test with ACL enforcement enabled
 	return dtls, &updater
 }
 

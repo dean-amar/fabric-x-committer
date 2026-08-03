@@ -4,384 +4,173 @@ Copyright IBM Corp. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# MSP Authentication with Stateless Session Binding
+# MSP Authentication and ACL Enforcement
 
 ## Overview
 
-This document describes the MSP (Membership Service Provider) authentication system implemented in fabric-x-committer. The system provides a lightweight, memory-safe approach to enforcing Access Control Lists (ACLs) on gRPC APIs without requiring every message to be wrapped in a signed envelope.
+Committer-X's API-exposing services — the **query service** and the **sidecar**
+(block query, block delivery, and notifications) — enforce Access Control Lists (ACLs)
+on their gRPC APIs. Every exposed RPC is a resource mapped to a channel policy
+(for example `/Channel/Application/Readers`); a client's MSP identity is evaluated against
+that policy before the call proceeds.
 
-## Architecture
+This implements **Option B** of the ACL RFC: rather than wrapping every request in a signed
+envelope, the client proves its identity **once per connection** via a dedicated `Authorize`
+RPC. The verified identity is bound to the gRPC connection, and every subsequent RPC on that
+connection reuses it. Internal services (coordinator, verifier, validator-committer, mock
+orderer) do not enforce ACL.
 
-### Key Concept: Stateless Session Binding
+## Key concept: connection-bound identity
 
-Instead of maintaining a global session registry (which risks memory leaks), we bind the authenticated MSP identity directly to the TLS connection's memory graph. When a client disconnects, the Go runtime automatically garbage collects the session state.
+The authenticated MSP identity is stored on a mutable `AuthInfo` value attached to the TLS
+connection during the handshake. When the connection closes, the Go runtime garbage-collects
+that value — there is no global session registry to leak.
 
-### Components
+## Components
 
-1. **CommitterAuthInfo** (`utils/auth/msp_credentials.go`)
-   - Implements `credentials.AuthInfo`
-   - Embeds standard TLS info
-   - Provides thread-safe storage for MSP identity
-   - Lives in the connection's memory, automatically cleaned up on disconnect
+All types live in `utils/auth/`.
 
-2. **CommitterCreds** (`utils/auth/msp_transport_credentials.go`)
-   - Wraps standard TLS credentials
-   - Injects `CommitterAuthInfo` during server handshake
-   - Ensures every connection has identity binding capability
+1. **`MSPAuthInfo`** (`auth_info.go`) — implements `credentials.AuthInfo`. Holds the client
+   TLS certificate and its SHA-256 hash (captured at handshake), and, once `Authorize`
+   succeeds, the bound `msp.Identity` and the config sequence it was evaluated at. Identity
+   access is guarded by a `sync.RWMutex`.
 
-3. **MSP Interceptor** (`utils/auth/msp_interceptor.go`)
-   - Unary gRPC interceptor
-   - Handles authentication RPC (binds identity)
-   - Enforces ACL policies on data RPCs (checks bound identity)
+2. **`CustomCredentials`** (`committer_creds.go`) — wraps the standard TLS
+   `TransportCredentials`. On each handshake it delegates to TLS, then replaces the connection's
+   `AuthInfo` with an `*MSPAuthInfo`, capturing the client's leaf certificate and hash (under
+   mTLS).
 
-## Authentication Flow
+3. **Interceptors** (`interceptor.go`):
+   - `AuthorizeInterceptor` (unary) — handles the `Authorize` RPC: validates the signed
+     envelope and binds the identity to the connection.
+   - `MSPUnaryServerInterceptor` / `MSPStreamServerInterceptor` — enforce ACL on business RPCs
+     by reading the bound identity and evaluating it against the resource's policy.
+
+4. **Envelope validation** (`envelope_utils.go`) — `ValidateAuthEnvelope` performs the
+   replay-resistant checks; `ExtractIdentityFromEnvelope` performs the cryptographic identity
+   checks.
+
+5. **Client helper** (`authorize_client.go`) — `AuthorizeConnection` builds the signed,
+   cert-bound envelope and calls `Authorize`, retrying while the server bootstraps.
+
+6. **Resource map** (`default_acl.go`) — the hard-coded default resource-to-policy map and the
+   set of ACL-exempt methods (health, reflection, `Authorize`).
+
+The channel-configuration bundle (MSP definitions + policies) is supplied by
+`serve.ACLProvider` / `serve.ACLUpdater` (`utils/serve/acl_provider.go`), which is refreshed
+from configuration blocks by the same path that refreshes the dynamic TLS CAs.
+
+## Authentication flow
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Client establishes mTLS connection                       │
-│    - TLS handshake with client certificate                  │
-│    - CommitterAuthInfo injected (identity slot empty)       │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 2. Client calls Authorize RPC with signed envelope          │
-│    - Envelope contains MSP identity + signature             │
-│    - Server validates signature and identity                │
-│    - MSP identity bound to connection via SetIdentity()     │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 3. Client calls data RPCs (e.g., GetTransactionStatus)     │
-│    - Interceptor retrieves bound identity via GetIdentity() │
-│    - Evaluates identity against channel ACL policy          │
-│    - Allows or denies based on policy result                │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 4. Client disconnects                                       │
-│    - Connection closed                                       │
-│    - CommitterAuthInfo automatically garbage collected      │
-│    - No manual cleanup required                             │
-└─────────────────────────────────────────────────────────────┘
+1. Client establishes a (mutually authenticated) TLS connection.
+   - CustomCredentials captures the client cert + hash into MSPAuthInfo (identity slot empty).
+
+2. Client calls Authorize(signedEnvelope) once per connection.
+   - AuthorizeInterceptor validates freshness + TLS cert-hash binding, verifies the signature,
+     resolves the identity against the channel MSPs, and binds it to the connection.
+
+3. Client calls business RPCs (unary or streaming).
+   - The MSP interceptors read the bound identity and evaluate it against the resource policy.
+   - Streams re-evaluate the identity whenever the channel config sequence advances.
+
+4. Client disconnects.
+   - MSPAuthInfo is garbage-collected; no manual cleanup.
 ```
 
-## Implementation Guide
+## Replay prevention
 
-### Step 1: Server Setup
+The `Authorize` envelope is protected by two independent mechanisms, mirroring the RFC:
 
-The server must use `CommitterCreds` and be started with proper TLS:
+- **Timestamp freshness (always).** The envelope's `ChannelHeader.Timestamp` must fall within
+  `DefaultEnvelopeFreshnessWindow` of the server's clock. A captured envelope goes stale and
+  cannot be replayed later, regardless of TLS mode.
+- **TLS cert-hash binding (under mTLS).** When the connection presents a client certificate,
+  the envelope's `ChannelHeader.TlsCertHash` must equal the SHA-256 hash of that certificate.
+  A captured envelope therefore cannot be replayed from a different connection, because the
+  attacker cannot reproduce the victim's TLS private key.
+
+Under mTLS these two together make the scheme equivalent to certificate-bound tokens
+(RFC 8705) for the token-theft/replay threat: the credential is useless without the private
+key, and after `Authorize` no credential travels on the wire at all. Without mTLS, timestamp
+freshness is the sole guard.
+
+## Policy resolution (fail-closed)
+
+For a given `info.FullMethod`, the resource-to-policy lookup order is:
+
+1. The channel configuration bundle's `ACLs` section (`APIPolicyMapper`).
+2. The hard-coded `DefaultACL` map.
+
+If neither defines a policy for the resource, the request is **denied**
+(`codes.PermissionDenied`). A newly-added RPC that no one has mapped is therefore unreachable
+until an explicit policy is declared, rather than silently allowed.
+
+Exempt methods — the `Authorize` RPC itself, gRPC health, and reflection — bypass enforcement
+entirely so that health probes and the authorization handshake work without a bound identity.
+
+## Bootstrap
+
+ACL evaluation needs the channel-configuration bundle, which the service builds from the first
+committed configuration block. Until that block is processed the provider has no bundle and,
+for an ACL-enforced service, `Authorize` returns `codes.Unavailable`. `AuthorizeConnection`
+retries on `Unavailable` within a bounded window, so clients that connect during startup
+succeed once the bundle is available. Genuine denials (bad identity, cert mismatch, stale
+timestamp) are permanent and returned immediately.
+
+## Server setup
+
+The ACL credentials and interceptors are installed for every gRPC server built by
+`serve.NewServers` (`utils/serve/start_serve.go`). Whether a given service actually enforces
+ACL is decided at registration time:
 
 ```go
-import (
-    "google.golang.org/grpc"
-    "google.golang.org/grpc/credentials"
-    
-    "github.com/hyperledger/fabric-x-committer/utils/auth"
-    "github.com/hyperledger/fabric-x-committer/utils/connection"
-)
-
-func setupServer(tlsConfig *tls.Config) (*grpc.Server, error) {
-    // 1. Create standard TLS credentials
-    standardTLSCreds := credentials.NewTLS(tlsConfig)
-    
-    // 2. Wrap with CommitterCreds to inject MSP auth capability
-    committerCreds := auth.NewCommitterCreds(standardTLSCreds)
-    
-    // 3. Create MSP interceptor
-    interceptor := auth.NewMSPUnaryServerInterceptor(&auth.MSPInterceptorConfig{
-        AuthMethod:     "/auth.AuthService/Authorize",
-        Bundle:         channelBundle,      // Your channel config bundle
-        AuthHandler:    authHandler,        // Your auth handler
-        ResourceMapper: resourceMapper,     // Your resource mapper
-    })
-    
-    // 4. Create gRPC server with credentials and interceptor
-    opts := []grpc.ServerOption{
-        grpc.Creds(committerCreds),
-        grpc.UnaryInterceptor(interceptor),
-    }
-    
-    return grpc.NewServer(opts...), nil
+func (s *Service) RegisterService(srv serve.Servers) {
+    // ... register the business services and health ...
+    // requiresACL=true → the query/sidecar enforce ACL.
+    serve.RegisterACLUpdater(srv.GrpcACLProvider, &s.aclUpdater, true)
+    committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcACLProvider))
 }
 ```
 
-**Critical Security Requirement**: The server MUST be started with `ServeTLS` (not `Serve`) to ensure the transport is encrypted:
+Services that only need dynamic TLS CA refresh (the mock orderer) register with
+`requiresACL=false` and are never subject to ACL checks. Services that register no
+`ACLUpdater` at all (internal services) bypass ACL entirely.
+
+## Client setup
+
+A client authorizes a connection once, before any business RPC:
 
 ```go
-// CORRECT - Enforces encrypted transport
-listener, _ := net.Listen("tcp", address)
-server.ServeTLS(listener, "", "") // Certs already in TLS config
+conn := test.NewSecuredConnection(t, endpoint, clientTLS)
 
-// WRONG - Does not enforce encryption, vulnerable to hijacking
-server.Serve(listener)
+tlsCertHash, err := auth.ClientTLSCertHash(clientTLS) // nil when not mTLS
+// ...
+err = auth.AuthorizeConnection(ctx, conn, auth.AuthorizeParameters{
+    Signer:      signingIdentity, // an msp.SigningIdentity
+    ChannelID:   channelID,
+    TLSCertHash: tlsCertHash,
+})
+// ... now use committerpb.NewQueryServiceClient(conn) / NewNotifierClient(conn) / peer.NewDeliverClient(conn)
 ```
 
-### Step 2: Implement AuthHandler
+For block delivery through the shared `utils/delivercommitter` helper, pass the signer and
+channel on `delivercommitter.Parameters`; it authorizes the connection on each (re)connection
+before opening the deliver stream. A nil `Signer` skips authorization, which is correct for
+servers that do not enforce ACL.
 
-The `AuthHandler` validates authentication requests and extracts the MSP identity:
+## Streaming and config changes
 
-```go
-type MyAuthHandler struct {
-    mspManager msp.MSPManager
-}
+For streaming RPCs (block delivery, notifications), the identity is evaluated when the stream
+is established and re-evaluated whenever the channel configuration sequence advances during the
+stream's lifetime. If a re-check fails — for example, the client's organization was removed
+from the channel — the stream is terminated. On an unchanged sequence the per-message check is
+a cheap atomic comparison with no cryptographic work.
 
-func (h *MyAuthHandler) Authenticate(
-    ctx context.Context,
-    req interface{},
-    sequence uint64,
-) (msp.Identity, error) {
-    // Cast request to your auth request type
-    authReq, ok := req.(*pb.AuthorizeRequest)
-    if !ok {
-        return nil, errors.New("invalid request type")
-    }
-    
-    // Extract and validate the signed envelope
-    envelope := authReq.SignedEnvelope
-    
-    // Unmarshal payload
-    payload := &common.Payload{}
-    if err := proto.Unmarshal(envelope.Payload, payload); err != nil {
-        return nil, errors.Wrap(err, "failed to unmarshal payload")
-    }
-    
-    // Extract signature header
-    signatureHeader := &common.SignatureHeader{}
-    if err := proto.Unmarshal(payload.Header.SignatureHeader, signatureHeader); err != nil {
-        return nil, errors.Wrap(err, "failed to unmarshal signature header")
-    }
-    
-    // Deserialize MSP identity from creator
-    identity, err := h.mspManager.DeserializeIdentity(signatureHeader.Creator)
-    if err != nil {
-        return nil, errors.Wrap(err, "failed to deserialize identity")
-    }
-    
-    // Verify the signature
-    if err := identity.Verify(envelope.Payload, envelope.Signature); err != nil {
-        return nil, errors.Wrap(err, "signature verification failed")
-    }
-    
-    // Validate identity
-    if err := identity.Validate(); err != nil {
-        return nil, errors.Wrap(err, "identity validation failed")
-    }
-    
-    return identity, nil
-}
-```
+## Thread-safety and performance
 
-### Step 3: Implement ResourceMapper
-
-The `ResourceMapper` maps gRPC methods to policy resource paths:
-
-```go
-type MyResourceMapper struct{}
-
-func (m *MyResourceMapper) MethodToResource(method string) string {
-    // Map gRPC methods to channel policy resources
-    switch method {
-    case "/committerpb.QueryService/GetTransactionStatus":
-        return "/Channel/Application/Readers"
-    case "/committerpb.QueryService/QueryState":
-        return "/Channel/Application/Readers"
-    case "/committerpb.BlockQueryService/GetBlockByNumber":
-        return "/Channel/Application/Readers"
-    default:
-        return "/Channel/Application/Readers" // Default policy
-    }
-}
-```
-
-### Step 4: Define Proto Service
-
-Add the authentication RPC to your proto service:
-
-```protobuf
-syntax = "proto3";
-
-import "common/common.proto";
-
-service AuthService {
-    rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
-}
-
-message AuthorizeRequest {
-    common.Envelope signed_envelope = 1;
-}
-
-message AuthorizeResponse {
-    bool success = 1;
-    string message = 2;
-    string session_token = 3;  // Optional: for client tracking
-}
-```
-
-### Step 5: Client Implementation
-
-Clients authenticate once per connection:
-
-```go
-import (
-    "google.golang.org/grpc"
-    "google.golang.org/grpc/credentials"
-)
-
-func connectAndAuthenticate(address string, tlsConfig *tls.Config) error {
-    // 1. Establish mTLS connection
-    creds := credentials.NewTLS(tlsConfig)
-    conn, err := grpc.Dial(address, grpc.WithTransportCredentials(creds))
-    if err != nil {
-        return err
-    }
-    defer conn.Close()
-    
-    // 2. Create signed envelope with MSP identity
-    envelope, err := createSignedEnvelope(mspIdentity, signer)
-    if err != nil {
-        return err
-    }
-    
-    // 3. Authenticate
-    authClient := pb.NewAuthServiceClient(conn)
-    resp, err := authClient.Authorize(context.Background(), &pb.AuthorizeRequest{
-        SignedEnvelope: envelope,
-    })
-    if err != nil {
-        return err
-    }
-    
-    if !resp.Success {
-        return errors.New("authentication failed")
-    }
-    
-    // 4. Use the same connection for subsequent RPCs
-    // The MSP identity is now bound to this connection
-    queryClient := committerpb.NewQueryServiceClient(conn)
-    status, err := queryClient.GetTransactionStatus(context.Background(), &committerpb.TxStatusQuery{
-        TxId: "tx123",
-    })
-    
-    return err
-}
-```
-
-## Security Considerations
-
-### Critical Requirements
-
-1. **Encrypted Transport**: The server MUST use `ServeTLS` to enforce encrypted connections
-2. **mTLS**: Client certificates should be validated during TLS handshake
-3. **Certificate Binding**: The MSP identity certificate should match the TLS client certificate
-4. **Signature Verification**: All envelopes must be cryptographically verified
-
-### Memory Safety
-
-- **No Global State**: Identity is stored in the connection object, not in global maps
-- **Automatic Cleanup**: When a connection closes, the Go runtime garbage collects the `CommitterAuthInfo`
-- **No Memory Leaks**: No manual cleanup or eviction logic required
-
-### Thread Safety
-
-- `CommitterAuthInfo` uses `sync.RWMutex` for thread-safe access
-- Multiple goroutines can safely read/write identity on the same connection
-- The interceptor is called serially per RPC, preventing race conditions
-
-## Testing
-
-### Unit Tests
-
-Test the core components in isolation:
-
-```go
-func TestCommitterAuthInfo(t *testing.T) {
-    authInfo := &auth.CommitterAuthInfo{}
-    
-    // Initially not authenticated
-    _, _, authenticated := authInfo.GetIdentity()
-    assert.False(t, authenticated)
-    
-    // Bind identity
-    authInfo.SetIdentity(mockIdentity, 42)
-    
-    // Verify retrieval
-    identity, seq, authenticated := authInfo.GetIdentity()
-    assert.True(t, authenticated)
-    assert.Equal(t, uint64(42), seq)
-}
-```
-
-### Integration Tests
-
-Test the full authentication flow:
-
-```go
-func TestMSPAuthentication(t *testing.T) {
-    // Setup server with MSP interceptor
-    server := setupTestServer(t)
-    defer server.Stop()
-    
-    // Create client with mTLS
-    conn := createMTLSClient(t, server.Address())
-    defer conn.Close()
-    
-    // Authenticate
-    authClient := pb.NewAuthServiceClient(conn)
-    envelope := createTestEnvelope(t, testIdentity)
-    resp, err := authClient.Authorize(context.Background(), &pb.AuthorizeRequest{
-        SignedEnvelope: envelope,
-    })
-    
-    require.NoError(t, err)
-    assert.True(t, resp.Success)
-    
-    // Call protected RPC
-    queryClient := committerpb.NewQueryServiceClient(conn)
-    status, err := queryClient.GetTransactionStatus(context.Background(), &committerpb.TxStatusQuery{
-        TxId: "tx123",
-    })
-    
-    require.NoError(t, err)
-    assert.NotNil(t, status)
-}
-```
-
-## Performance Characteristics
-
-- **Overhead**: Minimal - identity lookup is a simple map read from connection context
-- **Scalability**: Excellent - no global locks or shared state
-- **Memory**: O(connections) - one `CommitterAuthInfo` per active connection
-- **Latency**: Negligible - no network calls after initial authentication
-
-## Comparison with Alternatives
-
-### vs. Per-Message Envelopes
-
-**Advantages**:
-- Better developer experience (no envelope wrapping for every call)
-- Lower bandwidth (no repeated signatures)
-- Simpler client code
-
-**Trade-offs**:
-- Requires initial authentication RPC
-- Identity bound to connection lifetime
-
-### vs. Global Session Registry
-
-**Advantages**:
-- No memory leak risk
-- Automatic cleanup on disconnect
-- No eviction logic needed
-
-**Trade-offs**:
-- Requires connection-level state (but this is natural for gRPC)
-
-## References
-
-- [Fabric MSP Documentation](https://hyperledger-fabric.readthedocs.io/en/latest/msp.html)
-- [gRPC Authentication Guide](https://grpc.io/docs/guides/auth/)
-- [fabric-protos-go](https://github.com/hyperledger/fabric-protos-go-apiv2)
-
-## Appendix: Complete Example
-
-See `utils/auth/example_test.go` for a complete working example.
+- `MSPAuthInfo` uses a `sync.RWMutex` for identity access; the TLS cert fields are set once at
+  handshake and read without locking.
+- Memory is O(active connections): one `MSPAuthInfo` per connection, freed on disconnect.
+- Unary RPCs evaluate the policy on every call (short-lived, no caching needed). Streams cache
+  the last-evaluated bundle and only re-evaluate on a sequence change.

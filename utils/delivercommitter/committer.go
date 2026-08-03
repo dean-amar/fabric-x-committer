@@ -12,7 +12,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
+	"github.com/hyperledger/fabric-x-common/msp"
+	"google.golang.org/grpc"
 
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/deliver"
 )
@@ -22,6 +25,13 @@ type Parameters struct {
 	ClientConfig *connection.ClientConfig
 	NextBlockNum uint64
 	OutputBlock  chan<- *common.Block
+
+	// Signer and ChannelID enable ACL authorization against the sidecar's block-deliver API.
+	// When Signer is nil, no Authorize call is made (for internal deployments or servers that
+	// do not enforce ACL). The client's TLS cert hash for the binding is derived from
+	// ClientConfig.TLS.
+	Signer    msp.SigningIdentity
+	ChannelID string
 }
 
 // ToQueue connects to a committer delivery server and delivers the stream to a queue (go channel).
@@ -33,18 +43,52 @@ func ToQueue(ctx context.Context, cdp Parameters) error {
 		return err
 	}
 	defer connection.CloseConnectionsLog(conn)
+
+	authParams, err := authParametersFor(cdp)
+	if err != nil {
+		return err
+	}
+
 	return deliver.ToQueue(ctx, deliver.Parameters{
-		Deliverer:    &ledgerDeliverer{client: peer.NewDeliverClient(conn)},
+		Deliverer: &ledgerDeliverer{
+			conn:       conn,
+			client:     peer.NewDeliverClient(conn),
+			authParams: authParams,
+		},
 		NextBlockNum: cdp.NextBlockNum,
 		OutputBlock:  cdp.OutputBlock,
 	})
 }
 
+// authParametersFor builds the per-connection authorization parameters, deriving the client
+// TLS cert hash from the delivery client's TLS configuration.
+func authParametersFor(cdp Parameters) (auth.AuthorizeParameters, error) {
+	if cdp.Signer == nil {
+		return auth.AuthorizeParameters{}, nil
+	}
+	tlsCertHash, err := auth.ClientTLSCertHash(cdp.ClientConfig.TLS)
+	if err != nil {
+		return auth.AuthorizeParameters{}, err
+	}
+	return auth.AuthorizeParameters{
+		Signer:      cdp.Signer,
+		ChannelID:   cdp.ChannelID,
+		TLSCertHash: tlsCertHash,
+	}, nil
+}
+
 type ledgerDeliverer struct {
-	client peer.DeliverClient
+	conn       grpc.ClientConnInterface
+	client     peer.DeliverClient
+	authParams auth.AuthorizeParameters
 }
 
 func (d *ledgerDeliverer) Deliver(ctx context.Context) (deliver.Streamer, error) {
+	// Authorize before opening the stream so the connection carries a bound MSP identity.
+	// This runs on every (re)connection attempt; it is a no-op when no signer is configured.
+	if err := auth.AuthorizeConnection(ctx, d.conn, d.authParams); err != nil {
+		return nil, errors.Wrap(err, "failed to authorize delivery connection")
+	}
 	deliverStream, deliverErr := d.client.Deliver(ctx)
 	if deliverErr != nil {
 		return nil, deliverErr
