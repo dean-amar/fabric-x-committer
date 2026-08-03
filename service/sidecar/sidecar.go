@@ -158,8 +158,7 @@ func (s *Service) Run(ctx context.Context) error {
 	})
 
 	g.Go(func() error {
-		// TODO: initialize retry from config.
-		return retry.Sustain(gCtx, nil, func() error {
+		return retry.Sustain(gCtx, s.config.Committer.Retry, func() error {
 			defer func() {
 				s.recoverCommittedBlocks(gCtx)
 			}()
@@ -179,6 +178,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterACLUpdater(srv.GrpcACLProvider, &s.aclUpdater, true) // Sidecar requires ACL enforcement
 	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcACLProvider))
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
+	serve.RegisterConnStatHandler(srv.ConnStatsHandler, s.metrics.serverConnections)
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(

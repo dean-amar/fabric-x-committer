@@ -30,6 +30,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
 var logger = flogging.MustGetLogger("query")
@@ -85,7 +86,7 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
-	pool, poolErr := vc.NewDatabasePool(ctx, q.config.Database)
+	pool, poolErr := statedb.NewPool(ctx, q.config.Database)
 	if poolErr != nil {
 		return poolErr
 	}
@@ -127,6 +128,7 @@ func (q *Service) RegisterService(s serve.Servers) {
 	serve.RegisterACLUpdater(s.GrpcACLProvider, &q.aclUpdater, true) // Query service requires ACL enforcement
 	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService(s.GrpcACLProvider))
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
+	serve.RegisterConnStatHandler(s.ConnStatsHandler, q.metrics.serverConnections)
 }
 
 // BeginView implements the query-service interface.
