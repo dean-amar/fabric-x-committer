@@ -376,6 +376,73 @@ func TestMakeViewLimitReached(t *testing.T) {
 	require.ErrorIs(t, err, ErrTooManyActiveViews)
 }
 
+// TestGetBatcherOnRetiredView covers the race in which a view is retired, either ended or
+// timed out, after a query fetched its holder from the map, but before the query assigned it
+// a batcher. Such an assignment has no matching release, so the batcher and its open DB
+// transaction would have remained alive for the service's lifetime.
+func TestGetBatcherOnRetiredView(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		viewTimeout time.Duration
+		endView     bool
+	}{
+		{name: "ended view", viewTimeout: time.Minute, endView: true},
+		{name: "timed out view", viewTimeout: 500 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			viewID := "view-id"
+			vb := newViewsBatcherForTest(t)
+			require.NoError(t, vb.makeView(viewID, defaultViewParams(tc.viewTimeout)))
+
+			// A query resolves the view's holder just before the view is retired.
+			v, ok := vb.viewIDToViewHolder.Load(viewID)
+			require.True(t, ok)
+
+			if tc.endView {
+				require.NoError(t, vb.removeViewID(viewID))
+			}
+			requireRetiredView(t, v)
+
+			// The retirement also unlists the view, so we relist its holder to emulate a query
+			// that resolved the holder before the retirement, and resumes only now.
+			vb.viewIDToViewHolder.Store(viewID, v)
+			b, err := vb.getBatcher(t.Context(), &committerpb.View{Id: viewID})
+			require.ErrorIs(t, err, ErrInvalidOrStaleView)
+			require.Nil(t, b)
+			require.Equal(t, 0, vb.viewParametersToLatestBatcher.Count())
+			test.RequireIntMetricValue(t, 0, vb.metrics.processingSessions.WithLabelValues(sessionViews))
+		})
+	}
+}
+
+// TestBatcherReleasedOnViewRetirement covers the opposite ordering of the same race: a batcher
+// assigned just before its view is retired must be released by the retirement.
+func TestBatcherReleasedOnViewRetirement(t *testing.T) {
+	t.Parallel()
+	viewID := "view-id"
+	vb := newViewsBatcherForTest(t)
+	require.NoError(t, vb.makeView(viewID, defaultViewParams(time.Minute)))
+
+	v, ok := vb.viewIDToViewHolder.Load(viewID)
+	require.True(t, ok)
+	b, err := vb.getBatcher(t.Context(), &committerpb.View{Id: viewID})
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	require.False(t, b.isStale())
+
+	require.NoError(t, vb.removeViewID(viewID))
+	requireRetiredView(t, v)
+
+	// The view held the batcher's only reference, so releasing it cancels the batcher,
+	// which in turn rolls back its transaction and unlists it.
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		require.True(ct, b.isStale())
+		require.Equal(ct, 0, vb.viewParametersToLatestBatcher.Count())
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
 func TestQueryMetrics(t *testing.T) {
 	t.Parallel()
 	env := newQueryServiceTestEnv(t, nil)
@@ -476,9 +543,25 @@ func TestQueryWithConsistentView(t *testing.T) {
 	// So we expect the old version of item 2.
 	requireResults(t, []*items{&testItem2}, ret3.Namespaces)
 
+	// All three views share one batcher, and so one transaction. Asserting that here keeps
+	// the wait below meaningful: it must observe a 1 -> 0 transition rather than a value the
+	// gauge already held.
+	txSessions := env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions)
+	test.RequireIntMetricValue(t, 1, txSessions)
+
 	env.endView(t, client, view0)
 	env.endView(t, client, view1)
 	env.endView(t, client, view2)
+
+	// EndView only cancels the view's context; its batcher reference is dropped by a
+	// context.AfterFunc goroutine, so the RPC can return before the drop happens. The
+	// shared transaction is rolled back only once the batcher loses its last reference
+	// and is cancelled, so a zero transaction count is what tells us the batcher is
+	// retired and that view3 below is guaranteed to open a new transaction.
+	test.EventuallyIntMetric(
+		t, 0, txSessions, 5*time.Second, 10*time.Millisecond,
+		"the views' shared transaction should be released once all views ended",
+	)
 
 	view3 := env.beginView(t, client, defaultViewParams(time.Minute))
 	key2Query.View = view3
@@ -796,6 +879,32 @@ func defaultViewParams(timeout time.Duration) *committerpb.ViewParameters {
 		NonDeferrable:       false,
 		TimeoutMilliseconds: uint64(timeout.Milliseconds()), //nolint:gosec
 	}
+}
+
+// newViewsBatcherForTest creates a views batcher with no DB pool.
+// It is sufficient for view and batcher lifecycle tests, as the transaction
+// is created lazily, only when a query is executed.
+func newViewsBatcherForTest(t *testing.T) *viewsBatcher {
+	t.Helper()
+	return &viewsBatcher{
+		ctx: t.Context(),
+		config: &Config{
+			MaxAggregatedViews:    5,
+			ViewAggregationWindow: time.Minute,
+		},
+		metrics: newQueryServiceMetrics(),
+	}
+}
+
+// requireRetiredView waits for the view's retirement, which makeView performs
+// asynchronously once the view's context ends.
+func requireRetiredView(t *testing.T, v *viewHolder) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		v.m.Lock()
+		defer v.m.Unlock()
+		return v.retired
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 //nolint:ireturn // returning a gRPC client interface is intentional for test purpose.
