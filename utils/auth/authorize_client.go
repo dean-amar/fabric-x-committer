@@ -27,7 +27,7 @@ import (
 // still bootstrapping its ACL bundle (codes.Unavailable). ACL-enforced services build their
 // bundle asynchronously from the first configuration block, so a client that connects during
 // that window must wait a bounded time rather than fail outright.
-var DefaultAuthorizeRetryProfile = retry.Profile{MaxElapsedTime: 30 * time.Second}
+var DefaultAuthorizeRetryProfile = retry.Profile{MaxElapsedTime: new(30 * time.Second)}
 
 // AuthorizeParameters describes how to authorize a gRPC connection to an ACL-enforced
 // service (query or sidecar) before issuing any business RPC on it.
@@ -65,7 +65,7 @@ func AuthorizeConnection(ctx context.Context, conn grpc.ClientConnInterface, par
 
 	// The server returns codes.Unavailable while it is still bootstrapping its bundle. We retry
 	// only that case within a bounded window; success and genuine denials return immediately.
-	retryCtx, cancel := context.WithTimeout(ctx, DefaultAuthorizeRetryProfile.MaxElapsedTime)
+	retryCtx, cancel := context.WithTimeout(ctx, *DefaultAuthorizeRetryProfile.MaxElapsedTime)
 	defer cancel()
 	backoff := DefaultAuthorizeRetryProfile.NewBackoff()
 

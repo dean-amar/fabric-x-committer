@@ -75,7 +75,7 @@ func TestQuerySecureConnection(t *testing.T) {
 				t.Helper()
 				// Create a new connection with the test TLS config
 				conn := test.NewSecuredConnectionWithRetry(t, &env.serverConfig.GRPC.Endpoint, cfg, retry.Profile{
-					MaxElapsedTime: 3 * time.Second,
+					MaxElapsedTime: new(3 * time.Second),
 				})
 
 				// Try to authorize the connection - if this fails (e.g., TLS mismatch), return
@@ -662,7 +662,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 
 	conn := test.NewSecuredConnectionWithRetry(t, &serverConfig.GRPC.Endpoint, opts.clientTLS, retry.Profile{
 		// prevents secure connection tests from hanging until the context times out.
-		MaxElapsedTime: 3 * time.Second,
+		MaxElapsedTime: new(3 * time.Second),
 	})
 
 	// Authorize the connection using the same crypto path as the database. The query service
