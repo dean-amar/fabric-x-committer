@@ -17,9 +17,11 @@ import (
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 	"github.com/hyperledger/fabric-x-committer/utils/testsig"
@@ -82,7 +84,7 @@ func BenchmarkGenTx(b *testing.B) {
 	flogging.ActivateSpec("fatal")
 	//nolint:thelper // false positive.
 	genericBench(b, func(b *testing.B, p *Profile) {
-		t, err := NewTxStream(p, defaultBenchStreamOptions())
+		t, err := NewTxStream(p, defaultBenchStreamOptions(), NewTxCounter(p.Transaction))
 		require.NoError(b, err)
 
 		ctx := b.Context()
@@ -188,14 +190,22 @@ func testTxProfiles(t *testing.T) (profiles []*Profile) {
 	return append(profiles, sigProfile, sigWithCertProfile)
 }
 
-func startTxGeneratorUnderTest(
-	t *testing.T, profile *Profile, options *StreamOptions, modifierGenerators ...Generator[Modifier],
-) *TxStream {
+func startTxGeneratorUnderTest(t *testing.T, profile *Profile, options *StreamOptions) *TxStream {
 	t.Helper()
-	g, err := NewTxStream(profile, options, modifierGenerators...)
+	g, err := NewTxStream(profile, options, NewTxCounter(profile.Transaction))
 	require.NoError(t, err)
 	test.RunServiceForTest(t.Context(), t, g.Run, nil)
 	return g
+}
+
+// firstGen builds a single generator with a fresh counter, failing the test on error — the common
+// single-generator case for tests and benchmarks.
+func firstGen(tb testing.TB, p *Profile) *IndependentTxGenerator {
+	tb.Helper()
+	gens, err := newIndependentTxGenerators(p, NewTxCounter(p.Transaction))
+	require.NoError(tb, err)
+	require.NotEmpty(tb, gens)
+	return gens[0]
 }
 
 func TestGenValidTx(t *testing.T) {
@@ -212,6 +222,80 @@ func TestGenValidTx(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTxStreamKeyStats(t *testing.T) {
+	t.Parallel()
+	p := DefaultProfile(1)
+	p.Transaction.ReadOnlyCount = 1
+	p.Transaction.ReadWriteCount = 2
+	p.Transaction.BlindWriteCount = 1
+	p.Transaction.KeyBackrefRate = 2.5 // 2.5 backrefs / tx of 4 slots => 1.5 fresh keys / tx
+	p.Transaction.TxReferenceGap = 5
+	p.Transaction.KeyLookbackWindow = 100
+
+	counter := NewTxCounter(p.Transaction)
+	s, err := NewTxStream(p, defaultStreamOptions(), counter)
+	require.NoError(t, err)
+	require.Equal(t, KeyStats{}, counter.KeyStats(), "nothing generated yet")
+
+	const n = 100
+	s.gens[0].buildBatch(n) // advances the shared counter by n
+
+	w := uint64(p.Transaction.ReadWriteCount + p.Transaction.BlindWriteCount)
+	ro := uint64(p.Transaction.ReadOnlyCount)
+	require.Equal(t, KeyStats{
+		KeyFrontier:         150,       // floor(100*1.5)
+		ReferencedReadKeys:  n * ro,    // every read-only slot reuses a key
+		ReferencedWriteKeys: n*w - 150, // the write slots that didn't create reuse a key
+	}, counter.KeyStats())
+}
+
+// TestTxStreamKeyStatsAboveWriteCap covers a new-key rate above the write-slot count: the surplus new
+// keys fall on read-only slots, and the reference counts must not underflow.
+func TestTxStreamKeyStatsAboveWriteCap(t *testing.T) {
+	t.Parallel()
+	p := DefaultProfile(1)
+	p.Transaction.ReadOnlyCount = 2
+	p.Transaction.ReadWriteCount = 1
+	p.Transaction.BlindWriteCount = 1
+	p.Transaction.KeyBackrefRate = 1 // 1 backref / tx of 4 slots => 3 fresh keys / tx > 2 write slots
+	p.Transaction.TxReferenceGap = 0
+	p.Transaction.KeyLookbackWindow = 8
+	require.NoError(t, p.Transaction.Validate())
+
+	counter := NewTxCounter(p.Transaction)
+	s, err := NewTxStream(p, defaultStreamOptions(), counter)
+	require.NoError(t, err)
+	const n = 100
+	s.gens[0].buildBatch(n)
+	// 300 new keys but only N*W=200 write slots to create them; the surplus 100 fall on read-only slots,
+	// leaving 200-100=100 read-only slots reusing keys and none on the write slots.
+	require.Equal(t, KeyStats{
+		KeyFrontier:         300,
+		ReferencedReadKeys:  100,
+		ReferencedWriteKeys: 0,
+	}, counter.KeyStats())
+}
+
+// TestTxStreamKeyStatsHistorical covers the default backref rate of zero: every slot introduces a fresh
+// key, so there are no references and every slot counts as created (N*slotsPerTx).
+func TestTxStreamKeyStatsHistorical(t *testing.T) {
+	t.Parallel()
+	p := DefaultProfile(1)
+	p.Transaction.ReadOnlyCount = 1
+	p.Transaction.ReadWriteCount = 2
+	p.Transaction.BlindWriteCount = 1
+	// KeyBackrefRate defaults to 0 => every slot is a fresh key, no references.
+
+	counter := NewTxCounter(p.Transaction)
+	s, err := NewTxStream(p, defaultStreamOptions(), counter)
+	require.NoError(t, err)
+	const n = 100
+	s.gens[0].buildBatch(n)
+	w := uint64(p.Transaction.ReadWriteCount + p.Transaction.BlindWriteCount)
+	slotsPerTx := w + uint64(p.Transaction.ReadOnlyCount)
+	require.Equal(t, KeyStats{KeyFrontier: n * slotsPerTx}, counter.KeyStats())
 }
 
 func TestGenValidBlock(t *testing.T) {
@@ -265,61 +349,135 @@ func TestGenInvalidSigTx(t *testing.T) {
 	requireBernoulliDist(t, valid, 0.2, 1e-2)
 }
 
-func TestGenDependentTx(t *testing.T) {
+// TestGenerationContentIsBatchSizeInvariant proves generation content is a pure function of the global
+// tx index, independent of batch granularity: for a fixed seed, n single-tx batches yield the same
+// deterministic content, per index, as one batch of n — the TX ID and the inner Tx's Namespaces and
+// Metadata. Endorsements and the envelope are excluded: they embed a non-deterministic ECDSA signature
+// and envelope timestamp, so two independently-signed txs with identical content still differ there.
+func TestGenerationContentIsBatchSizeInvariant(t *testing.T) {
+	t.Parallel()
+	p := DefaultProfile(1)
+	p.Transaction.ReadOnlyCount = 1
+	p.Transaction.ReadWriteCount = 2
+	p.Transaction.BlindWriteCount = 1
+	p.Transaction.MetadataSize = 16
+
+	const n = 25
+	singleGen := firstGen(t, p)
+	wantTxs := make([]*servicepb.LoadGenTx, n)
+	for i := range wantTxs {
+		wantTxs[i] = singleGen.buildAndSignBatch(1)[0]
+	}
+
+	batchGen := firstGen(t, p)
+	gotTxs := batchGen.buildAndSignBatch(n)
+	require.Len(t, gotTxs, n)
+
+	for i := range n {
+		require.Equal(t, wantTxs[i].Id, gotTxs[i].Id, "tx %d: ID mismatch", i)
+		test.RequireProtoEqual(t, deterministicTx(wantTxs[i].Tx), deterministicTx(gotTxs[i].Tx))
+	}
+}
+
+// TestQueryStageRunsBeforeSign proves the query stage runs BEFORE signing: a fake querier stamps a
+// fixed version on every read of a built (unsigned) batch, and that version must then appear in the
+// SIGNED payload — decoded from the envelope, not read off the in-memory Tx pointer, which would show
+// the mutation even if it had (incorrectly) happened after signing marshaled the payload.
+func TestQueryStageRunsBeforeSign(t *testing.T) {
+	t.Parallel()
+	const fixedVersion = uint64(42)
+
+	p := DefaultProfile(1)
+	p.Transaction.ReadOnlyCount = 1
+	p.Transaction.ReadWriteCount = 1
+
+	g := firstGen(t, p)
+	const n = 5
+	built, base := g.buildBatch(n)
+	require.NoError(t, (&fakeVersionQuerier{version: fixedVersion}).FillVersions(t.Context(), built))
+	txs := g.signBatch(built, base)
+	require.Len(t, txs, n)
+
+	for _, tx := range txs {
+		signedTx := decodeSignedTx(t, tx)
+		for _, ns := range signedTx.Namespaces {
+			for _, r := range ns.ReadsOnly {
+				require.Equal(t, fixedVersion, r.GetVersion())
+			}
+			for _, rw := range ns.ReadWrites {
+				require.Equal(t, fixedVersion, rw.GetVersion())
+			}
+		}
+	}
+}
+
+// TestGenerationProducesValidSignedTxs covers build + sign with no query stage (the path Run's worker
+// loop takes when no querier is wired): the batch is well-formed and validly signed.
+func TestGenerationProducesValidSignedTxs(t *testing.T) {
+	t.Parallel()
+	p := DefaultProfile(1)
+	p.Transaction.ReadOnlyCount = 1
+	p.Transaction.ReadWriteCount = 2
+	p.Transaction.BlindWriteCount = 1
+	p.Policy.NamespacePolicies[DefaultGeneratedNamespaceID].Scheme = signature.Ecdsa
+	endorser := NewTxEndorser(&p.Policy)
+
+	g := firstGen(t, p)
+	const n = 10
+	txs := g.buildAndSignBatch(n)
+	require.Len(t, txs, n)
+	for _, tx := range txs {
+		requireValidTx(t, tx, p, endorser)
+	}
+}
+
+// txKeysByRole extracts the keys of a generated TX's single namespace, split by slot role, for tests
+// that assert on key reuse across a stream.
+func txKeysByRole(tx *servicepb.LoadGenTx) (readOnly, readWrite, blindWrite [][]byte) {
+	ns := tx.Tx.Namespaces[0]
+	for _, r := range ns.ReadsOnly {
+		readOnly = append(readOnly, r.Key)
+	}
+	for _, rw := range ns.ReadWrites {
+		readWrite = append(readWrite, rw.Key)
+	}
+	for _, w := range ns.BlindWrites {
+		blindWrite = append(blindWrite, w.Key)
+	}
+	return readOnly, readWrite, blindWrite
+}
+
+func TestGenSplitContention(t *testing.T) {
 	t.Parallel()
 	p := DefaultProfile(1)
 	p.Policy.NamespacePolicies[DefaultGeneratedNamespaceID].Scheme = signature.NoScheme
-	p.Transaction.Dependencies = []DependencyDescription{
-		{
-			Gap:         1,
-			Src:         "write",
-			Dst:         "write",
-			Probability: 0.1,
-		},
-		{
-			Gap:         1,
-			Src:         "read",
-			Dst:         "write",
-			Probability: 0.1,
-		},
-		{
-			Gap:         1,
-			Src:         "write",
-			Dst:         "read-write",
-			Probability: 0.1,
-		},
-		{
-			Gap:         1,
-			Src:         "read-write",
-			Dst:         "read-write",
-			Probability: 0.1,
-		},
-	}
+	// One backward reference per transaction: with 2 slots, key-backref-rate 1 leaves one create and one
+	// reference one tx behind, drawn from a 2-key window so warmup adds at most a couple of extra
+	// (negative) keys.
+	p.Transaction.ReadWriteCount = 2
+	p.Transaction.KeyBackrefRate = 1
+	p.Transaction.TxReferenceGap = 1
+	p.Transaction.KeyLookbackWindow = 2
 
 	c := startTxGeneratorUnderTest(t, p, defaultStreamOptions())
 	g := c.MakeGenerator()
 
-	txs := g.Consume(t.Context(), ConsumeParameters{RequestedItems: 1e6})
-	m := make(map[string]uint64)
+	const n = 1000
+	txs := g.Consume(t.Context(), ConsumeParameters{RequestedItems: n})
+	require.Len(t, txs, n)
+
+	distinct := make(map[string]struct{})
 	for _, tx := range txs {
-		for _, ns := range tx.Tx.Namespaces {
-			for _, r := range ns.ReadsOnly {
-				m[string(r.Key)]++
-			}
-			for _, rw := range ns.ReadWrites {
-				m[string(rw.Key)]++
-			}
-			for _, w := range ns.BlindWrites {
-				m[string(w.Key)]++
-			}
+		_, rw, _ := txKeysByRole(tx)
+		require.Len(t, rw, 2)
+		for _, k := range rw {
+			distinct[string(k)] = struct{}{}
 		}
 	}
-
-	var sum uint64
-	for _, v := range m {
-		sum += v - 1
-	}
-	require.InDelta(t, 0.4, float64(sum)/float64(len(txs)), 1e-3)
+	// n transactions create ~n keys total (one new per tx), not 2n: the second slot reuses an
+	// existing key. Allow a small warmup slack.
+	require.Less(t, len(distinct), n+10)
+	require.Greater(t, len(distinct), n-10)
 }
 
 func TestBlindWriteWithValue(t *testing.T) {
@@ -392,35 +550,6 @@ func TestGenTxWithRateLimit(t *testing.T) {
 	require.InDelta(t, float64(expectedSeconds), duration.Seconds(), 0.2*float64(expectedSeconds))
 }
 
-// modGenTester simulates querying the version from the query service.
-type modGenTester struct {
-	nsVersion uint64
-}
-
-func (m *modGenTester) Next() Modifier {
-	return m
-}
-
-func (m *modGenTester) Modify(tx *applicationpb.Tx) {
-	for _, ns := range tx.Namespaces {
-		ns.NsVersion = m.nsVersion
-	}
-}
-
-func TestGenTxWithModifier(t *testing.T) {
-	t.Parallel()
-	p := DefaultProfile(8)
-
-	mod0 := &modGenTester{0}
-	mod1 := &modGenTester{1}
-	c := startTxGeneratorUnderTest(t, p, defaultStreamOptions(), mod0, mod1)
-	g := c.MakeGenerator()
-	tx := g.Next(t.Context())
-	for _, ns := range tx.Tx.Namespaces {
-		require.Equal(t, mod1.nsVersion, ns.NsVersion)
-	}
-}
-
 func TestAsnMarshal(t *testing.T) {
 	t.Parallel()
 	loadGenTxs := GenerateTransactions(t, nil, 128)
@@ -467,4 +596,50 @@ func requireBernoulliDist(t *testing.T, sample []float64, probability Probabilit
 		ones += v
 	}
 	require.InDelta(t, probability, ones/float64(len(sample)), delta)
+}
+
+// deterministicTx strips a generated Tx down to the parts that are a pure function of the
+// transaction index — Namespaces and Metadata — dropping Endorsements, which carries a
+// non-deterministic ECDSA signature (or an envelope timestamp, for the envelope as a whole).
+func deterministicTx(tx *applicationpb.Tx) *applicationpb.Tx {
+	return &applicationpb.Tx{
+		Namespaces: tx.Namespaces,
+		Metadata:   tx.Metadata,
+	}
+}
+
+// decodeSignedTx decodes the applicationpb.Tx actually embedded in the TX's signed envelope
+// payload, as opposed to reading the in-memory tx.Tx pointer, which would reflect a mutation
+// applied at any point, even after signing.
+func decodeSignedTx(t *testing.T, tx *servicepb.LoadGenTx) *applicationpb.Tx {
+	t.Helper()
+	payload, err := protoutil.UnmarshalPayload(tx.EnvelopePayload)
+	require.NoError(t, err)
+	inner, err := serialization.UnmarshalTx(payload.Data)
+	require.NoError(t, err)
+	return inner
+}
+
+// fakeVersionQuerier is a batchQuerier test double that stamps a fixed version on every read
+// (ReadsOnly and ReadWrites) across the batch, letting tests prove the query stage runs before
+// signing.
+type fakeVersionQuerier struct {
+	version uint64
+}
+
+// FillVersions implements batchQuerier.
+func (q *fakeVersionQuerier) FillVersions(_ context.Context, batch []*applicationpb.Tx) error {
+	for _, tx := range batch {
+		for _, ns := range tx.Namespaces {
+			for _, r := range ns.ReadsOnly {
+				version := q.version
+				r.Version = &version
+			}
+			for _, rw := range ns.ReadWrites {
+				version := q.version
+				rw.Version = &version
+			}
+		}
+	}
+	return nil
 }

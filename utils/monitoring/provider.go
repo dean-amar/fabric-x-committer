@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	httpsScheme    = "https://"
-	httpScheme     = "http://"
-	metricsSubPath = "/metrics"
-	pprofSubPath   = "/debug/pprof/"
+	httpsScheme  = "https://"
+	httpScheme   = "http://"
+	pprofSubPath = "/debug/pprof/"
+
+	// MetricsSubPath is the path for prometheus metrics endpoint.
+	MetricsSubPath = "/metrics"
 )
 
 // Provider is a prometheus metrics provider.
@@ -60,7 +62,7 @@ func RegisterMonitoringServer(mux *http.ServeMux, p *Provider) {
 	mux.HandleFunc(pprofSubPath+"trace", pprof.Trace)
 
 	// Register metrics handlers.
-	mux.Handle(metricsSubPath, promhttp.HandlerFor(
+	mux.Handle(MetricsSubPath, promhttp.HandlerFor(
 		p.Registry(), promhttp.HandlerOpts{Registry: p.Registry()},
 	))
 }
@@ -77,6 +79,14 @@ func (p *Provider) NewCounterVec(opts prometheus.CounterOpts, labels []string) *
 	cv := prometheus.NewCounterVec(opts, labels)
 	p.registry.MustRegister(cv)
 	return cv
+}
+
+// NewCounterFunc registers a counter whose value is computed at scrape time by function. Use it for a
+// cumulative total derived from other state rather than incremented via Add.
+func (p *Provider) NewCounterFunc(opts prometheus.CounterOpts, function func() float64) prometheus.CounterFunc {
+	c := prometheus.NewCounterFunc(opts, function)
+	p.registry.MustRegister(c)
+	return c
 }
 
 // NewGauge creates a new prometheus gauge.
@@ -129,6 +139,6 @@ func MakeMetricsURL(address string, tlsConf *connection.TLSConfig) (string, erro
 	if tlsConf != nil && (tlsConf.Mode == connection.OneSideTLSMode || tlsConf.Mode == connection.MutualTLSMode) {
 		scheme = httpsScheme
 	}
-	ret, err := url.JoinPath(scheme, address, metricsSubPath)
+	ret, err := url.JoinPath(scheme, address, MetricsSubPath)
 	return ret, errors.Wrap(err, "failed to make prometheus URL")
 }
