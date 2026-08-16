@@ -48,6 +48,11 @@ const (
 	// MaxMsgSize is set to 100MB.
 	MaxMsgSize       = 100 * 1024 * 1024
 	scResolverSchema = "sc.connection"
+
+	// lbRoundRobin spreads RPCs across one socket per resolved address; lbPickFirst pins the
+	// channel to a single socket. See [ClientParameters.PickFirst] for when each applies.
+	lbRoundRobin = "round_robin"
+	lbPickFirst  = "pick_first"
 )
 
 type (
@@ -69,6 +74,13 @@ type (
 		Creds          credentials.TransportCredentials
 		Retry          *retry.Profile
 		AdditionalOpts []grpc.DialOption
+		// PickFirst selects the pick_first load-balancing policy instead of the default
+		// round_robin. It must be set for connections that carry per-connection server state
+		// (e.g. an ACL identity bound by an Authorize RPC): round_robin spreads RPCs across one
+		// socket per resolved address, so a hostname resolving to several addresses (dual-stack
+		// localhost, DNS, K8s) would authorize one socket and route the next RPC to another,
+		// unauthorized one. pick_first pins the channel to a single socket so the binding holds.
+		PickFirst bool
 	}
 )
 
@@ -168,22 +180,39 @@ func (d *DialInfo) NewConnectionPerEndpoint() ([]*grpc.ClientConn, error) {
 
 // NewSingleConnection creates a single connection given a client config.
 func NewSingleConnection(config *ClientConfig) (*grpc.ClientConn, error) {
+	return newSingleConnection(config, false)
+}
+
+// NewSingleConnectionPickFirst creates a single connection that pins the channel to one socket
+// via the pick_first policy. Use it for ACL-enforced clients that authorize the connection with
+// an Authorize RPC: the server binds the identity per socket, so all RPCs must ride the same
+// socket. See [ClientParameters.PickFirst] for the failure mode this avoids.
+func NewSingleConnectionPickFirst(config *ClientConfig) (*grpc.ClientConn, error) {
+	return newSingleConnection(config, true)
+}
+
+func newSingleConnection(config *ClientConfig, pickFirst bool) (*grpc.ClientConn, error) {
 	tlsCreds, err := config.TLS.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
 	return NewConnection(ClientParameters{
-		Address: config.Endpoint.Address(),
-		Creds:   tlsCreds,
-		Retry:   config.Retry,
+		Address:   config.Endpoint.Address(),
+		Creds:     tlsCreds,
+		Retry:     config.Retry,
+		PickFirst: pickFirst,
 	})
 }
 
 // NewConnection creates a connection with the given parameters.
 // It will not attempt to create a connection with the remote.
 func NewConnection(p ClientParameters) (*grpc.ClientConn, error) {
+	loadBalancingPolicy := lbRoundRobin
+	if p.PickFirst {
+		loadBalancingPolicy = lbPickFirst
+	}
 	dialOpts := append([]grpc.DialOption{
-		grpc.WithDefaultServiceConfig(MakeGrpcRetryPolicyJSON(p.Retry)),
+		grpc.WithDefaultServiceConfig(MakeGrpcRetryPolicyJSON(p.Retry, loadBalancingPolicy)),
 		grpc.WithTransportCredentials(p.Creds),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(MaxMsgSize),
@@ -313,7 +342,10 @@ func AddressString[T WithAddress](addresses ...T) string {
 //	(1) UNAVAILABLE	The service is currently unavailable (e.g., transient network issue, server down).
 //	(2) DEADLINE_EXCEEDED	Operation took too long (deadline passed).
 //	(3) RESOURCE_EXHAUSTED	Some resource (e.g., quota) has been exhausted; the operation cannot proceed.
-func MakeGrpcRetryPolicyJSON(p *retry.Profile) string {
+//
+// loadBalancingPolicy is the gRPC LB policy name to embed (e.g. "round_robin", "pick_first");
+// see [ClientParameters.PickFirst] for why per-connection-stateful clients require pick_first.
+func MakeGrpcRetryPolicyJSON(p *retry.Profile, loadBalancingPolicy string) string {
 	p = p.WithDefaults()
 
 	// We put limits on the values to ensure correct values.
@@ -331,7 +363,7 @@ func MakeGrpcRetryPolicyJSON(p *retry.Profile) string {
 	}
 	ret := map[string]any{
 		"loadBalancingConfig": []map[string]any{{
-			"round_robin": make(map[string]any),
+			loadBalancingPolicy: make(map[string]any),
 		}},
 		"methodConfig": []map[string]any{{
 			// Setting an empty name sets the default for all methods.

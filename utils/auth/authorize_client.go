@@ -57,6 +57,15 @@ type AuthorizeParameters struct {
 // retries such responses within DefaultAuthorizeRetryProfile. Genuine denials (bad identity,
 // cert mismatch, stale timestamp) are permanent and returned immediately.
 func AuthorizeConnection(ctx context.Context, conn grpc.ClientConnInterface, params AuthorizeParameters) error {
+	return authorizeConnection(ctx, conn, params, DefaultAuthorizeRetryProfile)
+}
+
+// authorizeConnection is the implementation behind AuthorizeConnection, parameterized by the retry
+// profile so tests can drive the bootstrap-retry behavior with a fast profile without mutating
+// package state.
+func authorizeConnection(
+	ctx context.Context, conn grpc.ClientConnInterface, params AuthorizeParameters, profile retry.Profile,
+) error {
 	if params.Signer == nil {
 		return nil
 	}
@@ -65,9 +74,9 @@ func AuthorizeConnection(ctx context.Context, conn grpc.ClientConnInterface, par
 
 	// The server returns codes.Unavailable while it is still bootstrapping its bundle. We retry
 	// only that case within a bounded window; success and genuine denials return immediately.
-	retryCtx, cancel := context.WithTimeout(ctx, *DefaultAuthorizeRetryProfile.MaxElapsedTime)
+	retryCtx, cancel := context.WithTimeout(ctx, *profile.MaxElapsedTime)
 	defer cancel()
-	backoff := DefaultAuthorizeRetryProfile.NewBackoff()
+	backoff := profile.NewBackoff()
 
 	for {
 		err := authorizeOnce(ctx, client, params)

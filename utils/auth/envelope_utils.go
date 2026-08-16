@@ -18,6 +18,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/msp"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // DefaultEnvelopeFreshnessWindow bounds how far an Authorize envelope's timestamp
@@ -124,7 +125,7 @@ func ValidateAuthEnvelope(
 	}
 
 	// 1. Freshness — guards replay independent of the TLS mode.
-	if err = validateTimestamp(channelHeader.GetTimestamp().AsTime(), freshnessWindow, now); err != nil {
+	if err = validateTimestamp(channelHeader.GetTimestamp(), freshnessWindow, now); err != nil {
 		return nil, "", err
 	}
 
@@ -141,17 +142,24 @@ func ValidateAuthEnvelope(
 	return ExtractIdentityFromEnvelope(envelope, bundle)
 }
 
-// validateTimestamp checks that ts is within +/- window of now. A zero timestamp is
-// rejected, since it carries no freshness information.
-func validateTimestamp(ts time.Time, window time.Duration, now time.Time) error {
-	if ts.IsZero() {
+// validateTimestamp checks that the envelope's timestamp is within +/- window of now. A missing
+// (nil) or out-of-range timestamp is rejected, since it carries no usable freshness information.
+//
+// The bounds are compared directly rather than via an absolute skew. now.Sub for a timestamp far
+// enough in the future saturates to math.MinInt64, and negating math.MinInt64 stays negative, so an
+// abs()-then-compare would let a pathological far-future timestamp slip past the window. Comparing
+// against the signed lower and upper bounds avoids that overflow entirely.
+func validateTimestamp(ts *timestamppb.Timestamp, window time.Duration, now time.Time) error {
+	if ts == nil {
 		return errors.New("envelope is missing a timestamp")
 	}
-	skew := now.Sub(ts)
-	if skew < 0 {
-		skew = -skew
+	// Reject timestamps outside the valid proto range (before year 1 or after year 9999) up front,
+	// so AsTime cannot yield a saturated/garbage instant.
+	if err := ts.CheckValid(); err != nil {
+		return errors.Wrap(err, "envelope timestamp is invalid")
 	}
-	if skew > window {
+	skew := now.Sub(ts.AsTime())
+	if skew < -window || skew > window {
 		return errors.Newf("envelope timestamp is outside the freshness window: skew=%s, window=%s",
 			skew, window)
 	}

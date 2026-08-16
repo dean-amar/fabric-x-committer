@@ -8,6 +8,7 @@ package auth
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -223,6 +224,12 @@ func bundleForEnforcement(provider BundleProvider) (bundle *channelconfig.Bundle
 	case e != nil:
 		return nil, false, status.Error(codes.Internal, "channel configuration error: "+e.Error())
 	}
+	// A bundle loaded successfully. Enforce ACL only for services that require it: a service
+	// registered with requiresACL=false (e.g. one that loads a bundle solely for dynamic TLS CA
+	// refresh) must not have enforcement silently switched on just because its bundle populated.
+	if !provider.RequiresACL() {
+		return nil, false, nil
+	}
 	return b, true, nil
 }
 
@@ -257,12 +264,19 @@ func authInfoFromContext(ctx context.Context) (*MSPAuthInfo, error) {
 
 // authServerStream wraps grpc.ServerStream to detect config-sequence changes and
 // re-evaluate the bound identity against the current policy on every message.
+//
+// A bidirectional stream (e.g. peer.Deliver, OpenNotificationStream) drives RecvMsg and SendMsg
+// from separate goroutines, so both may call checkConfigAndRevalidate concurrently. mu guards the
+// compare-and-update of currentBundle so that racing revalidations cannot corrupt the cached
+// bundle or each other's view of the last-evaluated sequence.
 type authServerStream struct {
 	grpc.ServerStream
-	authInfo      *MSPAuthInfo
-	provider      BundleProvider
-	fullMethod    string
-	currentBundle *channelconfig.Bundle // last bundle the identity was evaluated against
+	authInfo   *MSPAuthInfo
+	provider   BundleProvider
+	fullMethod string
+
+	mu            sync.Mutex
+	currentBundle *channelconfig.Bundle // last bundle the identity was evaluated against; guarded by mu
 }
 
 // RecvMsg re-checks the config before receiving.
@@ -293,6 +307,11 @@ func (s *authServerStream) checkConfigAndRevalidate() error {
 	if identity == nil {
 		return status.Error(codes.Unauthenticated, "identity no longer bound to connection")
 	}
+
+	// RecvMsg and SendMsg may run concurrently on a bidirectional stream; serialize the
+	// compare-and-update of the cached bundle so the two directions cannot race on it.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	cachedSeq := s.currentBundle.ConfigtxValidator().Sequence()
 	latestSeq := latestBundle.ConfigtxValidator().Sequence()

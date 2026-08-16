@@ -95,6 +95,43 @@ Under mTLS these two together make the scheme equivalent to certificate-bound to
 key, and after `Authorize` no credential travels on the wire at all. Without mTLS, timestamp
 freshness is the sole guard.
 
+The freshness check compares the envelope timestamp against a symmetric window using signed
+bounds and rejects any timestamp outside the valid protobuf range up front, so a pathological
+far-future timestamp cannot overflow the skew arithmetic and slip past the window.
+
+## Residual risks and operational guidance
+
+Two properties follow from the Option B "bind once per connection" design and the choice to
+support non-mTLS deployments. Both are intentional; operators should be aware of them.
+
+- **Replay protection without mTLS is time-bounded only.** When the server runs without mutual
+  TLS (`mode: none` or server-only TLS), the envelope carries no certificate to bind to, so an
+  `Authorize` envelope observed on the wire can be replayed from another connection until it goes
+  stale (the freshness window). Because the transport is also unencrypted in `mode: none`, an
+  on-path observer can capture the envelope in the first place. **For any deployment where ACL
+  enforcement is a security boundary, run the query and sidecar services with mutual TLS**
+  (`mode: mtls`), which the shipped sample configurations already do. Non-mTLS modes are intended
+  for testing and for trusted-network deployments where ACLs are advisory.
+
+- **Certificate revocation is re-checked at policy-evaluation granularity, not per call.** The
+  client certificate and MSP identity are fully validated once, at `Authorize` time. For the life
+  of the connection, subsequent RPCs re-evaluate the bound identity against the *current channel
+  policies* (so removing the client's organization from a policy revokes access on the next
+  message), but they do not re-run certificate chain/CRL validation. A certificate revoked via CRL
+  without a corresponding channel-config change therefore keeps working until the client
+  disconnects and re-`Authorize`s. Operators who rely on CRL-based revocation should bound
+  connection lifetime (for example via the gRPC `MaxConnectionAge` keepalive setting), which forces
+  a periodic re-`Authorize` and thus a fresh certificate validation.
+
+## Configuration-update safety
+
+The bundle held by the `ACLProvider` is updated only when a configuration block carries a
+*strictly newer* config sequence. A transient stale read from the configuration source (for
+example replica lag or follower reads in a distributed SQL backend) cannot roll the effective
+policy set backward and silently reinstate access that a newer configuration already revoked.
+Concurrent re-evaluations on a bidirectional stream (which drives receive and send on separate
+goroutines) are serialized, so the cached bundle cannot be corrupted by racing updates.
+
 ## Policy resolution (fail-closed)
 
 For a given `info.FullMethod`, the resource-to-policy lookup order is:

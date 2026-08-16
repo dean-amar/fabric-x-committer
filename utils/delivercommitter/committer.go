@@ -38,7 +38,10 @@ type Parameters struct {
 // It returns when an error occurs or when the context is done.
 // It will attempt to reconnect on errors.
 func ToQueue(ctx context.Context, cdp Parameters) error {
-	conn, err := connection.NewSingleConnection(cdp.ClientConfig)
+	// pick_first pins the channel to a single socket so the identity bound by AuthorizeConnection
+	// below holds for the Deliver stream; round_robin could route the stream to a different,
+	// unauthorized socket when the endpoint resolves to multiple addresses.
+	conn, err := connection.NewSingleConnectionPickFirst(cdp.ClientConfig)
 	if err != nil {
 		return err
 	}

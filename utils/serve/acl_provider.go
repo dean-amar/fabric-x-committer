@@ -156,9 +156,28 @@ func (d *ACLUpdater) UpdateClientRootCAs(certs [][]byte) {
 	d.certsUpdateVersion.Add(1)
 }
 
-// UpdateBundle stores the latest channel-configuration bundle for ACL evaluation.
-func (d *ACLUpdater) UpdateBundle(bund *channelconfig.Bundle) {
-	d.bundle.Store(bund)
+// UpdateBundle stores a channel-configuration bundle for ACL evaluation, but only if its config
+// sequence is strictly greater than the currently stored one. This enforces monotonicity at the
+// sink: a transient stale read from the config source (replica lag / follower reads in a
+// distributed SQL backend) cannot roll the bundle — and therefore the effective ACL policy —
+// backward and silently reinstate access that a newer config already revoked. A nil bundle is
+// ignored. It returns true when the bundle was installed.
+func (d *ACLUpdater) UpdateBundle(newBundle *channelconfig.Bundle) bool {
+	if newBundle == nil {
+		return false
+	}
+	newSeq := newBundle.ConfigtxValidator().Sequence()
+	for {
+		currentBundle := d.bundle.Load()
+		if currentBundle != nil && newSeq <= currentBundle.ConfigtxValidator().Sequence() {
+			// Not newer than what we already have; reject to preserve monotonicity.
+			return false
+		}
+		if d.bundle.CompareAndSwap(currentBundle, newBundle) {
+			return true
+		}
+		// A concurrent update won the swap; re-evaluate against the new current.
+	}
 }
 
 // Load loads the dynamic certificates.

@@ -68,6 +68,13 @@ type (
 		NotifyStream        committerpb.Notifier_OpenNotificationStreamClient
 		StreamAllTxStream   committerpb.Notifier_StreamAllTransactionsClient
 
+		// queryConn and sidecarConn are the ACL-enforced connections. They are created (lazily,
+		// without dialing) in CreateRuntimeClients but authorized only in Start, once their
+		// services are actually serving — an Authorize RPC issued before Start would dial a
+		// not-yet-running server and hang on the connection handshake.
+		queryConn   *grpc.ClientConn
+		sidecarConn *grpc.ClientConn
+
 		CommittedBlock          chan *common.Block
 		TxBuilder               *workload.TxBuilder
 		Config                  *Config
@@ -337,14 +344,12 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	c.CoordinatorClient = servicepb.NewCoordinatorClient(
 		test.NewSecuredConnection(t, services.Coordinator.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
-	queryConn := test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS)
-	c.QueryServiceClient = committerpb.NewQueryServiceClient(queryConn)
-	sidecarConn := test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS)
-	// The sidecar and query services enforce ACL, so authorize each connection with a
-	// channel-member identity before issuing RPCs on it.
-	c.authorizeConn(ctx, t, queryConn)
-	c.authorizeConn(ctx, t, sidecarConn)
-	c.NotifyClient = committerpb.NewNotifierClient(sidecarConn)
+	// The sidecar and query services enforce ACL. We only create the connections here (grpc.NewClient
+	// does not dial); the authorizing RPC is deferred to Start, after the services are serving.
+	c.queryConn = test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS)
+	c.QueryServiceClient = committerpb.NewQueryServiceClient(c.queryConn)
+	c.sidecarConn = test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS)
+	c.NotifyClient = committerpb.NewNotifierClient(c.sidecarConn)
 	var err error
 	c.OrdererStream, err = adapters.NewBroadcastStream(ctx, &c.OrdererEnv.OrdererConnConfig)
 	require.NoError(t, err)
@@ -365,6 +370,16 @@ func (c *CommitterRuntime) authSigner(t *testing.T) msp.SigningIdentity {
 	require.NoError(t, err)
 	require.NotEmpty(t, identities)
 	return identities[0]
+}
+
+// AuthorizeClients authorizes the ACL-enforced query and sidecar connections. Callers that start
+// the services themselves (e.g. an already-running containerized committer) invoke this once the
+// services are serving; the in-process Start path authorizes each connection individually as its
+// service comes up.
+func (c *CommitterRuntime) AuthorizeClients(ctx context.Context, t *testing.T) {
+	t.Helper()
+	c.authorizeConn(ctx, t, c.sidecarConn)
+	c.authorizeConn(ctx, t, c.queryConn)
 }
 
 // authorizeConn authorizes a client connection against the ACL-enforced services, binding the
@@ -423,10 +438,15 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	}
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
+		// Authorize the sidecar connection now that the service is serving, before opening the
+		// ACL-enforced notification streams on it.
+		c.authorizeConn(t.Context(), t, c.sidecarConn)
 		c.OpenNotificationStream(t.Context(), t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
+		// Authorize the query connection now that the service is serving.
+		c.authorizeConn(t.Context(), t, c.queryConn)
 	}
 
 	if Coordinator&serviceFlags != 0 && Sidecar&serviceFlags != 0 {

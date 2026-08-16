@@ -424,7 +424,7 @@ func TestGrpcRetryJSON(t *testing.T) {
 	t.Parallel()
 	templateExpectedJSON := `
 	{
-	  "loadBalancingConfig": [{"round_robin": {}}],
+	  "loadBalancingConfig": [{"%s": {}}],
 	  "methodConfig": [{
 		"name": [{}],
 		"retryPolicy": {
@@ -439,20 +439,22 @@ func TestGrpcRetryJSON(t *testing.T) {
 	for _, tt := range []struct {
 		name             string
 		maxElapsedTime   *time.Duration
+		policy           string
 		expectedAttempts int
 	}{
 		// A nil budget falls back to the 15m default.
-		{name: "default", maxElapsedTime: nil, expectedAttempts: 96},
+		{name: "default", maxElapsedTime: nil, policy: "round_robin", expectedAttempts: 96},
 		// A zero budget requests unlimited retries; the gRPC layer is intentionally bounded,
 		// so it is capped at the high defaultGrpcMaxAttempts rather than being truly unlimited.
-		{name: "unlimited", maxElapsedTime: new(time.Duration(0)), expectedAttempts: 1024},
-		{name: "finite", maxElapsedTime: new(15 * time.Second), expectedAttempts: 7},
+		{name: "unlimited", maxElapsedTime: new(time.Duration(0)), policy: "round_robin", expectedAttempts: 1024},
+		{name: "finite", maxElapsedTime: new(15 * time.Second), policy: "round_robin", expectedAttempts: 7},
+		{name: "pick_first", maxElapsedTime: nil, policy: "pick_first", expectedAttempts: 96},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			profile := retry.Profile{MaxElapsedTime: tt.maxElapsedTime}
-			jsonRaw := connection.MakeGrpcRetryPolicyJSON(&profile)
-			require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, tt.expectedAttempts), jsonRaw)
+			jsonRaw := connection.MakeGrpcRetryPolicyJSON(&profile, tt.policy)
+			require.JSONEq(t, fmt.Sprintf(templateExpectedJSON, tt.policy, tt.expectedAttempts), jsonRaw)
 		})
 	}
 }

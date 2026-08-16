@@ -13,8 +13,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
 )
 
 var logger = flogging.MustGetLogger("auth")
@@ -28,14 +26,11 @@ var logger = flogging.MustGetLogger("auth")
 // is a defensive fallback: reaching it means the interceptor was not installed.
 type Service struct {
 	committerpb.UnimplementedAuthServiceServer
-	provider *serve.ACLProvider
 }
 
 // NewAuthService creates a new auth service bound to the given TLS/bundle provider.
-func NewAuthService(provider *serve.ACLProvider) *Service {
-	return &Service{
-		provider: provider,
-	}
+func NewAuthService() *Service {
+	return &Service{}
 }
 
 // Authorize is a defensive fallback. In normal operation auth.AuthorizeInterceptor handles

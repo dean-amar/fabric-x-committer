@@ -176,7 +176,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	committerpb.RegisterNotifierServer(srv.GRPC, s.notifier)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
 	serve.RegisterACLUpdater(srv.GrpcACLProvider, &s.aclUpdater, true) // Sidecar requires ACL enforcement
-	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService(srv.GrpcACLProvider))
+	committerpb.RegisterAuthServiceServer(srv.GRPC, auth.NewAuthService())
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 	serve.RegisterConnStatHandler(srv.ConnStatsHandler, s.metrics.serverConnections)
 }

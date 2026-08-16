@@ -502,7 +502,7 @@ func TestSidecarStartWithoutCoordinator(t *testing.T) {
 	// commit requires the coordinator, so authorized client streams cannot be established until
 	// the coordinator is back — they are started after the restart below.
 	t.Log("Start the service")
-	env.startSidecarServiceAndClientAndNotificationStream(ctx, t, 0, test.InsecureTLSConfig)
+	env.startSidecarService(ctx, t)
 	test.RequireConnectionMetrics(
 		t, coordLabel,
 		env.sidecar.metrics.coordConnection,

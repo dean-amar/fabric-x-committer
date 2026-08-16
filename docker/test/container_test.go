@@ -114,6 +114,9 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 					false,
 				),
 				OrdererEnv: &mock.OrdererTestEnv{
+					OrdererTestParameters: mock.OrdererTestParameters{
+						ArtifactsPath: artifactsPath,
+					},
 					OrdererConnConfig: ordererdial.Config{
 						TLS:                        clientTLS,
 						FaultToleranceLevel:        ordererdial.CFT,
@@ -123,6 +126,9 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			}
 
 			runtime.CreateRuntimeClients(ctx, t)
+			// The container's services are already running, so authorize the ACL-enforced
+			// connections before opening the notification stream on the sidecar connection.
+			runtime.AuthorizeClients(ctx, t)
 			runtime.OpenNotificationStream(ctx, t)
 
 			// Adding namespace policy and creating transaction builder

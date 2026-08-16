@@ -13,11 +13,18 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
+	cb "github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/types"
+	"github.com/hyperledger/fabric-x-common/common/channelconfig"
+	"github.com/hyperledger/fabric-x-common/common/configtx"
 	"github.com/hyperledger/fabric-x-common/common/crypto/tlsgen"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
 	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
@@ -160,6 +167,62 @@ func TestExtractAppTLSCAsFromEnvelope(t *testing.T) {
 		_, err := serialization.ExtractAppTLSCAsFromEnvelope(nil)
 		require.Error(t, err)
 	})
+}
+
+// TestUpdateBundleMonotonic verifies that UpdateBundle only installs a bundle whose config
+// sequence is strictly greater than the currently stored one. This is the sink-side guard against
+// a stale config read rolling the effective ACL policy backward and reinstating revoked access.
+func TestUpdateBundleMonotonic(t *testing.T) {
+	t.Parallel()
+
+	baseCfg := loadBaseConfig(t)
+	bundleAt := func(seq uint64) *channelconfig.Bundle {
+		cfg, ok := proto.Clone(baseCfg).(*cb.Config)
+		require.True(t, ok)
+		cfg.Sequence = seq
+		bundle, err := channelconfig.NewBundle("testchannel", cfg, factory.GetDefault())
+		require.NoError(t, err)
+		return bundle
+	}
+
+	var updater ACLUpdater
+
+	// A nil bundle is ignored.
+	require.False(t, updater.UpdateBundle(nil))
+
+	// Step 1: first non-nil bundle is accepted.
+	require.True(t, updater.UpdateBundle(bundleAt(1)))
+	require.Equal(t, uint64(1), updater.bundle.Load().ConfigtxValidator().Sequence())
+
+	// Step 2: a strictly newer sequence is accepted.
+	require.True(t, updater.UpdateBundle(bundleAt(2)))
+	require.Equal(t, uint64(2), updater.bundle.Load().ConfigtxValidator().Sequence())
+
+	// Step 3: an equal or older sequence is rejected, and the stored bundle is unchanged.
+	require.False(t, updater.UpdateBundle(bundleAt(2)))
+	require.False(t, updater.UpdateBundle(bundleAt(1)))
+	require.Equal(t, uint64(2), updater.bundle.Load().ConfigtxValidator().Sequence(),
+		"a stale (older/equal) bundle must not roll the stored sequence backward")
+}
+
+// loadBaseConfig generates a config block and returns its channel configuration at sequence 0, for
+// building derived bundles at chosen sequences.
+func loadBaseConfig(t *testing.T) *cb.Config {
+	t.Helper()
+	dir := t.TempDir()
+	block, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(dir, &testcrypto.ConfigBlock{
+		ChannelID:             "testchannel",
+		PeerOrganizationCount: 1,
+	})
+	require.NoError(t, err)
+
+	env, err := protoutil.UnmarshalEnvelope(block.Data.Data[0])
+	require.NoError(t, err)
+	payload, err := protoutil.UnmarshalPayload(env.Payload)
+	require.NoError(t, err)
+	confEnv, err := configtx.UnmarshalConfigEnvelope(payload.Data)
+	require.NoError(t, err)
+	return confEnv.Config
 }
 
 // newTestDynamicTLS creates a DynamicTLS via NewDynamicTLSFromConfig using the given CA

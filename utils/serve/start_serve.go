@@ -278,12 +278,13 @@ func newGRPCServer(c *ServerConfig, tlsProvider *ACLProvider, connStats *ConnSta
 		),
 	))
 
-	opts = append(opts,
+	opts = append(
+		opts,
 		grpc.ChainUnaryInterceptor(
 			auth.AuthorizeInterceptor(tlsProvider),
 			auth.MSPUnaryServerInterceptor(tlsProvider),
 		),
-		grpc.StreamInterceptor(
+		grpc.ChainStreamInterceptor(
 			auth.MSPStreamServerInterceptor(tlsProvider),
 		),
 	)
@@ -293,13 +294,13 @@ func newGRPCServer(c *ServerConfig, tlsProvider *ACLProvider, connStats *ConnSta
 	}
 
 	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
-		opts = append(opts, grpc.UnaryInterceptor(RateLimitInterceptor(limiter)))
+		opts = append(opts, grpc.ChainUnaryInterceptor(RateLimitInterceptor(limiter)))
 		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
 			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
 	}
 
 	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
-		opts = append(opts, grpc.StreamInterceptor(StreamConcurrencyInterceptor(sem)))
+		opts = append(opts, grpc.ChainStreamInterceptor(StreamConcurrencyInterceptor(sem)))
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
 	}
 

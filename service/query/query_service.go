@@ -125,7 +125,7 @@ func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
 	serve.RegisterACLUpdater(s.GrpcACLProvider, &q.aclUpdater, true) // Query service requires ACL enforcement
-	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService(s.GrpcACLProvider))
+	committerpb.RegisterAuthServiceServer(s.GRPC, auth.NewAuthService())
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 	serve.RegisterConnStatHandler(s.ConnStatsHandler, q.metrics.serverConnections)
 }
@@ -348,7 +348,10 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 			return
 		}
 
-		if len(configTX.Envelope) == 0 || (seen && configTX.Version == lastVersion) {
+		// Skip when there is nothing to apply, or when the read is not strictly newer than what we
+		// last applied. Using <= (not ==) means a transient stale read returning an older version
+		// cannot roll lastVersion backward and re-apply a superseded config.
+		if len(configTX.Envelope) == 0 || (seen && configTX.Version <= lastVersion) {
 			return
 		}
 
