@@ -17,8 +17,11 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -28,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
@@ -70,6 +74,11 @@ type (
 		SeedForCryptoGen        *rand.Rand
 		NextExpectedBlockNumber uint64
 		CredFactory             *test.CredentialsFactory
+
+		// clientAuthDialOpts attach a signed, method-bound envelope to client dials of the
+		// ACL-enforcing services (sidecar, query). Built once in CreateRuntimeClients from the
+		// same channel crypto the services load their bundle from.
+		clientAuthDialOpts []grpc.DialOption
 	}
 
 	// Config represents the runtime configuration.
@@ -167,6 +176,13 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	}
 	if conf.NumVerifiers <= 0 {
 		conf.NumVerifiers = 1
+	}
+	if conf.QueryTLSRefreshInterval <= 0 {
+		// The query service polls the DB for its channel-config bundle on this interval, and ACL
+		// enforcement returns Unavailable until the first bundle loads. The production default is
+		// 1 minute, which would stall short tests that dial the query service; poll quickly so the
+		// bundle loads promptly. Tests needing a specific cadence (e.g. dynamic TLS) override it.
+		conf.QueryTLSRefreshInterval = time.Second
 	}
 	if conf.NumVCService <= 0 {
 		conf.NumVCService = 1
@@ -330,14 +346,18 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	t.Helper()
 	services := c.SystemConfig.Services
 
+	c.clientAuthDialOpts = c.buildClientAuthDialOptions(t)
+
+	// The coordinator is an internal service and never enforces ACL, so its client needs no
+	// envelope. The query service and sidecar do enforce, so their clients attach one.
 	c.CoordinatorClient = servicepb.NewCoordinatorClient(
 		test.NewSecuredConnection(t, services.Coordinator.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
 	c.QueryServiceClient = committerpb.NewQueryServiceClient(
-		test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS, c.clientAuthDialOpts...),
 	)
 	c.NotifyClient = committerpb.NewNotifierClient(
-		test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS, c.clientAuthDialOpts...),
 	)
 	var err error
 	c.OrdererStream, err = adapters.NewBroadcastStream(ctx, &c.OrdererEnv.OrdererConnConfig)
@@ -347,6 +367,64 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	})
 
 	c.SidecarClientConfig = test.NewTLSClientConfig(c.SystemConfig.ClientTLS, services.Sidecar.GrpcEndpoint)
+}
+
+// ClientAuthDialOptions returns the gRPC dial options that attach a signed, method-bound envelope
+// to client dials of the ACL-enforcing services (sidecar, query). Tests that dial those services
+// directly (rather than through the runtime's own clients) must include these so their calls pass
+// ACL enforcement; they are no-op passthroughs for non-ACL deployments.
+func (c *CommitterRuntime) ClientAuthDialOptions() []grpc.DialOption {
+	return c.clientAuthDialOpts
+}
+
+// buildClientAuthDialOptions builds the gRPC dial options that attach a signed, method-bound
+// envelope to client dials of the ACL-enforcing services. The signer is loaded from the same
+// channel crypto artifacts the sidecar and query service build their ACL bundle from, so the
+// dialing identity is a channel member their bundle trusts. When no artifacts are configured
+// (or the deployment is not mTLS), the signer/cert-hash are nil and the interceptors become
+// no-op passthroughs, so the options are safe to attach unconditionally.
+func (c *CommitterRuntime) buildClientAuthDialOptions(t *testing.T) []grpc.DialOption {
+	t.Helper()
+
+	cfg := auth.ClientAuthConfig{
+		Signer:      c.loadDeliverySigner(t),
+		ChannelID:   c.SystemConfig.Policy.ChannelID,
+		TLSCertHash: c.clientTLSCertHash(t),
+	}
+	return []grpc.DialOption{
+		grpc.WithChainUnaryInterceptor(auth.UnaryClientInterceptor(cfg)),
+		grpc.WithChainStreamInterceptor(auth.StreamClientInterceptor(cfg)),
+	}
+}
+
+// loadDeliverySigner loads a channel-member signing identity from the runtime's crypto
+// artifacts, or returns nil when none are configured (non-ACL runs), matching the loadgen's
+// no-op fallback.
+//
+//nolint:ireturn // msp.SigningIdentity is an interface by design.
+func (c *CommitterRuntime) loadDeliverySigner(t *testing.T) msp.SigningIdentity {
+	t.Helper()
+
+	artifactsPath := c.SystemConfig.Policy.ArtifactsPath
+	if artifactsPath == "" {
+		return nil
+	}
+	identities, err := testcrypto.GetPeersIdentities(artifactsPath)
+	require.NoError(t, err)
+	if len(identities) == 0 {
+		return nil
+	}
+	return identities[0]
+}
+
+// clientTLSCertHash returns the SHA-256 of the runtime's client TLS certificate, or nil when the
+// deployment is not mTLS (the server then skips the cert-hash binding check).
+func (c *CommitterRuntime) clientTLSCertHash(t *testing.T) []byte {
+	t.Helper()
+
+	certHash, err := auth.ClientTLSCertHash(c.SystemConfig.ClientTLS)
+	require.NoError(t, err)
+	return certHash
 }
 
 // OpenNotificationStream starts a notification stream.
@@ -392,7 +470,6 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	}
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
-		c.OpenNotificationStream(t.Context(), t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
@@ -406,6 +483,12 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 
 	if Sidecar&serviceFlags != 0 {
 		c.startBlockDelivery(t)
+		// Open the notification streams only after block delivery is confirmed working. A
+		// successful delivery proves the sidecar has loaded its channel-config bundle and is past
+		// the ACL bootstrap window, so these (ACL-enforced) streams won't be rejected with
+		// codes.Unavailable. StreamAllTransactions streams only future blocks, so a stream opened
+		// during bootstrap would be forced to reconnect and miss the blocks under test.
+		c.OpenNotificationStream(t.Context(), t)
 	}
 }
 
@@ -460,6 +543,7 @@ func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
 		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx, delivercommitter.Parameters{
 			ClientConfig: c.SidecarClientConfig,
 			OutputBlock:  c.CommittedBlock,
+			DialOpts:     c.clientAuthDialOpts,
 		}))
 	}, func(ctx context.Context) bool {
 		select {

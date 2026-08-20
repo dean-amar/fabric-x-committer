@@ -24,6 +24,20 @@ func UnmarshalTx(data []byte) (*applicationpb.Tx, error) {
 	return &tx, nil
 }
 
+// ExtractAppBundle builds a channel-configuration Bundle from a marshaled config Envelope.
+// The Bundle exposes the MSP manager and policy manager used for ACL evaluation.
+func ExtractAppBundle(envelopeBytes []byte) (*channelconfig.Bundle, error) {
+	envelope, err := protoutil.UnmarshalEnvelope(envelopeBytes)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal config envelope")
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build channel config bundle")
+	}
+	return bundle, nil
+}
+
 // ExtractAppTLSCAsFromEnvelope parses a Fabric config envelope and extracts
 // TLS root CA certificates from application organizations.
 // Only application org CAs are needed because the sidecar and query services

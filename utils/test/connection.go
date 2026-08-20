@@ -85,30 +85,35 @@ func ServerToMultiClientConfig(
 	}
 }
 
-// NewSecuredConnection creates the default connection with given transport credentials.
+// NewSecuredConnection creates the default connection with given transport credentials. Extra
+// dial options (e.g. client-auth interceptors) may be supplied via opts.
 func NewSecuredConnection(
 	t *testing.T,
 	endpoint connection.WithAddress,
 	tlsConfig connection.TLSConfig,
+	opts ...grpc.DialOption,
 ) *grpc.ClientConn {
 	t.Helper()
-	return NewSecuredConnectionWithRetry(t, endpoint, tlsConfig, defaultGrpcRetryProfile)
+	return NewSecuredConnectionWithRetry(t, endpoint, tlsConfig, defaultGrpcRetryProfile, opts...)
 }
 
 // NewSecuredConnectionWithRetry creates the default connection with given transport credentials.
+// Extra dial options (e.g. client-auth interceptors) may be supplied via opts.
 func NewSecuredConnectionWithRetry(
 	t *testing.T,
 	endpoint connection.WithAddress,
 	tlsConfig connection.TLSConfig,
 	retryProfile retry.Profile,
+	opts ...grpc.DialOption,
 ) *grpc.ClientConn {
 	t.Helper()
 	clientCreds, err := tlsConfig.ClientCredentials()
 	require.NoError(t, err)
 	conn, err := connection.NewConnection(connection.ClientParameters{
-		Address: endpoint.Address(),
-		Creds:   clientCreds,
-		Retry:   &retryProfile,
+		Address:        endpoint.Address(),
+		Creds:          clientCreds,
+		Retry:          &retryProfile,
+		AdditionalOpts: opts,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {

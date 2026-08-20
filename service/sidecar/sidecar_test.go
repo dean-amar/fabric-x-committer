@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -146,7 +148,8 @@ func (env *sidecarTestEnv) startSidecarClient(
 ) {
 	t.Helper()
 	committerClient := test.NewTLSClientConfig(sidecarClientCreds, &env.serverConfig.GRPC.Endpoint)
-	env.committedBlock = delivercommitter.Start(ctx, t, committerClient, startBlkNum)
+	env.committedBlock = delivercommitter.Start(ctx, t, committerClient, startBlkNum,
+		env.clientAuthDialOptions(t, sidecarClientCreds)...)
 }
 
 func (env *sidecarTestEnv) startNotificationStream(
@@ -155,10 +158,36 @@ func (env *sidecarTestEnv) startNotificationStream(
 	sidecarClientCreds connection.TLSConfig,
 ) {
 	t.Helper()
-	conn := test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, sidecarClientCreds)
+	conn := test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, sidecarClientCreds,
+		env.clientAuthDialOptions(t, sidecarClientCreds)...)
 	var err error
 	env.notifyStream, err = committerpb.NewNotifierClient(conn).OpenNotificationStream(ctx)
 	require.NoError(t, err)
+}
+
+// clientAuthDialOptions builds dial options that attach a signed, method-bound envelope so the
+// client passes the sidecar's always-on ACL enforcement. The signer is a channel-member identity
+// from the same crypto the sidecar's ACL bundle (extracted from the config block delivered by the
+// mock orderer) is built from, so the bundle's MSP trusts it.
+func (env *sidecarTestEnv) clientAuthDialOptions(t *testing.T, clientTLS connection.TLSConfig) []grpc.DialOption {
+	t.Helper()
+
+	identities, err := testcrypto.GetPeersIdentities(env.ArtifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+
+	certHash, err := auth.ClientTLSCertHash(clientTLS)
+	require.NoError(t, err)
+
+	cfg := auth.ClientAuthConfig{
+		Signer:      identities[0],
+		ChannelID:   env.ChanID,
+		TLSCertHash: certHash,
+	}
+	return []grpc.DialOption{
+		grpc.WithChainUnaryInterceptor(auth.UnaryClientInterceptor(cfg)),
+		grpc.WithChainStreamInterceptor(auth.StreamClientInterceptor(cfg)),
+	}
 }
 
 func TestSidecarSecureConnection(t *testing.T) {
@@ -782,7 +811,9 @@ func TestUpdateDynamicTLS(t *testing.T) {
 
 	t.Run("updates TLS CAs from config envelope", func(t *testing.T) {
 		t.Parallel()
-		s := &Service{}
+		s := &Service{aclUpdater: serve.NewACLUpdater(true)}
+		aclProvider := &serve.ACLProvider{}
+		serve.RegisterACLUpdater(aclProvider, s.aclUpdater)
 
 		block := createConfigBlockForTest(t)
 		ch := make(chan *common.Block, 1)
@@ -799,18 +830,22 @@ func TestUpdateDynamicTLS(t *testing.T) {
 		})
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
-			require.NotEmpty(ct, s.tlsUpdater.Load())
+			require.NotEmpty(ct, s.aclUpdater.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 		// Cancel after the envelope is processed.
 		cancel()
 
 		require.ErrorIs(t, g.Wait(), context.Canceled)
-		require.NotEmpty(t, s.tlsUpdater.Load(), "should have received TLS CA certificates")
+		require.NotEmpty(t, s.aclUpdater.Load(), "should have received TLS CA certificates")
+
+		bundle, err := aclProvider.GetBundle()
+		require.NoError(t, err)
+		require.NotNil(t, bundle, "should have received an ACL bundle")
 	})
 
 	t.Run("returns non-retryable error for invalid envelope", func(t *testing.T) {
 		t.Parallel()
-		s := &Service{}
+		s := &Service{aclUpdater: serve.NewACLUpdater(true)}
 
 		block := &common.Block{
 			Header: &common.BlockHeader{Number: 1},
@@ -821,7 +856,7 @@ func TestUpdateDynamicTLS(t *testing.T) {
 
 		err := s.updateDynamicTLS(t.Context(), ch)
 		require.Error(t, err)
-		require.Empty(t, s.tlsUpdater.Load())
+		require.Empty(t, s.aclUpdater.Load())
 	})
 }
 

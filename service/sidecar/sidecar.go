@@ -67,7 +67,7 @@ type Service struct {
 	config                *Config
 	healthcheck           *health.Server
 	metrics               *perfMetrics
-	tlsUpdater            serve.DynamicTLSUpdater
+	aclUpdater            *serve.ACLUpdater
 	ready                 *channel.Ready
 }
 
@@ -106,7 +106,9 @@ func New(c *Config) (*Service, error) {
 		committedBlock:        make(chan *common.Block, c.ChannelBufferSize),
 		committedBlockWithTxs: make(chan *committedBlockWithTxs, c.ChannelBufferSize),
 		statusQueue:           make(chan []*committerpb.TxStatus, c.ChannelBufferSize),
-		ready:                 channel.NewReady(),
+		// The sidecar enforces ACL on its exposed APIs.
+		aclUpdater: serve.NewACLUpdater(true),
+		ready:      channel.NewReady(),
 	}, nil
 }
 
@@ -174,7 +176,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	committerpb.RegisterBlockQueryServiceServer(srv.GRPC, s)
 	committerpb.RegisterNotifierServer(srv.GRPC, s.notifier)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
-	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
+	serve.RegisterACLUpdater(srv.GrpcACLProvider, s.aclUpdater)
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 	serve.RegisterConnStatHandler(srv.ConnStatsHandler, s.metrics.serverConnections)
 }
@@ -470,7 +472,13 @@ func (s *Service) updateDynamicTLS(ctx context.Context, configBlocks <-chan *com
 				errors.Wrap(err, "failed to extract TLS CAs from config envelope"))
 		}
 
-		s.tlsUpdater.UpdateClientRootCAs(certs)
+		s.aclUpdater.UpdateClientRootCAs(certs)
+
+		if bundle, bundleErr := serialization.ExtractAppBundle(configBlk.Data.Data[0]); bundleErr != nil {
+			logger.Errorf("Failed to extract ACL bundle from config envelope: %v", bundleErr)
+		} else {
+			s.aclUpdater.UpdateBundle(bundle)
+		}
 
 		logger.Infof("Updated dynamic TLS with %d CA certificates", len(certs))
 	}

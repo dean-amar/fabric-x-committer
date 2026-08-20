@@ -74,7 +74,7 @@ type (
 		cutBlock             chan any
 		cache                *blockCache
 		healthcheck          *health.Server
-		tlsUpdater           serve.DynamicTLSUpdater
+		aclUpdater           *serve.ACLUpdater
 
 		// config uses atomic.Pointer to allow safe concurrent reads by the Run() goroutine
 		// while supporting runtime updates (e.g., BlockTimeout changes in tests).
@@ -175,6 +175,9 @@ func NewMockOrderer(config *OrdererConfig) (*Orderer, error) {
 		cutBlock:     make(chan any),
 		cache:        newBlockCache(config.OutBlockCapacity),
 		healthcheck:  serve.DefaultHealthCheckService(),
+		// The orderer only needs the dynamic TLS client-CA refresh, so it registers without ACL
+		// enforcement (the optimistic model: registered, but requiresACL=false).
+		aclUpdater: serve.NewACLUpdater(false),
 	}
 	o.config.Store(config)
 
@@ -472,7 +475,7 @@ func (*Orderer) WaitForReady(context.Context) bool {
 func (o *Orderer) RegisterService(s serve.Servers) {
 	ab.RegisterAtomicBroadcastServer(s.GRPC, o)
 	healthgrpc.RegisterHealthServer(s.GRPC, o.healthcheck)
-	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &o.tlsUpdater)
+	serve.RegisterACLUpdater(s.GrpcACLProvider, o.aclUpdater)
 }
 
 // SubmitBlock allows submitting blocks directly for testing other packages.
@@ -615,7 +618,7 @@ func (o *Orderer) updateTLSFromConfigBlock(configBlock *common.Block) error {
 		return errors.Wrap(err, "failed to extract TLS CAs from config envelope")
 	}
 
-	o.tlsUpdater.UpdateClientRootCAs(certs)
+	o.aclUpdater.UpdateClientRootCAs(certs)
 
 	logger.Infof("Updated dynamic TLS with %d CA certificates from config block %d",
 		len(certs), configBlock.Header.Number)

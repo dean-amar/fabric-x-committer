@@ -97,16 +97,22 @@ func TestRateLimit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			// The sidecar and query services enforce ACL, and the ACL interceptor runs before
+			// the rate limiter. Attach the runtime's signed-envelope dial options so requests
+			// reach the rate limiter instead of being rejected first with Unauthenticated.
+			authOpts := c.ClientAuthDialOptions()
+
 			var conn *grpc.ClientConn
 			if tt.useRetry {
 				// The default retry policy includes RESOURCE_EXHAUSTED, so rate-limited
 				// requests will be automatically retried and should eventually succeed.
-				conn = test.NewSecuredConnection(t, tt.endpoint, c.SystemConfig.ClientTLS)
+				conn = test.NewSecuredConnection(t, tt.endpoint, c.SystemConfig.ClientTLS, authOpts...)
 			} else {
 				// Create a connection without retry policy to observe rate limiting directly.
 				clientCreds, err := c.SystemConfig.ClientTLS.ClientCredentials()
 				require.NoError(t, err)
-				conn, err = grpc.NewClient(tt.endpoint.Address(), grpc.WithTransportCredentials(clientCreds))
+				dialOpts := append([]grpc.DialOption{grpc.WithTransportCredentials(clientCreds)}, authOpts...)
+				conn, err = grpc.NewClient(tt.endpoint.Address(), dialOpts...)
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = conn.Close() })
 			}

@@ -12,6 +12,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
+	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/deliver"
@@ -22,13 +23,16 @@ type Parameters struct {
 	ClientConfig *connection.ClientConfig
 	NextBlockNum uint64
 	OutputBlock  chan<- *common.Block
+	// DialOpts carries additional gRPC dial options, e.g. client-auth interceptors, attached
+	// to the delivery connection alongside ClientConfig's TLS/retry settings.
+	DialOpts []grpc.DialOption
 }
 
 // ToQueue connects to a committer delivery server and delivers the stream to a queue (go channel).
 // It returns when an error occurs or when the context is done.
 // It will attempt to reconnect on errors.
 func ToQueue(ctx context.Context, cdp Parameters) error {
-	conn, err := connection.NewSingleConnection(cdp.ClientConfig)
+	conn, err := connection.NewSingleConnection(cdp.ClientConfig, cdp.DialOpts...)
 	if err != nil {
 		return err
 	}

@@ -17,11 +17,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
@@ -46,6 +49,9 @@ type (
 		ns           []string
 		clientConn   committerpb.QueryServiceClient
 		pool         *pgxpool.Pool
+		// loadPolicy carries the crypto artifacts + channel ID a client needs to sign an envelope
+		// the query service's ACL bundle trusts.
+		loadPolicy *workload.PolicyProfile
 	}
 
 	queryServiceTestOpts struct {
@@ -67,7 +73,11 @@ func TestQuerySecureConnection(t *testing.T) {
 			env := newQueryServiceTestEnv(t, &queryServiceTestOpts{serverTLS: serverTLS, clientTLS: clientTLS})
 			return func(ctx context.Context, t *testing.T, cfg connection.TLSConfig) error {
 				t.Helper()
-				client := createQueryClientWithTLS(t, &env.serverConfig.GRPC.Endpoint, cfg)
+				// The query service enforces ACL, so a TLS-compatible connection still needs a
+				// signed envelope to succeed. Build the auth options from the per-attempt TLS
+				// config so the envelope's cert-hash matches the connection under mTLS.
+				client := createQueryClientWithTLS(t, &env.serverConfig.GRPC.Endpoint, cfg,
+					queryClientAuthOptions(t, env.loadPolicy, cfg)...)
 				_, err := client.GetConfigTransaction(ctx, nil)
 				return err
 			}
@@ -610,7 +620,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 
 	t.Log("generating config and namespaces")
 	namespacesToTest := []string{"0", "1", "2"}
-	dbConf := generateNamespacesUnderTest(t, namespacesToTest)
+	dbConf, loadPolicy := generateNamespacesUnderTest(t, namespacesToTest)
 
 	config := &Config{
 		MinBatchKeys:          5,
@@ -627,7 +637,11 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 
 	qs := NewQueryService(config)
 	test.RunServiceAndServeForTest(t.Context(), t, qs, serverConfig)
-	clientConn := createQueryClientWithTLS(t, &serverConfig.GRPC.Endpoint, opts.clientTLS)
+	// The query service enforces ACL, so the client must attach a signed envelope. The signer is
+	// the channel-member identity from the same crypto the config bundle (which the query polls
+	// from the DB) was built from, so the bundle's MSP trusts it.
+	clientConn := createQueryClientWithTLS(t, &serverConfig.GRPC.Endpoint, opts.clientTLS,
+		queryClientAuthOptions(t, loadPolicy, opts.clientTLS)...)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
@@ -642,10 +656,11 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		ns:           namespacesToTest,
 		clientConn:   clientConn,
 		pool:         pool,
+		loadPolicy:   loadPolicy,
 	}
 }
 
-func generateNamespacesUnderTest(t *testing.T, namespaces []string) *statedb.Config {
+func generateNamespacesUnderTest(t *testing.T, namespaces []string) (*statedb.Config, *workload.PolicyProfile) {
 	t.Helper()
 	env := vc.NewValidatorAndCommitServiceTestEnv(t, nil)
 
@@ -664,7 +679,9 @@ func generateNamespacesUnderTest(t *testing.T, namespaces []string) *statedb.Con
 	require.NoError(t, err)
 	err = client.Run(t.Context())
 	require.NoError(t, connection.FilterStreamRPCError(err))
-	return env.DBEnv.DBConf
+	// The generated config block (written to the DB) becomes the query service's ACL bundle; its
+	// policy carries the crypto artifacts a client needs to sign a trusted envelope.
+	return env.DBEnv.DBConf, &clientConf.LoadProfile.Policy
 }
 
 type items struct {
@@ -873,7 +890,7 @@ func TestRefreshTLSFromDB(t *testing.T) {
 	t.Run("updates TLS from config in DB", func(t *testing.T) {
 		t.Parallel()
 		// generateNamespacesUnderTest sets up DB with system tables and a config block.
-		dbConf := generateNamespacesUnderTest(t, []string{"0"})
+		dbConf, _ := generateNamespacesUnderTest(t, []string{"0"})
 
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		t.Cleanup(cancel)
@@ -883,8 +900,11 @@ func TestRefreshTLSFromDB(t *testing.T) {
 		t.Cleanup(pool.Close)
 
 		qs := &Service{
-			config: &Config{TLSRefreshInterval: 100 * time.Millisecond},
+			config:     &Config{TLSRefreshInterval: 100 * time.Millisecond},
+			aclUpdater: serve.NewACLUpdater(true),
 		}
+		aclProvider := &serve.ACLProvider{}
+		serve.RegisterACLUpdater(aclProvider, qs.aclUpdater)
 
 		var wg sync.WaitGroup
 		t.Cleanup(wg.Wait)
@@ -893,8 +913,12 @@ func TestRefreshTLSFromDB(t *testing.T) {
 		})
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
-			require.NotEmpty(ct, qs.tlsUpdater.Load())
-		}, 10*time.Second, 100*time.Millisecond, "TLS updater should have been called with CAs from config")
+			require.NotEmpty(ct, qs.aclUpdater.Load())
+			bundle, err := aclProvider.GetBundle()
+			require.NoError(ct, err)
+			require.NotNil(ct, bundle)
+		}, 10*time.Second, 100*time.Millisecond,
+			"TLS updater should have been called with CAs and an ACL bundle from config")
 	})
 }
 
@@ -902,7 +926,35 @@ func createQueryClientWithTLS(
 	t *testing.T,
 	ep *connection.Endpoint,
 	tlsCfg connection.TLSConfig,
+	opts ...grpc.DialOption,
 ) committerpb.QueryServiceClient {
 	t.Helper()
-	return test.CreateClientWithTLS(t, ep, tlsCfg, committerpb.NewQueryServiceClient)
+	return test.CreateClientWithTLS(t, ep, tlsCfg, committerpb.NewQueryServiceClient, opts...)
+}
+
+// queryClientAuthOptions builds the dial options that attach a signed, method-bound envelope to
+// the query client, so it passes the query service's always-on ACL enforcement. The signer comes
+// from the load profile's crypto artifacts — the same material the config bundle was built from —
+// so the bundle's MSP trusts the identity.
+func queryClientAuthOptions(
+	t *testing.T, loadPolicy *workload.PolicyProfile, clientTLS connection.TLSConfig,
+) []grpc.DialOption {
+	t.Helper()
+
+	identities, err := testcrypto.GetPeersIdentities(loadPolicy.ArtifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+
+	certHash, err := auth.ClientTLSCertHash(clientTLS)
+	require.NoError(t, err)
+
+	cfg := auth.ClientAuthConfig{
+		Signer:      identities[0],
+		ChannelID:   loadPolicy.ChannelID,
+		TLSCertHash: certHash,
+	}
+	return []grpc.DialOption{
+		grpc.WithChainUnaryInterceptor(auth.UnaryClientInterceptor(cfg)),
+		grpc.WithChainStreamInterceptor(auth.StreamClientInterceptor(cfg)),
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -48,7 +49,7 @@ type (
 	Servers struct {
 		GRPC            *grpc.Server
 		HTTP            *http.ServeMux
-		GrpcTLSProvider *TLSProvider
+		GrpcACLProvider *ACLProvider
 
 		// ConnStatsHandler tracks the number of open gRPC connections. A service reports the
 		// count by calling RegisterConnStatHandler with a gauge from its own monitoring provider.
@@ -132,14 +133,16 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
 	s.stopOnce = &sync.Once{}
 
-	s.GrpcTLSProvider, err = NewTLSProvider(conf.GRPC.TLS)
+	s.GrpcACLProvider, err = NewACLProvider(conf.GRPC.TLS)
 	if err != nil {
 		return s, errors.Wrap(err, "failed to create TLS provider")
 	}
 
 	s.ConnStatsHandler = &ConnStatsHandler{}
 
-	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.ConnStatsHandler)
+	//nolint:contextcheck // false positive: the ACL stream interceptor derives its context from
+	// the gRPC stream itself (ss.Context()) at call time, not from this function's ctx parameter.
+	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcACLProvider, s.ConnStatsHandler)
 	if err != nil {
 		return s, errors.Wrapf(err, "failed creating GRPC server")
 	}
@@ -263,26 +266,37 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 }
 
 // newGRPCServer instantiate a [grpc.Server].
-func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, connStats *ConnStatsHandler) (*grpc.Server, error) {
+func newGRPCServer(c *ServerConfig, aclProvider *ACLProvider, connStats *ConnStatsHandler) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),
 		grpc.StatsHandler(connStats),
 	}
-	opts = append(opts, grpc.Creds(newCredentials(tlsProvider.GetServerTLSCredentials())))
+	opts = append(opts, grpc.Creds(newCredentials(aclProvider.GetServerTLSCredentials())))
+
+	// ACL interceptors are always installed and run first, before rate-limit / concurrency.
+	// Whether they actually enforce is decided at call time by the provider: a server enforces
+	// only when its owning service has registered an ACLUpdater with requiresACL=true (sidecar,
+	// query). Internal services never register one, so the interceptors are pure passthroughs
+	// for them. The peer TLS cert is read directly from credentials.TLSInfo by the interceptor —
+	// no custom credentials needed.
+	opts = append(opts,
+		grpc.ChainUnaryInterceptor(auth.MetadataUnaryServerInterceptor(aclProvider)),
+		grpc.ChainStreamInterceptor(auth.MetadataStreamServerInterceptor(aclProvider)),
+	)
 
 	if err := c.RateLimit.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid rate limit configuration")
 	}
 
 	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
-		opts = append(opts, grpc.UnaryInterceptor(RateLimitInterceptor(limiter)))
+		opts = append(opts, grpc.ChainUnaryInterceptor(RateLimitInterceptor(limiter)))
 		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
 			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
 	}
 
 	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
-		opts = append(opts, grpc.StreamInterceptor(StreamConcurrencyInterceptor(sem)))
+		opts = append(opts, grpc.ChainStreamInterceptor(StreamConcurrencyInterceptor(sem)))
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
 	}
 

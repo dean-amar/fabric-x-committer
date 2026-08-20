@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
@@ -18,8 +19,11 @@ import (
 
 // Start starts a delivery to fetch committed blocks from the sidecar/ledger service.
 // p.NextBlockNum is updated with the latest block number.
-// It returns a channel to receive the committed blocks.
-func Start(ctx context.Context, t *testing.T, conf *connection.ClientConfig, startBlockNum uint64) chan *common.Block {
+// It returns a channel to receive the committed blocks. Extra dial options (e.g. ACL client-auth
+// interceptors for an enforcing sidecar) may be supplied via opts.
+func Start( //nolint:revive // argument-limit.
+	ctx context.Context, t *testing.T, conf *connection.ClientConfig, startBlockNum uint64, opts ...grpc.DialOption,
+) chan *common.Block {
 	t.Helper()
 	receivedBlocksFromLedgerService := make(chan *common.Block, 10)
 	test.RunServiceForTest(ctx, t, func(ctx context.Context) error {
@@ -27,6 +31,7 @@ func Start(ctx context.Context, t *testing.T, conf *connection.ClientConfig, sta
 			ClientConfig: conf,
 			OutputBlock:  receivedBlocksFromLedgerService,
 			NextBlockNum: startBlockNum,
+			DialOpts:     opts,
 		}))
 	}, nil)
 	return receivedBlocksFromLedgerService

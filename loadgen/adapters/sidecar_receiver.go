@@ -14,10 +14,15 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
+	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -38,12 +43,64 @@ const (
 
 // runSidecarReceiver start receiving blocks from the sidecar.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
+	dialOpts, err := clientAuthDialOptions(&params.Res.Profile.Policy, params.ClientConfig.TLS)
+	if err != nil {
+		return errors.Wrap(err, "failed to build client-auth dial options for the sidecar receiver")
+	}
 	return runDeliveryReceiver(ctx, params.Res, func(gCtx context.Context, committedBlock chan *common.Block) error {
 		return delivercommitter.ToQueue(gCtx, delivercommitter.Parameters{
 			ClientConfig: params.ClientConfig,
 			OutputBlock:  committedBlock,
+			DialOpts:     dialOpts,
 		})
 	})
+}
+
+// clientAuthDialOptions builds the gRPC dial options that attach a signed envelope to
+// client-facing dials of ACL-enforced services (e.g. the sidecar's Deliver service). The
+// signer is loaded from the load profile's policy crypto artifacts (the same artifacts used
+// to sign generated transactions), so a channel member's identity authenticates delivery too.
+//
+// A policy without artifacts (the common case for non-ACL deployments) yields a nil signer,
+// which makes auth.UnaryClientInterceptor/StreamClientInterceptor no-op passthroughs — the
+// options are safe to attach unconditionally.
+func clientAuthDialOptions(policy *workload.PolicyProfile, tlsConfig connection.TLSConfig) ([]grpc.DialOption, error) {
+	signer, err := loadDeliverySigner(policy.ArtifactsPath)
+	if err != nil {
+		return nil, err
+	}
+	certHash, err := auth.ClientTLSCertHash(tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	cfg := auth.ClientAuthConfig{
+		Signer:      signer,
+		ChannelID:   policy.ChannelID,
+		TLSCertHash: certHash,
+	}
+	return []grpc.DialOption{
+		grpc.WithChainUnaryInterceptor(auth.UnaryClientInterceptor(cfg)),
+		grpc.WithChainStreamInterceptor(auth.StreamClientInterceptor(cfg)),
+	}, nil
+}
+
+// loadDeliverySigner loads a channel-member signer for client-side ACL envelopes from the
+// peer crypto artifacts at artifactsPath. It returns a nil signer (no error) when no
+// artifacts are configured, which is the case for non-ACL loadgen runs.
+//
+//nolint:ireturn // msp.SigningIdentity is an interface by design.
+func loadDeliverySigner(artifactsPath string) (msp.SigningIdentity, error) {
+	if artifactsPath == "" {
+		return nil, nil //nolint:nilnil // absence of artifacts is not an error; see doc comment.
+	}
+	identities, err := testcrypto.GetPeersIdentities(artifactsPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load peer identities for client auth")
+	}
+	if len(identities) == 0 {
+		return nil, nil //nolint:nilnil // no identity available; the caller falls back to a no-op.
+	}
+	return identities[0], nil
 }
 
 // runOrdererReceiver start receiving blocks from the orderer.

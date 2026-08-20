@@ -20,15 +20,18 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -128,7 +131,8 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			// Adding namespace policy and creating transaction builder
 			runtime.AddOrUpdateNamespaces(t, "1")
 
-			runtime.CommittedBlock = delivercommitter.Start(ctx, t, runtime.SidecarClientConfig, 0)
+			runtime.CommittedBlock = delivercommitter.Start(ctx, t, runtime.SidecarClientConfig, 0,
+				runtime.ClientAuthDialOptions()...)
 
 			t.Log("Try to fetch the first block")
 			b, ok := channel.NewReader(ctx, runtime.CommittedBlock).Read()
@@ -217,7 +221,11 @@ func TestStartTestNode(t *testing.T) {
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint := mustGetEndpoint(ctx, t, containerName, sidecarPort)
 	committerClient := test.NewInsecureClientConfig(sidecarEndpoint)
-	committedBlock := delivercommitter.Start(ctx, t, committerClient, 0)
+	// The sidecar enforces ACL, so the delivery client must attach a signed envelope. The signer is
+	// a channel member from the container's own crypto artifacts, which the sidecar's ACL bundle
+	// trusts.
+	committedBlock := delivercommitter.Start(ctx, t, committerClient, 0,
+		containerDeliveryAuthDialOptions(ctx, t, containerName)...)
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
@@ -225,6 +233,29 @@ func TestStartTestNode(t *testing.T) {
 	monitorMetric(
 		t, getContainerMappedHostPort(ctx, t, containerName, loadGenMetricsPort), nil, 1000,
 	)
+}
+
+// containerDeliveryAuthDialOptions builds dial options that attach a signed, method-bound envelope
+// so a delivery client passes the container sidecar's always-on ACL enforcement. The signer is a
+// channel-member identity from the container's own crypto artifacts, matching the sidecar's ACL
+// bundle. The all-in-one committer node runs on the "mychannel" channel (cmd/config/samples), and
+// it is started in NoneTLSMode here, so no TLS cert-hash binding applies.
+func containerDeliveryAuthDialOptions(ctx context.Context, t *testing.T, containerName string) []grpc.DialOption {
+	t.Helper()
+
+	artifactsPath := copyArtifactsFromContainer(ctx, t, containerName)
+	identities, err := testcrypto.GetPeersIdentities(artifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+
+	cfg := auth.ClientAuthConfig{
+		Signer:    identities[0],
+		ChannelID: "mychannel",
+	}
+	return []grpc.DialOption{
+		grpc.WithChainUnaryInterceptor(auth.UnaryClientInterceptor(cfg)),
+		grpc.WithChainStreamInterceptor(auth.StreamClientInterceptor(cfg)),
+	}
 }
 
 // TestYugabyteTabletDiscoveryWithSingleNodeConnection verifies that the YugabyteDB

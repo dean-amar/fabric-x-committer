@@ -43,10 +43,12 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	sidecarEndpoint := c.SystemConfig.Services.Sidecar.GrpcEndpoint
 	clientCreds, err := c.SystemConfig.ClientTLS.ClientCredentials()
 	require.NoError(t, err)
-	conn, err := grpc.NewClient(
-		sidecarEndpoint.Address(),
-		grpc.WithTransportCredentials(clientCreds),
-	)
+	// The sidecar enforces ACL, and the ACL interceptor runs before the concurrency limiter.
+	// Attach the runtime's signed-envelope dial options so a stream reaches the concurrency
+	// limiter (ResourceExhausted) instead of being rejected first with Unauthenticated.
+	dialOpts := append([]grpc.DialOption{grpc.WithTransportCredentials(clientCreds)},
+		c.ClientAuthDialOptions()...)
+	conn, err := grpc.NewClient(sidecarEndpoint.Address(), dialOpts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 

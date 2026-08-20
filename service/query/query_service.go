@@ -62,7 +62,7 @@ type (
 		metrics     *perfMetrics
 		ready       *channel.Ready
 		healthcheck *health.Server
-		tlsUpdater  serve.DynamicTLSUpdater
+		aclUpdater  *serve.ACLUpdater
 	}
 )
 
@@ -73,6 +73,8 @@ func NewQueryService(config *Config) *Service {
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
+		// The query service enforces ACL on its exposed APIs.
+		aclUpdater: serve.NewACLUpdater(true),
 	}
 }
 
@@ -123,7 +125,7 @@ func (q *Service) Run(ctx context.Context) error {
 func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
-	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
+	serve.RegisterACLUpdater(s.GrpcACLProvider, q.aclUpdater)
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 	serve.RegisterConnStatHandler(s.ConnStatsHandler, q.metrics.serverConnections)
 }
@@ -356,9 +358,17 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 			return
 		}
 
+		bundle, bundleErr := serialization.ExtractAppBundle(configTX.Envelope)
+		if bundleErr != nil {
+			logger.Errorf("Failed to extract ACL bundle from config envelope: %v", bundleErr)
+		}
+
 		seen = true
 		lastVersion = configTX.Version
-		q.tlsUpdater.UpdateClientRootCAs(certs)
+		q.aclUpdater.UpdateClientRootCAs(certs)
+		if bundle != nil {
+			q.aclUpdater.UpdateBundle(bundle)
+		}
 		logger.Infof("Updated dynamic TLS with %d CA certificates from config version %d", len(certs), lastVersion)
 	}
 

@@ -114,6 +114,7 @@ func TestKeepAliveQueryDeadConnectionDetection(t *testing.T) {
 
 	proxy, conn := dialThroughProxy(
 		t, c.SystemConfig.Services.Query.GrpcEndpoint.Address(), clientCredentials(t, c),
+		c.ClientAuthDialOptions()...,
 	)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
@@ -150,14 +151,16 @@ func TestKeepAliveSidecarStreamSlotRelease(t *testing.T) {
 	// Number of connections the Sidecar before our client connects.
 	prevActiveConnections := gauge.value(t)
 
-	proxy, conn := dialThroughProxy(t, addr, clientCreds)
+	authOpts := c.ClientAuthDialOptions()
+	proxy, conn := dialThroughProxy(t, addr, clientCreds, authOpts...)
 
 	sendSidecarInitialMessage(t, conn)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 
-	conn2, err := grpc.NewClient(addr, grpc.WithTransportCredentials(clientCreds))
+	conn2DialOpts := append([]grpc.DialOption{grpc.WithTransportCredentials(clientCreds)}, authOpts...)
+	conn2, err := grpc.NewClient(addr, conn2DialOpts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn2.Close() })
 
@@ -276,17 +279,20 @@ func sendSidecarInitialMessage(t *testing.T, conn *grpc.ClientConn) {
 }
 
 // dialThroughProxy routes a connection through a toxiproxy that can later black-hole the traffic.
+// Extra dial options (e.g. the runtime's ACL client-auth interceptors) may be supplied via opts.
 func dialThroughProxy(
-	t *testing.T, serviceAddr string, clientCreds credentials.TransportCredentials,
+	t *testing.T, serviceAddr string, clientCreds credentials.TransportCredentials, opts ...grpc.DialOption,
 ) (*toxiclient.Proxy, *grpc.ClientConn) {
 	t.Helper()
 	proxy := newProxy(t, serviceAddr)
 
-	conn, err := grpc.NewClient(proxy.Listen,
+	dialOpts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(clientCreds), grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    999 * time.Hour, // effectively disable client-side keep-alive
 			Timeout: 999 * time.Hour, // effectively disable client-side keep-alive
-		}))
+		}),
+	}, opts...)
+	conn, err := grpc.NewClient(proxy.Listen, dialOpts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 

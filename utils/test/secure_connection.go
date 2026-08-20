@@ -145,17 +145,19 @@ func RunSecureConnectionTest(t *testing.T, starter ServerStarter) {
 // CreateClientWithTLS creates and returns a typed gRPC client using the provided TLS configuration.
 // It establishes a secure connection to the given endpoint
 // and returns the generated client using the provided client creation proto function.
+// Extra dial options (e.g. ACL client-auth interceptors) may be supplied via opts.
 func CreateClientWithTLS[T any](
 	t *testing.T,
 	endpoint *connection.Endpoint,
 	tlsCfg connection.TLSConfig,
 	protoClient func(grpc.ClientConnInterface) T,
+	opts ...grpc.DialOption,
 ) T {
 	t.Helper()
 	conn := NewSecuredConnectionWithRetry(t, endpoint, tlsCfg, retry.Profile{
 		// prevents secure connection tests from hanging until the context times out.
 		MaxElapsedTime: new(3 * time.Second),
-	})
+	}, opts...)
 	return protoClient(conn)
 }
 
