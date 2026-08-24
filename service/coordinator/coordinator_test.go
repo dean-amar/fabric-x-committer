@@ -304,9 +304,11 @@ func TestCoordinatorServiceValidTx(t *testing.T) {
 		committerpb.NewTxStatus(committerpb.Status_COMMITTED, "tx1", 1, 0),
 	}, nil)
 
-	test.RequireIntMetricValue(t, preMetricsValue+1, env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(
+	// sendTxStatus increments transactionCommittedTotal after it forwards the status the test
+	// observed above, so the counter is only eventually consistent with that status.
+	test.EventuallyIntMetric(t, preMetricsValue+1, env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(
 		committerpb.Status_COMMITTED.String(),
-	))
+	), 5*time.Second, 100*time.Millisecond)
 
 	_, err = env.coordinator.SetLastCommittedBlockNumber(ctx, &servicepb.BlockRef{Number: 1})
 	require.NoError(t, err)
@@ -547,8 +549,11 @@ func TestCoordinatorServiceDependentOrderedTxs(t *testing.T) {
 		for txID, txStatus := range status {
 			require.Equal(t, committerpb.Status_COMMITTED, txStatus.Status, txID)
 		}
-		test.RequireIntMetricValue(t, expectedReceived,
-			env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(committerpb.Status_COMMITTED.String()))
+		// sendTxStatus increments transactionCommittedTotal after it forwards the statuses
+		// receiveStatus read above, so the counter is only eventually consistent with them.
+		test.EventuallyIntMetric(t, expectedReceived,
+			env.coordinator.metrics.transactionCommittedTotal.WithLabelValues(committerpb.Status_COMMITTED.String()),
+			5*time.Second, 100*time.Millisecond)
 	}
 
 	// Assert that the dependent TX chain reached the mock VC in the correct

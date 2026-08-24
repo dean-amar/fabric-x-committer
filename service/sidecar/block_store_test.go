@@ -65,7 +65,9 @@ func TestBlockStoreAndDelivery(t *testing.T) {
 	require.Zero(t, bs.GetBlockHeight())
 	inputBlock <- blk0
 	ensureAtLeastHeight(t, bs, 1)
-	require.Equal(t, 1, test.GetIntMetricValue(t, metrics.blockHeight))
+	// The worker updates blockHeight after it appends the block to the ledger that
+	// ensureAtLeastHeight polls, so the metric is only eventually consistent with the height.
+	test.EventuallyIntMetric(t, 1, metrics.blockHeight, 5*time.Second, 10*time.Millisecond)
 	require.Greater(t, test.GetMetricValue(t, metrics.appendBlockToLedgerSeconds), float64(0))
 
 	committerClient := test.NewInsecureClientConfig(&serverConfig.GRPC.Endpoint)
@@ -79,7 +81,8 @@ func TestBlockStoreAndDelivery(t *testing.T) {
 	inputBlock <- blk2
 
 	ensureAtLeastHeight(t, bs, 3)
-	require.Equal(t, 3, test.GetIntMetricValue(t, metrics.blockHeight))
+	// blockHeight trails the ledger append that ensureAtLeastHeight polls, so wait for the metric.
+	test.EventuallyIntMetric(t, 3, metrics.blockHeight, 5*time.Second, 10*time.Millisecond)
 	for i := range 3 {
 		blk := <-receivedBlocksFromLedgerService
 		require.Equal(t, uint64(i), blk.Header.Number) //nolint:gosec

@@ -448,8 +448,13 @@ func TestQueryMetrics(t *testing.T) {
 
 	expectedMetricsSize := 4
 	require.Equal(t, 0, env.qs.batcher.viewIDToViewHolder.Count())
-	test.RequireIntMetricValue(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionViews))
-	test.RequireIntMetricValue(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions))
+	// EndView cancels the view context; the session gauges are decremented by the context.AfterFunc
+	// callbacks that fire off that cancellation, so they are only eventually consistent with the
+	// synchronous viewIDToViewHolder removal above.
+	test.EventuallyIntMetric(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionViews),
+		5*time.Second, 10*time.Millisecond)
+	test.EventuallyIntMetric(t, 0, env.qs.metrics.processingSessions.WithLabelValues(sessionTransactions),
+		5*time.Second, 10*time.Millisecond)
 	requireIntVecMetricValue(t, expectedMetricsSize, env.qs.metrics.requests.MetricVec, grpcGetRows)
 	test.RequireIntMetricValue(t, expectedMetricsSize*querySize, env.qs.metrics.keysRequested)
 	test.RequireIntMetricValue(t, expectedMetricsSize*keyCount, env.qs.metrics.keysResponded)
