@@ -16,6 +16,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/go-task/slim-sprig/v3 v3.0.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0

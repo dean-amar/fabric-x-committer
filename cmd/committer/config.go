@@ -19,6 +19,7 @@ const (
 	vcService          = "vc"
 	verifierService    = "verifier"
 	queryService       = "query"
+	authService        = "auth"
 )
 
 var serviceNames = map[string]string{
@@ -27,6 +28,7 @@ var serviceNames = map[string]string{
 	vcService:          "Validator-Committer",
 	verifierService:    "Verifier",
 	queryService:       "Query-Service",
+	authService:        "Auth-Service",
 }
 
 func readConfig(name, configPath string) (any, *serve.Config, error) {
@@ -41,6 +43,8 @@ func readConfig(name, configPath string) (any, *serve.Config, error) {
 		return config.ReadVerifierYamlAndSetupLogging(config.NewViperWithVerifierDefaults(), configPath)
 	case queryService:
 		return config.ReadQueryYamlAndSetupLogging(config.NewViperWithQueryDefaults(), configPath)
+	case authService:
+		return config.ReadAuthYamlAndSetupLogging(config.NewViperWithAuthDefaults(), configPath)
 	default:
 		return nil, nil, errors.Newf("unknown service: %s", name)
 	}

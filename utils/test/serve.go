@@ -54,13 +54,13 @@ func ServeForTest(
 ) (stop context.CancelFunc) {
 	tb.Helper()
 
-	servers, err := serve.NewServers(ctx, sc)
-	tb.Cleanup(servers.Stop)
-	require.NoError(tb, err)
-
 	if registerer == nil {
 		registerer = &HealthService{HealthServer: serve.DefaultHealthCheckService()}
 	}
+
+	servers, err := serve.NewServers(ctx, sc, registerer)
+	tb.Cleanup(servers.Stop)
+	require.NoError(tb, err)
 
 	var wg sync.WaitGroup
 	tb.Cleanup(wg.Wait)

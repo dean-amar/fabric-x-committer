@@ -151,6 +151,23 @@ waiting-txs-limit: 20_000_000
 # Default: 100
 channel-buffer-size: 100
 
+# Optional ACL enforcement. When this section is present, block delivery, block query, and the
+# notification streams are authorized against the central auth service; streams re-authorize when a
+# new configuration block advances the observed configuration. When omitted, the sidecar serves
+# without ACL checks.
+# auth:
+#   server:
+#     endpoint: auth:10001
+#     tls:
+#       mode: mtls
+#       cert-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/sidecar/tls/server.crt
+#       key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/sidecar/tls/server.key
+#       ca-cert-paths:
+#         - /root/artifacts/peerOrganizations/peer-org-0.com/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
+#   # How often an open stream re-authorizes its bound identity against the latest policy.
+#   # Zero uses the enforcer's default interval (1m).
+#   stream-revalidate-interval: 1m
+
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or

@@ -9,6 +9,7 @@ package sidecar
 import (
 	"time"
 
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 )
@@ -29,6 +30,10 @@ type (
 		// ChannelBufferSize is the buffer size that will be used to queue blocks, requests, and statuses.
 		ChannelBufferSize int                       `mapstructure:"channel-buffer-size" default:"100" validate:"gt=0"`
 		Notification      NotificationServiceConfig `mapstructure:"notification"`
+		// Auth optionally enables ACL enforcement: when set, block delivery, block query, and the
+		// notification streams are authorized against the AuthService. When absent (nil), the sidecar
+		// serves without ACL checks, preserving existing behavior.
+		Auth *acl.ClientConfig `mapstructure:"auth"`
 	}
 
 	// LedgerConfig holds the ledger path.

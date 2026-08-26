@@ -43,6 +43,25 @@ type (
 		RegisterService(Servers)
 	}
 
+	// UnaryInterceptorProvider is an optional interface a Registerer may implement to contribute
+	// unary interceptors. They are installed when the gRPC server is constructed and chained after
+	// the built-in (rate-limit) interceptor.
+	UnaryInterceptorProvider interface {
+		UnaryServerInterceptors() []grpc.UnaryServerInterceptor
+	}
+
+	// StreamInterceptorProvider is the streaming counterpart of UnaryInterceptorProvider; its
+	// interceptors are chained after the built-in (concurrency-limit) stream interceptor.
+	StreamInterceptorProvider interface {
+		StreamServerInterceptors() []grpc.StreamServerInterceptor
+	}
+
+	// extraInterceptors holds the interceptors a Registerer contributes beyond the built-in ones.
+	extraInterceptors struct {
+		unary  []grpc.UnaryServerInterceptor
+		stream []grpc.StreamServerInterceptor
+	}
+
 	// Servers holds the gRPC, and HTTP servers along with their listeners.
 	// It provides a unified interface for service registration and lifecycle management.
 	Servers struct {
@@ -115,7 +134,7 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 		return nil
 	}
 
-	servers, err := NewServers(ctx, conf)
+	servers, err := NewServers(ctx, conf, r)
 	defer servers.Stop()
 	if err != nil {
 		return err
@@ -127,9 +146,11 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 // It sets up gRPC, and HTTP servers along with their listeners.
 // It create the server objects even if we do not deploy it eventually.
 // This allows us to avoid nil checks in the service.RegisterService() method in case the endpoint is empty.
+// The registerer may optionally implement UnaryInterceptorProvider / StreamInterceptorProvider to
+// contribute interceptors installed on the gRPC server; a nil registerer contributes none.
 // IMPORTANT: If error is returned, the caller is responsible for calling StopFunc() on the
 // returned Servers.
-func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
+func NewServers(ctx context.Context, conf *Config, r Registerer) (s Servers, err error) {
 	s.stopOnce = &sync.Once{}
 
 	s.GrpcTLSProvider, err = NewTLSProvider(conf.GRPC.TLS)
@@ -139,7 +160,7 @@ func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
 
 	s.ConnStatsHandler = &ConnStatsHandler{}
 
-	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.ConnStatsHandler)
+	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.ConnStatsHandler, interceptorsOf(r))
 	if err != nil {
 		return s, errors.Wrapf(err, "failed creating GRPC server")
 	}
@@ -262,8 +283,24 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 	return l, nil
 }
 
-// newGRPCServer instantiate a [grpc.Server].
-func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, connStats *ConnStatsHandler) (*grpc.Server, error) {
+// interceptorsOf extracts the interceptors a Registerer contributes through the optional provider
+// interfaces. A nil registerer, or one implementing neither interface, contributes none.
+func interceptorsOf(r Registerer) extraInterceptors {
+	var extra extraInterceptors
+	if provider, ok := r.(UnaryInterceptorProvider); ok {
+		extra.unary = provider.UnaryServerInterceptors()
+	}
+	if provider, ok := r.(StreamInterceptorProvider); ok {
+		extra.stream = provider.StreamServerInterceptors()
+	}
+	return extra
+}
+
+// newGRPCServer instantiate a [grpc.Server]. The built-in rate-limit and concurrency interceptors
+// come first; the registerer's contributed interceptors (e.g. ACL enforcement) are chained after.
+func newGRPCServer(
+	c *ServerConfig, tlsProvider *TLSProvider, connStats *ConnStatsHandler, extra extraInterceptors,
+) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),
@@ -275,15 +312,23 @@ func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, connStats *ConnSta
 		return nil, errors.Wrap(err, "invalid rate limit configuration")
 	}
 
+	unary := extra.unary
 	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
-		opts = append(opts, grpc.UnaryInterceptor(RateLimitInterceptor(limiter)))
+		unary = append([]grpc.UnaryServerInterceptor{RateLimitInterceptor(limiter)}, unary...)
 		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
 			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
 	}
+	if len(unary) > 0 {
+		opts = append(opts, grpc.ChainUnaryInterceptor(unary...))
+	}
 
+	stream := extra.stream
 	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
-		opts = append(opts, grpc.StreamInterceptor(StreamConcurrencyInterceptor(sem)))
+		stream = append([]grpc.StreamServerInterceptor{StreamConcurrencyInterceptor(sem)}, stream...)
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
+	}
+	if len(stream) > 0 {
+		opts = append(opts, grpc.ChainStreamInterceptor(stream...))
 	}
 
 	if c.KeepAlive != nil && c.KeepAlive.Params != nil {

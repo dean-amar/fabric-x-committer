@@ -1,0 +1,120 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Configuration for the server
+server:
+  # The gRPC endpoint where the auth service listens for Authenticate calls from clients and
+  # Authorize calls from resource servers. Format: host:port or :port (binds to all interfaces).
+  endpoint: :10001
+  tls: &tlsConfig
+    # TLS mode for server connections: 'none' (no TLS), 'tls' (server auth only),
+    # or 'mtls' (mutual TLS with client cert verification).
+    # mtls is strongly recommended: the token's certificate binding (its proof-of-possession
+    # property) depends on the client presenting a TLS certificate, which this mode enforces.
+    mode: mtls
+    # Path to the server's TLS certificate file (public key).
+    cert-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/tls/server.crt
+    # Path to the server's TLS private key file.
+    key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/tls/server.key
+    # List of paths to CA certificate files for verifying client certificates (required for mtls).
+    ca-cert-paths:
+      - /root/artifacts/peerOrganizations/peer-org-0.com/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
+  keep-alive:
+    params:
+      # After a duration of this time if the server doesn't see any activity it
+      # pings the client to see if the transport is still alive.
+      time: 60s
+      # After having pinged for keepalive check, the server waits for a duration
+      # of Timeout and if no activity is seen even after that the connection is closed.
+      timeout: 10s
+    enforcement-policy:
+      # The minimum amount of time a client should wait before sending a keepalive ping.
+      min-time: 60s
+      # If true, server allows keepalive pings even when there are no active streams(RPCs).
+      permit-without-stream: true
+  # Rate limiting configuration for unary gRPC endpoints (token bucket).
+  rate-limit:
+    # Maximum number of requests per second allowed. Set to 0 to disable rate limiting.
+    # Default: 5,000
+    requests-per-second: 0
+    # Maximum number of requests allowed in a single burst. Default: 1,000
+    burst: 0
+# Monitoring endpoint configuration (Prometheus metrics at /metrics and pprof profiling at /debug/pprof/).
+monitoring:
+  # The endpoint where Prometheus metrics and pprof profiling are exposed.
+  endpoint: :2120
+  # Monitoring TLS configuration should/could be different from the GRPC server TLS
+  # to only allow authorized admins to monitor the service's metrics.
+  tls: *tlsConfig
+  rate-limit:
+    requests-per-second: 0
+    burst: 0
+
+# Maximum time to wait for the auth service to become ready before startup fails.
+# Default: 5m
+startup-timeout: 5m
+
+# Database connection configuration. The auth service reads the committed channel configuration
+# from the state database (the same one the committer uses) and persists issued token records there.
+database:
+  # List of database endpoints to connect to. Format: host:port for each endpoint.
+  endpoints:
+    - db:5433
+  # Database username for authentication.
+  username: "yugabyte"
+  # Database password for authentication.
+  password: "yugabyte"
+  # Database name to connect to.
+  database: "yugabyte"
+  tls:
+    # TLS mode for database connections: 'none' (no TLS) or 'tls' (server auth with CA verification).
+    mode: tls
+    # Path to the CA certificate file for verifying the database server's certificate.
+    ca-cert-path: /root/artifacts/peerOrganizations/peer-org-0.com/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
+  # Maximum size of the database connection pool. Default: 20
+  max-connections: 10
+  # Minimum size of the database connection pool. Default: 1
+  min-connections: 5
+  # Enable load balancing across multiple database endpoints. Set to false for single-node deployments.
+  load-balance: false
+  retry:  # The exponential backoff retry strategy for database operations.
+    initial-interval: 500ms
+    randomization-factor: 0.5
+    multiplier: 1.5
+    max-interval: 60s
+    max-elapsed-time: 15m
+
+# Path to a PEM-encoded EC (P-256) private key used to mint and verify ES256 tokens.
+# All AuthService instances behind a load balancer MUST share the same key so a token minted
+# by one instance verifies at another. When empty, an ephemeral key is generated at startup:
+# convenient for a single-instance dev deployment, but tokens then do not survive a restart and
+# separate instances cannot verify each other's tokens.
+signing-key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/auth-signing-key.pem
+
+# Lifetime of a minted token. Clients refresh by calling Authenticate again before it elapses.
+# Keep it short: it bounds how long a revoked token can still be honored (revocation is a record
+# delete, effective within this window). Default: 5m
+token-ttl: 5m
+
+# Bounds how far an authentication envelope's timestamp may deviate from the server's clock, so a
+# captured envelope cannot be replayed once it goes stale. Default: 5m
+envelope-freshness-window: 5m
+
+# How often the service reads the latest committed channel configuration from the state database to
+# rebuild its policy/MSP evaluation bundle. Default: 1m
+config-refresh-interval: 1m
+
+# How often expired token records are swept from the store. Default: 1m
+token-cleanup-interval: 1m
+
+# Logging configuration
+logging:
+  # Log level specification. Can be a single level (e.g., "info", "debug") or
+  # module-specific levels (e.g., "info,auth=debug").
+  logSpec: info:grpc=error
+  # Log message format template.
+  format: >-
+    %{color}%{time:2006-01-02 15:04:05.000 MST} [%{module}] %{shortfunc}
+    -> %{level:.4s}%{color:reset} %{message}

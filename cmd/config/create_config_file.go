@@ -114,6 +114,8 @@ var (
 	//go:embed templates/loadgen_shared.yaml.tmpl
 	templateLoadGenShared string
 
+	//go:embed templates/auth.yaml.tmpl
+	TemplateAuth string
 	//go:embed templates/coordinator.yaml.tmpl
 	TemplateCoordinator string
 	//go:embed templates/mock-orderer.yaml.tmpl

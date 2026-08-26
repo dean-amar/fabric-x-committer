@@ -17,12 +17,16 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
@@ -57,12 +61,13 @@ type (
 	// Service is a gRPC service that implements the QueryServiceServer interface.
 	Service struct {
 		committerpb.UnimplementedQueryServiceServer
-		batcher     viewsBatcher
-		config      *Config
-		metrics     *perfMetrics
-		ready       *channel.Ready
-		healthcheck *health.Server
-		tlsUpdater  serve.DynamicTLSUpdater
+		batcher      viewsBatcher
+		config       *Config
+		metrics      *perfMetrics
+		ready        *channel.Ready
+		healthcheck  *health.Server
+		tlsUpdater   serve.DynamicTLSUpdater
+		authEnforcer *acl.Enforcer
 	}
 )
 
@@ -89,6 +94,17 @@ func (q *Service) Run(ctx context.Context) error {
 		return poolErr
 	}
 	defer pool.Close()
+
+	if q.config.Auth != nil {
+		conn, connErr := connection.NewSingleConnection(q.config.Auth.Server)
+		if connErr != nil {
+			return errors.Wrap(connErr, "failed to connect to the auth service")
+		}
+		defer connection.CloseConnectionsLog(conn)
+		// The query service exposes only unary methods, so no stream revalidation interval applies.
+		q.authEnforcer = acl.NewEnforcer(servicepb.NewAuthServiceClient(conn), acl.EnforcerConfig{})
+		logger.Infof("ACL enforcement enabled via auth service at %s", q.config.Auth.Server.Endpoint.Address())
+	}
 
 	var limitter *semaphore.Weighted
 	if q.config.MaxActiveViews > 0 {
@@ -126,6 +142,16 @@ func (q *Service) RegisterService(s serve.Servers) {
 	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 	serve.RegisterConnStatHandler(s.ConnStatsHandler, q.metrics.serverConnections)
+}
+
+// UnaryServerInterceptors contributes the ACL enforcement interceptor when the auth service is
+// configured. All query methods are unary, so no stream interceptor is needed. serve calls this at
+// server construction, after Run has installed the enforcer.
+func (q *Service) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
+	if q.authEnforcer == nil {
+		return nil
+	}
+	return []grpc.UnaryServerInterceptor{q.authEnforcer.UnaryInterceptor()}
 }
 
 // BeginView implements the query-service interface.

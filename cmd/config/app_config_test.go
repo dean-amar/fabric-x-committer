@@ -24,6 +24,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/query"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
@@ -373,6 +374,79 @@ func TestReadConfigQuery(t *testing.T) {
 			t.Parallel()
 			v := NewViperWithQueryDefaults()
 			c, serverConfig, err := ReadQueryYamlAndSetupLogging(v, tc.configFilePath)
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedServiceConfig, c)
+			require.Equal(t, tc.expectedServerConfig, serverConfig)
+		})
+	}
+}
+
+func TestReadConfigAuth(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                  string
+		configFilePath        string
+		expectedServiceConfig *auth.Config
+		expectedServerConfig  *serve.Config
+	}{{
+		name:           "default",
+		configFilePath: emptyConfig(t),
+		expectedServerConfig: &serve.Config{
+			GRPC: serve.ServerConfig{
+				Endpoint: *newEndpoint(connection.DefaultHost, authServerPort),
+				RateLimit: serve.RateLimitConfig{
+					RequestsPerSecond: 5000,
+					Burst:             1000,
+				},
+				MaxConcurrentStreams: 10,
+			},
+			HTTP:                  *newServerConfig(authMonitoringPort),
+			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
+		},
+		expectedServiceConfig: &auth.Config{
+			Database:                defaultDBConfig(),
+			TokenTTL:                5 * time.Minute,
+			EnvelopeFreshnessWindow: 5 * time.Minute,
+			ConfigRefreshInterval:   time.Minute,
+			TokenCleanupInterval:    time.Minute,
+		},
+	}, {
+		name:           "sample",
+		configFilePath: "samples/auth.yaml",
+		expectedServerConfig: withClientStreamLimit(&serve.Config{
+			GRPC: serve.ServerConfig{
+				Endpoint: *newEndpoint("", authServerPort),
+				TLS:      test.NewServiceTLSConfig(artifactsPath, "auth", connection.MutualTLSMode),
+				KeepAlive: &serve.ServerKeepAliveConfig{
+					Params: &serve.ServerKeepAliveParamsConfig{
+						Time:    60 * time.Second,
+						Timeout: 10 * time.Second,
+					},
+					EnforcementPolicy: &serve.ServerKeepAliveEnforcementPolicyConfig{
+						MinTime:             60 * time.Second,
+						PermitWithoutStream: true,
+					},
+				},
+			},
+			HTTP:                  *newServerConfigWithDefaultTLS("auth", authMonitoringPort),
+			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
+		}),
+		expectedServiceConfig: &auth.Config{
+			Database: defaultSampleDBConfig(),
+			SigningKeyPath: filepath.Join(artifactsPath,
+				"peerOrganizations/peer-org-0.com/peers/auth/auth-signing-key.pem"),
+			TokenTTL:                5 * time.Minute,
+			EnvelopeFreshnessWindow: 5 * time.Minute,
+			ConfigRefreshInterval:   time.Minute,
+			TokenCleanupInterval:    time.Minute,
+		},
+	}}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := NewViperWithAuthDefaults()
+			c, serverConfig, err := ReadAuthYamlAndSetupLogging(v, tc.configFilePath)
 			require.NoError(t, err)
 			require.Equal(t, tc.expectedServiceConfig, c)
 			require.Equal(t, tc.expectedServerConfig, serverConfig)

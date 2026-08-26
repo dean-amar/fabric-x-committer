@@ -1,0 +1,98 @@
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+syntax = "proto3";
+
+option go_package = "github.com/hyperledger/fabric-x-committer/api/servicepb";
+
+package servicepb;
+
+// AuthService is the central authentication and authorization service. It authenticates clients
+// from a signed envelope and mints cert-bound JWTs (Authenticate), authorizes a token against a
+// resource policy for a resource server (Authorize), and re-evaluates an already-bound identity
+// against the latest policy for a long-lived stream (ReAuthorize). Only the AuthService mints and
+// verifies tokens; resource servers hold no signing keys and delegate every decision here.
+service AuthService {
+    // Authenticate verifies a signed envelope and mints a short-lived, cert-bound JWT.
+    rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+    // Authorize evaluates a token against a resource policy for a resource server, returning the
+    // identity bound to the token so the caller can bind it to a stream session.
+    rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+    // ReAuthorize re-evaluates an identity already bound to a stream session against the latest
+    // policy, without re-presenting the token. It is how a resource server keeps verifying that a
+    // long-lived stream's identity is still permitted after configuration changes.
+    rpc ReAuthorize(ReAuthorizeRequest) returns (AuthorizeResponse);
+}
+
+message AuthenticateRequest {
+    // signed_envelope is a marshaled common.Envelope carrying the client's serialized MSP identity
+    // and a signature over the payload; under mutual TLS its ChannelHeader also carries the TLS
+    // certificate hash the token is bound to.
+    bytes signed_envelope = 1;
+    // requested_scope optionally narrows the token's authority (least privilege). A requested scope
+    // may only narrow, never broaden, the identity's authority.
+    repeated string requested_scope = 2;
+}
+
+message AuthenticateResponse {
+    // token is the minted cert-bound JWT the client attaches to subsequent RPCs.
+    string token = 1;
+    // expires_at is the token expiry in unix seconds.
+    int64 expires_at = 2;
+}
+
+message AuthorizeRequest {
+    // token is the client's JWT, forwarded by the resource server.
+    string token = 1;
+    // resource is the gRPC full method being authorized, e.g. "/committerpb.QueryService/GetRows".
+    string resource = 2;
+    // tls_cert_hash is the SHA-256 of the caller's TLS certificate observed at the resource server.
+    // It is empty when the caller connected without a client certificate.
+    bytes tls_cert_hash = 3;
+}
+
+message ReAuthorizeRequest {
+    // identity is the MSP SerializedIdentity that Authorize bound to the stream session at
+    // establishment. Re-authorization re-resolves it against the latest configuration and evaluates
+    // the resource policy again; it deliberately does not re-present the token, so a stream's
+    // authorization tracks the identity's live permissions rather than the establishment token's TTL.
+    bytes identity = 1;
+    // resource is the gRPC full method the stream belongs to.
+    string resource = 2;
+}
+
+message AuthorizeResponse {
+    // authorized is true when the identity satisfies the resource policy. The RPCs return a gRPC
+    // status error for every non-authorized outcome (Unauthenticated for an invalid, expired, or
+    // unknown token or a certificate mismatch; PermissionDenied for a scope or policy denial;
+    // Unavailable before the configuration is loaded), so a successful response always has
+    // authorized = true.
+    bool authorized = 1;
+    // identity is the resolved MSP SerializedIdentity bound to the token. Authorize returns it so a
+    // resource server can bind it to a stream session and later pass it to ReAuthorize.
+    bytes identity = 2;
+}
+
+// TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
+// in the auth service's identity store. It - not the raw JWT - holds the client's serialized MSP
+// identity, so the identity can be re-resolved against the latest configuration at authorization
+// time and a token can be revoked by deleting the record.
+message TokenRecord {
+    // jti is the opaque token id and the row key.
+    string jti = 1;
+    // serialized_identity is the client's MSP SerializedIdentity.
+    bytes serialized_identity = 2;
+    // msp_id is the client's MSP identifier, kept for logging and quick filtering.
+    string msp_id = 3;
+    // cert_hash_sha256 is the cnf/x5t#S256 binding to the client's TLS certificate.
+    bytes cert_hash_sha256 = 4;
+    // scope is the optional least-privilege scope granted at issuance.
+    repeated string scope = 5;
+    // issued_sequence is the config sequence the identity was first resolved against.
+    uint64 issued_sequence = 6;
+    // expires_at is the token expiry in unix seconds, used for TTL cleanup.
+    int64 expires_at = 7;
+}

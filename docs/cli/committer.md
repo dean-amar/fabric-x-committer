@@ -65,6 +65,7 @@ Usage:
   Committer start [command]
 
 Available Commands:
+  auth        Starts Auth-Service.
   coordinator Starts Coordinator.
   query       Starts Query-Service.
   sidecar     Starts Sidecar.

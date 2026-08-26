@@ -35,6 +35,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/deliverorderer"
@@ -69,6 +70,7 @@ type Service struct {
 	metrics               *perfMetrics
 	tlsUpdater            serve.DynamicTLSUpdater
 	ready                 *channel.Ready
+	authEnforcer          *acl.Enforcer
 }
 
 var (
@@ -125,6 +127,21 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer blockStoreInstance.close()
 	s.blockStore = blockStoreInstance
+
+	// Set up ACL enforcement before signaling ready, so the interceptors are installed when the
+	// gRPC server is constructed (which happens after WaitForReady returns).
+	if s.config.Auth != nil {
+		authConn, authErr := connection.NewSingleConnection(s.config.Auth.Server)
+		if authErr != nil {
+			return errors.Wrap(authErr, "failed to connect to the auth service")
+		}
+		defer connection.CloseConnectionsLog(authConn)
+		s.authEnforcer = acl.NewEnforcer(servicepb.NewAuthServiceClient(authConn), acl.EnforcerConfig{
+			RevalidateInterval: s.config.Auth.StreamRevalidateInterval,
+		})
+		logger.Infof("ACL enforcement enabled via auth service at %s", s.config.Auth.Server.Endpoint.Address())
+	}
+
 	s.ready.SignalReady()
 	defer s.ready.Reset()
 
@@ -177,6 +194,25 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 	serve.RegisterConnStatHandler(srv.ConnStatsHandler, s.metrics.serverConnections)
+}
+
+// UnaryServerInterceptors contributes the ACL enforcement interceptor for the sidecar's unary
+// block-query methods when the auth service is configured. serve installs it at server construction.
+func (s *Service) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
+	if s.authEnforcer == nil {
+		return nil
+	}
+	return []grpc.UnaryServerInterceptor{s.authEnforcer.UnaryInterceptor()}
+}
+
+// StreamServerInterceptors contributes the ACL enforcement interceptor for the sidecar's block
+// delivery and notification streams when the auth service is configured. The interceptor authorizes
+// each stream at establishment and re-authorizes it when the observed configuration advances.
+func (s *Service) StreamServerInterceptors() []grpc.StreamServerInterceptor {
+	if s.authEnforcer == nil {
+		return nil
+	}
+	return []grpc.StreamServerInterceptor{s.authEnforcer.StreamInterceptor()}
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(

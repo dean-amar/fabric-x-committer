@@ -26,6 +26,9 @@
     - core::0136::prepositions
     - core::0134::synonyms
     - core::0216::synonyms
+    # Verb-noun method naming: our domain's canonical RPC verbs (e.g. AuthService's
+    # Authenticate/Authorize, the OAuth 2.0 / RFC 8705 names) read best as bare verbs.
+    - core::0136::verb-noun
     # Java related issues (might be addressed in the future if required)
     - core::0191::java-multiple-files
     - core::0191::java-package

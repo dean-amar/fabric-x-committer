@@ -34,6 +34,8 @@ const (
 	queryMonitoringPort       = 2117
 	loadgenServerPort         = 8001
 	loadgenMonitoringPort     = 2118
+	authServerPort            = 10001
+	authMonitoringPort        = 2120
 )
 
 // NewViperWithCoordinatorDefaults returns a viper instance with the coordinator default values.
@@ -72,6 +74,13 @@ func NewViperWithQueryDefaults() *viper.Viper {
 // NewViperWithLoadGenDefaults returns a viper instance with the load generator default values.
 func NewViperWithLoadGenDefaults() *viper.Viper {
 	return newViperWithServiceDefault("loadgen", loadgenServerPort, loadgenMonitoringPort)
+}
+
+// NewViperWithAuthDefaults returns a viper instance with the auth-service default values.
+func NewViperWithAuthDefaults() *viper.Viper {
+	v := newViperWithServiceDefault("auth", authServerPort, authMonitoringPort)
+	setClientFacingServerLimits(v)
+	return v
 }
 
 // NewViperWithOrdererDefaults returns a viper instance with the mock-orderer service default values.
