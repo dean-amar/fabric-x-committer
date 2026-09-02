@@ -14,6 +14,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	promgo "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -256,6 +257,66 @@ func requireRPCStatusRecorded(t *testing.T, rpcErr error, wantStatus string) {
 	}, 30*time.Second, 100*time.Millisecond)
 }
 
+// TestServerStatsHandlerUnaryMessageMetrics verifies the per-message families for unary RPCs: every
+// request is counted as received and every response as sent, each with its wire size observed.
+func TestServerStatsHandlerUnaryMessageMetrics(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	env := newServerStatsTestEnv(ctx, t, serve.DefaultHealthCheckService())
+
+	const rpcCount = 3
+	for range rpcCount {
+		_, err := env.health.Check(ctx, &healthgrpc.HealthCheckRequest{})
+		require.NoError(t, err)
+	}
+
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		require.Equal(ct, rpcCount, test.GetIntMetricValue(ct,
+			env.metrics.MessagesReceivedTotal.WithLabelValues(healthCheckMethod)))
+		require.Equal(ct, rpcCount, test.GetIntMetricValue(ct,
+			env.metrics.MessagesSentTotal.WithLabelValues(healthCheckMethod)))
+		requireMessageSizeObserved(ct, env.metrics.MessageReceivedSizeBytes, healthCheckMethod, rpcCount)
+		requireMessageSizeObserved(ct, env.metrics.MessageSentSizeBytes, healthCheckMethod, rpcCount)
+	}, 30*time.Second, 100*time.Millisecond)
+}
+
+// TestServerStatsHandlerStreamMessageMetrics verifies the per-message families count the individual
+// messages of a streaming RPC, which is what makes per-stream throughput visible: the stream's own
+// Begin/End pair says nothing about how much flowed through it.
+func TestServerStatsHandlerStreamMessageMetrics(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+	healthServer := serve.DefaultHealthCheckService()
+	env := newServerStatsTestEnv(ctx, t, healthServer)
+
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	t.Cleanup(cancelStream)
+
+	// Watch consumes a single request and then pushes one message per status change, the first one
+	// immediately. Driving two messages out against the one message in keeps the directions
+	// distinguishable, so a received/sent mix-up cannot pass.
+	stream, err := env.health.Watch(streamCtx, &healthgrpc.HealthCheckRequest{})
+	require.NoError(t, err)
+	_, err = stream.Recv()
+	require.NoError(t, err)
+	healthServer.SetServingStatus("", healthgrpc.HealthCheckResponse_NOT_SERVING)
+	_, err = stream.Recv()
+	require.NoError(t, err)
+
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		require.Equal(ct, 1, test.GetIntMetricValue(ct,
+			env.metrics.MessagesReceivedTotal.WithLabelValues(healthWatchMethod)))
+		require.Equal(ct, 2, test.GetIntMetricValue(ct,
+			env.metrics.MessagesSentTotal.WithLabelValues(healthWatchMethod)))
+		requireMessageSizeObserved(ct, env.metrics.MessageReceivedSizeBytes, healthWatchMethod, 1)
+		requireMessageSizeObserved(ct, env.metrics.MessageSentSizeBytes, healthWatchMethod, 2)
+	}, 30*time.Second, 100*time.Millisecond)
+}
+
 // newServerStatsTestEnv starts a server wired with the stats handler and the given health service,
 // and returns the recorded metrics together with a connected health client.
 func newServerStatsTestEnv(
@@ -276,9 +337,31 @@ func newServerStatsTestEnv(
 	}
 }
 
+// requireMessageSizeObserved asserts the size histogram recorded exactly wantCount observations for
+// methodName, each of a positive size: WireLength counts the 5-byte gRPC frame header on top of the
+// payload, so even an empty message is never observed as zero.
+func requireMessageSizeObserved(
+	t test.TestingT, h *prometheus.HistogramVec, methodName string, wantCount uint64,
+) {
+	t.Helper()
+	require.Equal(t, wantCount, histogramVecCount(t, h.MetricVec, methodName))
+	require.Positive(t, metricVecValue(t, h.MetricVec, methodName))
+}
+
 func metricVecValue(t test.TestingT, mv *prometheus.MetricVec, lvs ...string) float64 {
 	t.Helper()
 	m, err := mv.GetMetricWithLabelValues(lvs...)
 	require.NoError(t, err)
 	return test.GetMetricValue(t, m)
+}
+
+// histogramVecCount returns the number of observations recorded on the histogram child carrying lvs.
+// GetMetricValue reports a histogram's mean, which cannot distinguish one observation from many.
+func histogramVecCount(t test.TestingT, mv *prometheus.MetricVec, lvs ...string) uint64 {
+	t.Helper()
+	m, err := mv.GetMetricWithLabelValues(lvs...)
+	require.NoError(t, err)
+	var gm promgo.Metric
+	require.NoError(t, m.Write(&gm))
+	return gm.Histogram.GetSampleCount()
 }

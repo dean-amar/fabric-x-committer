@@ -50,6 +50,18 @@ var LatencyBuckets = []float64{.0001, .001, .002, .003, .004, .005, .01, .03, .0
 // to 6h.
 var StreamDurationBuckets = []float64{.1, .5, 1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600, 10800, 21600}
 
+// MessageSizeBuckets are the histogram bucket boundaries (bytes) for the gRPC per-message wire-size
+// metrics, shared by the received and sent histograms. Powers of four from 16B to 4MiB, sized from
+// what a loaded pipeline produces: an empty control message is 5B, since WireLength adds a 5-byte
+// frame header to the payload and so can never fall below it; status and notification batches land
+// around 4-8KiB, and block and TX batches in the tens of KiB. The 4MiB top is gRPC's default receive
+// limit, so an inbound message in +Inf is one that only fits because this repo raises the limit to
+// connection.MaxMsgSize. Sends have no comparable default (gRPC allows up to MaxInt32), so +Inf on
+// the sent histogram means only "unusually large".
+var MessageSizeBuckets = []float64{
+	16, 64, 256, 1 << 10, 4 << 10, 16 << 10, 64 << 10, 256 << 10, 1 << 20, 4 << 20,
+}
+
 // NewThroughputMetrics creates a new prometheus throughput counter.
 func NewThroughputMetrics(p *Provider, params MetricsParameters) *ThroughputMetrics {
 	return &ThroughputMetrics{

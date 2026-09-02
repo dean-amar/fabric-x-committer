@@ -29,6 +29,19 @@ type ServerMetrics struct {
 	// ActiveConnections is incremented when the server accepts a connection and decremented
 	// when it is torn down, so it reflects the number of connections currently open.
 	ActiveConnections prometheus.Gauge
+	// MessagesReceivedTotal counts individual messages the server received. A streaming RPC is one
+	// RequestsTotal observation however much flows through it, so this is what makes per-stream
+	// throughput visible.
+	MessagesReceivedTotal *prometheus.CounterVec
+	// MessagesSentTotal counts individual messages the server sent, the outbound counterpart of
+	// MessagesReceivedTotal.
+	MessagesSentTotal *prometheus.CounterVec
+	// MessageReceivedSizeBytes observes the wire size of each message received: the compressed
+	// payload plus gRPC framing, excluding HTTP/2 framing.
+	MessageReceivedSizeBytes *prometheus.HistogramVec
+	// MessageSentSizeBytes observes the wire size of each message sent, on the same basis as
+	// MessageReceivedSizeBytes.
+	MessageSentSizeBytes *prometheus.HistogramVec
 }
 
 const method = "method"
@@ -68,5 +81,31 @@ func NewServerMetrics(p *monitoring.Provider, params monitoring.MetricsParameter
 			Name:      "active_connections",
 			Help:      "Number of client connections currently open on the server",
 		}),
+		MessagesReceivedTotal: p.NewCounterVec(prometheus.CounterOpts{
+			Namespace: params.Namespace,
+			Subsystem: params.Subsystem,
+			Name:      "messages_received_total",
+			Help:      "Number of messages received by the server",
+		}, []string{method}),
+		MessagesSentTotal: p.NewCounterVec(prometheus.CounterOpts{
+			Namespace: params.Namespace,
+			Subsystem: params.Subsystem,
+			Name:      "messages_sent_total",
+			Help:      "Number of messages sent by the server",
+		}, []string{method}),
+		MessageReceivedSizeBytes: p.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: params.Namespace,
+			Subsystem: params.Subsystem,
+			Name:      "message_received_size_bytes",
+			Help:      "The wire size (bytes) of messages received by the server",
+			Buckets:   monitoring.MessageSizeBuckets,
+		}, []string{method}),
+		MessageSentSizeBytes: p.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: params.Namespace,
+			Subsystem: params.Subsystem,
+			Name:      "message_sent_size_bytes",
+			Help:      "The wire size (bytes) of messages sent by the server",
+			Buckets:   monitoring.MessageSizeBuckets,
+		}, []string{method}),
 	}
 }
