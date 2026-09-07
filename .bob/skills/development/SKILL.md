@@ -95,6 +95,7 @@ most common review rejection:
 | Retry / keep a loop alive | `retry.Sustain`, `retry.WaitForCondition` | `utils/retry` |
 | Run a service + gRPC/HTTP servers | `serve.StartAndServe` | `utils/serve` |
 | Prometheus metrics | `monitoring.Provider` + `promutil.*` | `utils/monitoring` |
+| Enforce/attach gRPC ACL | `acl.Enforcer` (server interceptors), `acl.TokenSource` (client credentials) | `utils/acl` |
 | Package logger | `flogging.MustGetLogger` | `fabric-lib-go/common/flogging` |
 
 **Test fixtures** — test code has its own reuse discipline: don't hand-roll crypto, TLS, or
@@ -355,6 +356,7 @@ if err != nil {
 never leak a raw internal error (stack traces must not cross the wire). Available
 (`utils/grpcerror/wrap.go`, all nil-safe): `WrapInternalError`, `WrapInvalidArgument`,
 `WrapCancelled`, `WrapFailedPrecondition`, `WrapUnimplemented`, `WrapNotFound`,
+`WrapUnavailable`, `WrapUnauthenticated`, `WrapPermissionDenied`,
 `WrapResourceExhaustedOrCancelled(ctx, err)`, `WrapWithContext(err, ctx)`. Map sentinels
 to codes with an `errors.Is` chain (`service/query/query_service.go:382`).
 

@@ -10,7 +10,9 @@ This guide explains how to configure Transport Layer Security (TLS) for Committe
 Each service configuration may include a `tls` section. This section defines the TLS mode and the filesystem paths to the required certificate files.
 
 ### Parameters
-> Note: In this document, “CA certificates” refer to TLS root CA certificates used to verify the TLS certificate of a component (e.g., sidecar, coordinator, verifier, committer, query) acting as a server or client.
+> Note: In this document, “CA certificates” refer to TLS root CA certificates used to verify the TLS certificate of a component (e.g., sidecar, coordinator, verifier, committer, query, auth) acting as a server or client.
+
+> Note: For the Auth Service and any ACL-protected server, `mode: mtls` is required rather than merely recommended. The token's proof-of-possession property comes from binding it to the client's TLS certificate, which only mutual TLS makes present on the connection; without it a token degrades to a plain bearer token. See [Auth Service](auth-service.md).
 
 | Field | Type | Description                                                                                                                                                    |
 | :--- | :--- |:---------------------------------------------------------------------------------------------------------------------------------------------------------------|

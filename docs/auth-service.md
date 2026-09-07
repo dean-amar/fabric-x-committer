@@ -12,8 +12,6 @@ delegating to the `AuthService`. This decouples the one-time, expensive signatur
 the many cheap per-call authorization checks, and works behind client-side load balancing because the
 authoritative state lives in one place (the state database), not on a socket or an instance.
 
-See the RFC (`updated_acl_rfc.md`) for the full motivation and design rationale.
-
 ## Structure
 
 The service is composed of focused collaborators, each with one responsibility:
@@ -26,7 +24,7 @@ The service is composed of focused collaborators, each with one responsibility:
   service; resource servers never verify tokens themselves.
 - **`tokenStore`** (`store.go`) — the token-to-identity binding store: it maps a token id (`jti`) to
   the client's resolved MSP identity (plus its certificate binding, scope, and expiry), persisted in
-  the dedicated `auth_tokens` namespace and fronted by an in-memory read-through cache.
+  the dedicated `auth_tokens` table and fronted by an in-memory read-through cache.
 - **`authenticator`** (`authenticate.go`) — verifies a signed envelope and issues a token, writing
   the token-to-identity binding to the store.
 - **`authorizer`** (`authorize.go`) — answers authorization decisions.
@@ -109,8 +107,9 @@ policy, the request is denied.
   `stream-revalidate-interval`. Because re-authorization checks the *identity* (not the token), a
   long-lived stream is torn down when a configuration change removes the identity's organization, but
   is never dropped merely because the establishment token's TTL elapsed - stream lifetime is
-  decoupled from token lifetime. Re-authorization is checked on stream activity; a fully idle stream
-  is re-checked on its next message.
+  decoupled from token lifetime. Re-authorization runs on a background timer per stream, so a
+  definitive denial cancels the stream context immediately; an idle stream is torn down at the next
+  tick rather than waiting for its next message.
 - **Revocation.** Revocation is a delete of the token record (`tokenStore.delete`), an operational
   primitive not yet exposed through a client-facing RPC. Because each instance fronts the store with a
   short-lived read-through cache, cross-instance revocation takes effect within the token TTL rather

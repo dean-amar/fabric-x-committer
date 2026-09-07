@@ -198,6 +198,8 @@ Start the database cluster first and wait for it to be healthy before starting a
    - Verifier Service — stateless, loads policies on first request
    - Coordinator Service — connects to VC and Verifier services
    - Sidecar Service — connects to Coordinator and Ordering Service
+   - Auth Service (optional) — connects to database on startup; start it before the Query Service
+     and Sidecar when ACL enforcement is enabled
 
 ### Service Dependencies
 
@@ -209,6 +211,12 @@ Start the database cluster first and wait for it to be healthy before starting a
 | Verifier | No dependencies (policies loaded on first request) |
 | Coordinator | Requires VC Service and Verifier |
 | Sidecar | Requires Coordinator and Ordering Service |
+| Auth Service (optional) | Requires Database |
+
+When an `auth:` section is configured, the Query Service and Sidecar additionally require the Auth
+Service to authorize incoming RPCs. Until the first configuration block is committed and observed,
+the Auth Service returns `Unavailable` and ACL-protected calls are rejected. See
+[Auth Service](auth-service.md).
 
 ### Graceful Shutdown
 

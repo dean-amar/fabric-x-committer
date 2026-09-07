@@ -117,11 +117,12 @@ func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 		stream := &aclServerStream{
 			ServerStream: ss,
 			ctx:          ctx,
+			cancel:       cancel,
 			enforcer:     e,
 			resource:     info.FullMethod,
 			identity:     identity,
 		}
-		go stream.revalidate(cancel)
+		go stream.revalidate()
 		return handler(srv, stream)
 	}
 }
@@ -198,7 +199,9 @@ type denial struct {
 type aclServerStream struct {
 	grpc.ServerStream
 	//nolint:containedctx // the wrapped stream must return this (cancelable) context from Context().
-	ctx      context.Context
+	ctx context.Context
+	// cancel tears the stream down when revalidation reaches a definitive denial.
+	cancel   context.CancelFunc
 	enforcer *Enforcer
 	resource string
 	identity []byte
@@ -228,7 +231,7 @@ func (s *aclServerStream) SendMsg(m any) error {
 // serving and the check is retried next tick, mirroring the client's cached-token fallback. Only a
 // definitive denial - a policy or identity rejection - terminates the stream: the loop records the
 // error (so the next receive/send returns it) and cancels the stream context.
-func (s *aclServerStream) revalidate(cancel context.CancelFunc) {
+func (s *aclServerStream) revalidate() {
 	ticker := time.NewTicker(s.enforcer.revalidateInterval)
 	defer ticker.Stop()
 	for {
@@ -248,7 +251,7 @@ func (s *aclServerStream) revalidate(cancel context.CancelFunc) {
 			}
 			logger.Warnf("ACL re-check for [%s] denied; terminating the stream: %v", s.resource, err)
 			s.denied.Store(&denial{err: err})
-			cancel()
+			s.cancel()
 			return
 		}
 	}

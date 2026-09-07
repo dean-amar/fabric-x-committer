@@ -67,6 +67,7 @@ func TestHealthcheckCMD(t *testing.T) {
 		{service: vcService, name: serviceNames[vcService], templ: config.TemplateVC},
 		{service: verifierService, name: serviceNames[verifierService], templ: config.TemplateVerifier},
 		{service: queryService, name: serviceNames[queryService], templ: config.TemplateQueryService},
+		{service: authService, name: serviceNames[authService], templ: config.TemplateAuth},
 	} {
 		t.Run(fmt.Sprintf("%s/serving", sc.name), func(t *testing.T) {
 			cliutil.UnitTestRunner(t, committerCMD(), cliutil.CommandTest{

@@ -247,7 +247,8 @@ func (s *Service) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 
 // StreamServerInterceptors contributes the ACL enforcement interceptor for the sidecar's block
 // delivery and notification streams when the auth service is configured. The interceptor authorizes
-// each stream at establishment and re-authorizes it when the observed configuration advances.
+// each stream at establishment and re-authorizes it on a background timer, so a configuration change
+// that revokes the bound identity's access tears the stream down.
 func (s *Service) StreamServerInterceptors() []grpc.StreamServerInterceptor {
 	if s.authEnforcer == nil {
 		return nil

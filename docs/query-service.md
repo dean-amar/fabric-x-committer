@@ -199,6 +199,10 @@ type Config struct {
    // GetTransactionStatus (number of transaction IDs).
    // Set to 0 to disable the limit.
    MaxRequestKeys int
+   // Auth optionally enables ACL enforcement: when set, every RPC is authorized against the
+   // Auth Service. When nil, the query service serves without ACL checks.
+   // See auth-service.md.
+   Auth *acl.ClientConfig
 }
 ```
 

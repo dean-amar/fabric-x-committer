@@ -31,6 +31,7 @@ Ordering Service
 - **Validator-Committer (VC)** — Executes a three-stage pipeline (Prepare, Validate, Commit) performing MVCC checks and committing valid transactions to the database.
 - **Query Service** — Provides read-only access to the committed world state with configurable isolation levels and query batching.
 - **Database Cluster** — Stores world state, transaction statuses, and namespace policies. Supports YugabyteDB (recommended) and PostgreSQL.
+- **Auth Service** (optional) — Issues certificate-bound ES256 tokens and answers per-RPC authorization decisions, enabling ACL enforcement on the Query Service and Sidecar. Enabled per service via an `auth:` config section.
 
 ## Key Capabilities
 

@@ -344,5 +344,16 @@ return serve.StartAndServe(ctx, service, serverConfig)
 5. `cmd/config/app_config.go` — `Read<X>YamlAndSetupLogging` via `readYamlAndSetupLogging[<X>.Config]`.
 6. `cmd/committer/config.go` + `start_cmd.go` — add the service to config dispatch and the
    `startService` switch → `serve.StartAndServe`.
-7. Sample YAML under `cmd/config/samples/`. Run `make lint`, `make test`, and
-   `make generate-metrics-doc`.
+7. Sample YAML under `cmd/config/samples/`, **and** a template
+   `cmd/config/templates/<name>.yaml.tmpl` with its `//go:embed` `Template<X>` var in
+   `cmd/config/create_config_file.go` — without the template, nothing (the integration runner
+   included) can render a working topology for the service.
+8. Register `service/<name>/metrics.go` with the metrics-doc generator: add a
+   `generate_service_doc "<X>" "service/<name>/metrics.go"` line to `scripts/metrics_doc.sh`.
+   `make generate-metrics-doc` silently omits the service until you do, and
+   `make check-metrics-doc` still passes (it only diffs the generator's own output).
+9. If the service needs a real database in tests (`testdb.RunTestMain`), add it to
+   `CORE_DB_PACKAGES_REGEXP` in the `Makefile`. Otherwise CI runs its tests in the non-DB job,
+   where they fail for lack of a database, and excludes them from the DB job.
+10. Add the doc to the `mkdocs.yml` nav, or it is never published.
+11. Run `make lint`, `make generate-metrics-doc`, and the relevant tests.

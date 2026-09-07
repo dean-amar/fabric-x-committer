@@ -152,8 +152,9 @@ waiting-txs-limit: 20_000_000
 channel-buffer-size: 100
 
 # Optional ACL enforcement. When this section is present, block delivery, block query, and the
-# notification streams are authorized against the central auth service; streams re-authorize when a
-# new configuration block advances the observed configuration. When omitted, the sidecar serves
+# notification streams are authorized against the central auth service; open streams re-authorize
+# their bound identity on a fixed interval (stream-revalidate-interval), so a configuration change
+# that revokes access tears the stream down within one interval. When omitted, the sidecar serves
 # without ACL checks.
 # auth:
 #   server:

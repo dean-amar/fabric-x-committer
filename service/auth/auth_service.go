@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
@@ -138,7 +137,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	servicepb.RegisterAuthServiceServer(srv.GRPC, s)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
-	serve.RegisterConnStatHandler(srv.ConnStatsHandler, s.metrics.serverConnections)
+	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
 // Authenticate exchanges a signed envelope for a cert-bound token. The signature is verified once
@@ -146,66 +145,33 @@ func (s *Service) RegisterService(srv serve.Servers) {
 func (s *Service) Authenticate(
 	ctx context.Context, req *servicepb.AuthenticateRequest,
 ) (*servicepb.AuthenticateResponse, error) {
-	start := time.Now()
 	bundle, err := s.provider.current()
 	if err != nil {
-		return nil, s.record(methodAuthenticate, start, grpcerror.WrapUnavailable(err))
+		return nil, grpcerror.WrapUnavailable(err)
 	}
-	resp, err := s.authenticator.authenticate(ctx, req.GetSignedEnvelope(), req.GetRequestedScope(), bundle)
-	return resp, s.record(methodAuthenticate, start, err)
+	return s.authenticator.authenticate(ctx, req.GetSignedEnvelope(), req.GetRequestedScope(), bundle)
 }
 
 // Authorize evaluates a token against a resource policy for a resource server.
 func (s *Service) Authorize(
 	ctx context.Context, req *servicepb.AuthorizeRequest,
 ) (*servicepb.AuthorizeResponse, error) {
-	start := time.Now()
 	bundle, err := s.provider.current()
 	if err != nil {
-		return nil, s.record(methodAuthorize, start, grpcerror.WrapUnavailable(err))
+		return nil, grpcerror.WrapUnavailable(err)
 	}
-	resp, err := s.authorizer.authorize(ctx, req, bundle)
-	return resp, s.record(methodAuthorize, start, err)
+	return s.authorizer.authorize(ctx, req, bundle)
 }
 
 // ReAuthorize re-evaluates a stream session's bound identity against the latest resource policy.
 func (s *Service) ReAuthorize(
 	_ context.Context, req *servicepb.ReAuthorizeRequest,
 ) (*servicepb.AuthorizeResponse, error) {
-	start := time.Now()
 	bundle, err := s.provider.current()
 	if err != nil {
-		return nil, s.record(methodReAuthorize, start, grpcerror.WrapUnavailable(err))
+		return nil, grpcerror.WrapUnavailable(err)
 	}
-	resp, err := s.authorizer.reAuthorize(req, bundle)
-	return resp, s.record(methodReAuthorize, start, err)
-}
-
-// record observes the request latency and increments the request counter with the outcome derived
-// from err's gRPC code. It returns err unchanged so handlers can `return s.record(...)`.
-func (s *Service) record(method string, start time.Time, err error) error {
-	promutil.Observe(s.metrics.requestsLatency.WithLabelValues(method), time.Since(start))
-	s.metrics.requests.WithLabelValues(method, outcomeForError(err)).Inc()
-	return err
-}
-
-// outcomeForError maps a handler's returned error to a metrics outcome label. A nil error is the only
-// success; any non-nil error - including a bare error that carries no gRPC status - is an error
-// outcome, never "ok".
-func outcomeForError(err error) string {
-	if err == nil {
-		return outcomeOK
-	}
-	switch grpcerror.GetCode(err) {
-	case codes.Unauthenticated:
-		return outcomeUnauthenticated
-	case codes.PermissionDenied:
-		return outcomeDenied
-	case codes.Unavailable:
-		return outcomeUnavailable
-	default:
-		return outcomeError
-	}
+	return s.authorizer.reAuthorize(req, bundle)
 }
 
 // newTokenID generates a random, opaque token id (the jti claim and the store's row key).

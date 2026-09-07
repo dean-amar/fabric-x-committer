@@ -10,35 +10,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/hyperledger/fabric-x-committer/utils/serve"
 )
 
 const (
 	namespace = "authservice"
 
 	subsystemGRPC = "grpc"
-
-	methodAuthenticate = "authenticate"
-	methodAuthorize    = "authorize"
-	methodReAuthorize  = "reauthorize"
-
-	// Request outcomes, used as the "outcome" label on the requests counter.
-	outcomeOK              = "ok"
-	outcomeDenied          = "denied"
-	outcomeUnauthenticated = "unauthenticated"
-	outcomeUnavailable     = "unavailable"
-	outcomeError           = "error"
 )
-
-var timeBuckets = []float64{.0001, .001, .002, .003, .004, .005, .01, .03, .05, .1, .3, .5, 1, 2, 3, 4, 5, 10}
 
 type perfMetrics struct {
 	*monitoring.Provider
 
-	requests          *prometheus.CounterVec
-	requestsLatency   *prometheus.HistogramVec
-	configSequence    prometheus.Gauge
-	tokenStoreSize    prometheus.Gauge
-	serverConnections prometheus.Gauge
+	serverMetrics  *serve.ServerMetrics
+	configSequence prometheus.Gauge
+	tokenStoreSize prometheus.Gauge
 }
 
 func newAuthServiceMetrics() *perfMetrics {
@@ -46,19 +32,10 @@ func newAuthServiceMetrics() *perfMetrics {
 
 	return &perfMetrics{
 		Provider: p,
-		requests: p.NewCounterVec(prometheus.CounterOpts{
+		serverMetrics: serve.NewServerMetrics(p, monitoring.MetricsParameters{
 			Namespace: namespace,
 			Subsystem: subsystemGRPC,
-			Name:      "requests_total",
-			Help:      "Number of authenticate/authorize requests by outcome.",
-		}, []string{"method", "outcome"}),
-		requestsLatency: p.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: subsystemGRPC,
-			Name:      "requests_latency_seconds",
-			Help:      "The latency (seconds) of authenticate/authorize requests.",
-			Buckets:   timeBuckets,
-		}, []string{"method"}),
+		}),
 		configSequence: p.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subsystemGRPC,
@@ -70,10 +47,6 @@ func newAuthServiceMetrics() *perfMetrics {
 			Subsystem: subsystemGRPC,
 			Name:      "token_store_size",
 			Help:      "Number of token records held in the in-memory cache.",
-		}),
-		serverConnections: monitoring.NewConnectionStatsMetrics(p, monitoring.MetricsParameters{
-			Namespace: namespace,
-			Subsystem: subsystemGRPC,
 		}),
 	}
 }

@@ -19,6 +19,8 @@ The Fabric-X Committer is built around six core services, each designed with spe
 
 These six services are: **Sidecar**, **Coordinator**, **Verifier**, **Validator-Committer (VC)**, **Query Service**, and **Database Cluster**.
 
+An optional seventh service, the **Auth Service**, provides access control: it authenticates clients from a signed envelope, issues certificate-bound tokens, and answers per-RPC authorization decisions for the API-exposing services (Query Service and Sidecar). It is enabled per service via an `auth:` configuration section; when omitted, those services serve without ACL checks. See [Auth Service](auth-service.md).
+
 The architecture achieves high throughput through a sophisticated pipelined design that enables parallel processing of conflict-free transactions while maintaining deterministic outcomes and strong consistency guarantees. Each service plays a specific role: the Sidecar acts as the entry point for blocks from the Ordering Service, the Coordinator orchestrates the validation flow using dependency graph analysis, Verifier services perform parallel signature verification, Validator-Committer (VC) services execute final MVCC validation and commit operations against the database, and the Query Service provides read-only access to the committed world state for clients and endorsers.
 
 ## 2. Architecture Diagram
