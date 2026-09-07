@@ -172,7 +172,7 @@ func NewDatabaseTestEnvFromConnection(t *testing.T, cs *testdb.Connection, loadB
 		Retry:          testdb.DefaultRetry,
 	}
 
-	m := newVCServiceMetrics()
+	m := newVCServiceMetrics(&queues{})
 	sCtx, sCancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(sCancel)
 	dbObject, err := newDatabase(sCtx, config, m, defaultTestResourceLimits())
@@ -275,7 +275,7 @@ func (env *DatabaseTestEnv) populateData( //nolint:revive
 	t *testing.T,
 	createNsIDs []string,
 	nsToWrites namespaceToWrites,
-	batchStatus *committerpb.TxStatusBatch,
+	batchStatus *servicepb.TxStatusBatch,
 	txIDToHeight transactionIDToHeight,
 ) {
 	t.Helper()

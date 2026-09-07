@@ -91,7 +91,7 @@ func (vc *ValidatorCommitterService) Run(ctx context.Context) error {
 	defer vc.ready.Reset()
 
 	g, eCtx := errgroup.WithContext(ctx)
-	g.Go(func() error { vc.monitorQueues(eCtx); return nil })
+	g.Go(func() error { vc.batchReceivedTransactionsAndForwardForProcessing(eCtx); return nil })
 	// ... more g.Go(...) worker pools ...
 	if err := g.Wait(); err != nil {
 		return err
@@ -146,7 +146,7 @@ At the boundary: validate input, log full errors, convert every returned error t
 // service/vc/validator_committer_service.go:210
 func (vc *ValidatorCommitterService) GetTransactionsStatus(
 	ctx context.Context, query *committerpb.TxIDsBatch,
-) (*committerpb.TxStatusBatch, error) {
+) (*servicepb.TxStatusBatch, error) {
 	if len(query.TxIds) == 0 {
 		return nil, grpcerror.WrapInvalidArgument(errors.New("query is empty"))
 	}
@@ -155,7 +155,7 @@ func (vc *ValidatorCommitterService) GetTransactionsStatus(
 		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapInternalError(err)
 	}
-	return &committerpb.TxStatusBatch{Status: txIDsStatus}, nil
+	return &servicepb.TxStatusBatch{Status: txIDsStatus}, nil
 }
 ```
 
@@ -225,30 +225,60 @@ holds typed prometheus fields. `newXxxMetrics()` calls `monitoring.NewProvider()
 `Namespace`/`Subsystem`/`Name`/`Help`. Update metrics at runtime only through `promutil`
 helpers (`AddToCounter`, `SetGauge`, `Observe`), never raw prometheus calls.
 
-For a gauge that merely reports a value already available on demand — a channel length, a
-queue depth — use `p.NewGaugeFunc(opts, fn)` instead of a `NewGauge` that a goroutine sets
-on a ticker. The value is then exact at scrape time and costs no goroutine. `fn` runs on the
-scrape path, so keep it cheap and concurrency-safe.
+**Never sample a value on a ticker if it can be read on demand.** A goroutine that wakes up to
+call `promutil.SetGauge(len(ch))` costs a goroutine and makes the value up to one interval
+stale, and the wiring is easy to lose — the sidecar shipped one for three months after its only
+call site was deleted, so two gauges silently read zero. Instead:
+
+| Reporting | Use |
+|---|---|
+| Length of a channel that lives as long as the service | `p.NewChannelLenGauge(opts, ch)` |
+| Length of a channel replaced at runtime (per session) | `p.NewAtomicChannelLenGauge(opts, &ptr)`; the owner `Store`s the current channel |
+| Anything else already computable (a map size, a struct field) | `p.NewGaugeFunc(opts, fn)` — `fn` runs on the scrape path, so keep it cheap, non-blocking and nil-safe |
+
+`promutil.SetGauge` / `AddToGauge` remain correct for a gauge whose value is *maintained*
+incrementally rather than derivable on demand (e.g. a count of in-flight subscriptions).
+
+The queues a gauge reports must exist before the metrics are registered, so the service
+constructor builds them first and passes them in (`service/sidecar/sidecar.go`'s `queues`).
+
+A namespace, subsystem or name repeated across metrics is hoisted to a local const —
+`namespace`, `subsystemXxx`, `nameXxx` — so `goconst` stays quiet and a rename is one edit.
 
 ```go
-// service/vc/metrics.go:15
+// service/vc/metrics.go
+const (
+	namespace = "vcservice"
+
+	subsystemGRPC     = "grpc"
+	subsystemPreparer = "preparer"
+
+	nameInputQueueSize = "input_queue_size"
+)
+
 var buckets = []float64{.0001, .001, .002, .003, .004, .005, .01, .03, .05, .1, .3, .5, 1}
 
 type perfMetrics struct {
 	*monitoring.Provider
 	transactionReceivedTotal      prometheus.Counter
-	preparerInputQueueSize        prometheus.Gauge
+	preparerInputQueueSize        prometheus.GaugeFunc
 	preparerTxBatchLatencySeconds prometheus.Histogram
 }
 
-func newVCServiceMetrics() *perfMetrics {
+// The queues are read on scrape, so they must exist before the metrics are registered: the
+// service constructor builds them first and passes them in.
+func newVCServiceMetrics(q *queues) *perfMetrics {
 	p := monitoring.NewProvider()
 	return &perfMetrics{
 		Provider: p,
 		transactionReceivedTotal: p.NewCounter(prometheus.CounterOpts{
-			Namespace: "vcservice", Subsystem: "grpc",
+			Namespace: namespace, Subsystem: subsystemGRPC,
 			Name: "received_transaction_total", Help: "Number of transactions received.",
 		}),
+		preparerInputQueueSize: p.NewChannelLenGauge(prometheus.GaugeOpts{
+			Namespace: namespace, Subsystem: subsystemPreparer,
+			Name: nameInputQueueSize, Help: "The preparer input queue size",
+		}, q.toPrepareTxs),
 	}
 }
 ```
