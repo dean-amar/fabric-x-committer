@@ -12,12 +12,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/protoutil/identity"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 )
@@ -42,6 +38,9 @@ type TokenSourceConfig struct {
 	RequireTransportSecurity bool
 	// Scope optionally requests a least-privilege token limited to these resources.
 	Scope []string
+	// Namespaces optionally requests a token limited to these namespace ids, so the resource server
+	// rejects a request touching any other namespace.
+	Namespaces []string
 }
 
 // TokenSource authenticates once against the AuthService and caches the resulting cert-bound token,
@@ -99,13 +98,14 @@ func (t *TokenSource) currentToken(ctx context.Context) (string, error) {
 	}
 	t.mu.Unlock()
 
-	envelope, err := t.buildEnvelope()
+	envelope, err := t.buildEnvelope(ctx)
 	if err != nil {
 		return "", err
 	}
 	resp, err := t.cfg.Client.Authenticate(ctx, &servicepb.AuthenticateRequest{
-		SignedEnvelope: envelope,
-		RequestedScope: t.cfg.Scope,
+		SignedEnvelope:      envelope,
+		RequestedScope:      t.cfg.Scope,
+		RequestedNamespaces: t.cfg.Namespaces,
 	})
 	if err != nil {
 		if cachedToken != "" && now.Before(cachedExpiry) {
@@ -134,17 +134,20 @@ func (t *TokenSource) refreshDeadline() time.Time {
 	return t.expiresAt.Add(-skew)
 }
 
-// buildEnvelope creates a fresh signed authentication envelope carrying the client's TLS cert hash.
-func (t *TokenSource) buildEnvelope() ([]byte, error) {
-	envelope, err := protoutil.CreateSignedEnvelopeWithTLSBinding(
-		common.HeaderType_MESSAGE, t.cfg.ChannelID, t.cfg.Signer, &emptypb.Empty{}, 0, 0, t.cfg.TLSCertHash,
-	)
+// buildEnvelope fetches a fresh single-use nonce and returns a signed authentication envelope
+// carrying it alongside the client's TLS certificate hash. The nonce is fetched per authentication
+// attempt rather than cached: it is valid for exactly one Authenticate call, so there is nothing to
+// reuse.
+func (t *TokenSource) buildEnvelope(ctx context.Context) ([]byte, error) {
+	nonceResp, err := t.cfg.Client.GetNonce(ctx, &servicepb.GetNonceRequest{})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build authentication envelope")
+		return nil, errors.Wrap(err, "failed to obtain an authentication nonce")
 	}
-	envelopeBytes, err := proto.Marshal(envelope)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal authentication envelope")
-	}
-	return envelopeBytes, nil
+
+	return buildAuthEnvelope(&authEnvelopeParams{
+		signer:      t.cfg.Signer,
+		channelID:   t.cfg.ChannelID,
+		tlsCertHash: t.cfg.TLSCertHash,
+		nonce:       nonceResp.GetNonce(),
+	})
 }

@@ -16,25 +16,42 @@ package servicepb;
 // against the latest policy for a long-lived stream (ReAuthorize). Only the AuthService mints and
 // verifies tokens; resource servers hold no signing keys and delegate every decision here.
 service AuthService {
+    // GetNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
+    // the envelope it then presents to Authenticate. It is the mandatory first step of authentication:
+    // because the server chooses the nonce and consumes it on use, a captured envelope cannot be
+    // replayed even within the freshness window.
+    rpc GetNonce(GetNonceRequest) returns (GetNonceResponse);
     // Authenticate verifies a signed envelope and mints a short-lived, cert-bound JWT.
     rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
     // Authorize evaluates a token against a resource policy for a resource server, returning the
-    // identity bound to the token so the caller can bind it to a stream session.
+    // identity bound to the token so the caller can bind it to a stream session and re-present it.
     rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
-    // ReAuthorize re-evaluates an identity already bound to a stream session against the latest
-    // policy, without re-presenting the token. It is how a resource server keeps verifying that a
-    // long-lived stream's identity is still permitted after configuration changes.
-    rpc ReAuthorize(ReAuthorizeRequest) returns (AuthorizeResponse);
+}
+
+message GetNonceRequest {
+}
+
+message GetNonceResponse {
+    // nonce is the server-issued challenge the client places in its envelope's SignatureHeader.Nonce.
+    // It is valid for a single Authenticate call and expires at expires_at.
+    bytes nonce = 1;
+    // expires_at is the nonce expiry in unix seconds.
+    int64 expires_at = 2;
 }
 
 message AuthenticateRequest {
     // signed_envelope is a marshaled common.Envelope carrying the client's serialized MSP identity
     // and a signature over the payload; under mutual TLS its ChannelHeader also carries the TLS
-    // certificate hash the token is bound to.
+    // certificate hash the token is bound to. Its SignatureHeader.Nonce must be an unconsumed nonce
+    // previously issued by GetNonce.
     bytes signed_envelope = 1;
-    // requested_scope optionally narrows the token's authority (least privilege). A requested scope
-    // may only narrow, never broaden, the identity's authority.
+    // requested_scope optionally narrows the token's authority to these gRPC full-method names
+    // (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
     repeated string requested_scope = 2;
+    // requested_namespaces optionally narrows the token's authority to these namespace ids, so a
+    // token may read or observe only the namespaces it lists. Empty means every namespace the
+    // identity's channel policy allows.
+    repeated string requested_namespaces = 3;
 }
 
 message AuthenticateResponse {
@@ -52,16 +69,14 @@ message AuthorizeRequest {
     // tls_cert_hash is the SHA-256 of the caller's TLS certificate observed at the resource server.
     // It is empty when the caller connected without a client certificate.
     bytes tls_cert_hash = 3;
-}
-
-message ReAuthorizeRequest {
-    // identity is the MSP SerializedIdentity that Authorize bound to the stream session at
-    // establishment. Re-authorization re-resolves it against the latest configuration and evaluates
-    // the resource policy again; it deliberately does not re-present the token, so a stream's
-    // authorization tracks the identity's live permissions rather than the establishment token's TTL.
-    bytes identity = 1;
-    // resource is the gRPC full method the stream belongs to.
-    string resource = 2;
+    // namespaces are the namespace ids the request actually touches, read out of the request body by
+    // the resource server's interceptor. The AuthService checks them against the token's namespace
+    // scope, so the decision stays here rather than being delegated back to the resource server.
+    repeated string namespaces = 4;
+    // all_namespaces is true when the request is not restricted to particular namespaces - an
+    // unfiltered subscription, for instance. A namespace-scoped token cannot satisfy such a request,
+    // so it is denied rather than being silently narrowed.
+    bool all_namespaces = 5;
 }
 
 message AuthorizeResponse {
@@ -71,9 +86,13 @@ message AuthorizeResponse {
     // Unavailable before the configuration is loaded), so a successful response always has
     // authorized = true.
     bool authorized = 1;
-    // identity is the resolved MSP SerializedIdentity bound to the token. Authorize returns it so a
-    // resource server can bind it to a stream session and later pass it to ReAuthorize.
+    // identity is the resolved MSP SerializedIdentity bound to the token, for logging and for a
+    // resource server that records who a stream belongs to.
     bytes identity = 2;
+    // token_expires_at is the bound token's expiry in unix seconds. A resource server caches an
+    // authorization decision for a stream no longer than this, so an expired token cannot keep an
+    // established stream alive.
+    int64 token_expires_at = 4;
 }
 
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
@@ -89,8 +108,12 @@ message TokenRecord {
     string msp_id = 3;
     // cert_hash_sha256 is the cnf/x5t#S256 binding to the client's TLS certificate.
     bytes cert_hash_sha256 = 4;
-    // scope is the optional least-privilege scope granted at issuance.
+    // scope is the optional least-privilege scope granted at issuance, as gRPC full-method names.
     repeated string scope = 5;
+    // namespaces is the optional namespace allowlist granted at issuance. Unlike scope, which the
+    // interceptor checks against the method name, this is enforced by the resource service against
+    // the namespaces the request body actually touches.
+    repeated string namespaces = 8;
     // issued_sequence is the config sequence the identity was first resolved against.
     uint64 issued_sequence = 6;
     // expires_at is the token expiry in unix seconds, used for TTL cleanup.

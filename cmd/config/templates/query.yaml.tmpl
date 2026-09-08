@@ -18,3 +18,10 @@ max-request-keys: {{ .MaxRequestKeys }}
 {{- if .QueryTLSRefreshInterval }}
 tls-refresh-interval: {{ .QueryTLSRefreshInterval }}
 {{- end }}
+{{- if .Services.Auth.GrpcEndpoint }}
+
+# ACL enforcement: every RPC is authorized against the AuthService.
+auth:
+  server:
+{{ include "endpointWithTLS" (dict "Endpoint" .Services.Auth.GrpcEndpoint "TLS" .ClientTLS) | indent 4 }}
+{{- end }}

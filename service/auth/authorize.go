@@ -9,6 +9,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
@@ -59,27 +60,41 @@ func (a *authorizer) authorize(
 		)
 	}
 
+	if err = namespacesAllowed(rec.GetNamespaces(), req); err != nil {
+		logger.Debugf("Authorization denied for [%s]: %v", req.GetResource(), err)
+		return nil, grpcerror.WrapPermissionDenied(err)
+	}
+
 	if err = evaluateResourcePolicy(bundle, req.GetResource(), rec.GetSerializedIdentity()); err != nil {
 		logger.Debugf("Authorization denied for [%s]: %v", req.GetResource(), err)
 		return nil, grpcerror.WrapPermissionDenied(err)
 	}
 
-	return &servicepb.AuthorizeResponse{Authorized: true, Identity: rec.GetSerializedIdentity()}, nil
+	return &servicepb.AuthorizeResponse{
+		Authorized:     true,
+		Identity:       rec.GetSerializedIdentity(),
+		TokenExpiresAt: rec.GetExpiresAt(),
+	}, nil
 }
 
-// reAuthorize re-evaluates an identity already bound to a stream session against the resource policy
-// under the latest bundle. It takes the identity directly (not a token), so a long-lived stream's
-// authorization tracks the identity's current permissions - a configuration change that removes the
-// identity's organization tears the stream down - independently of the establishment token's TTL.
-func (*authorizer) reAuthorize(
-	req *servicepb.ReAuthorizeRequest, bundle *channelconfig.Bundle,
-) (*servicepb.AuthorizeResponse, error) {
-	if len(req.GetIdentity()) == 0 {
-		return nil, grpcerror.WrapInvalidArgument(errors.New("identity is required"))
+// namespacesAllowed checks the namespaces a request touches against the token's namespace scope. An
+// unscoped token may touch anything; a scoped one may touch only what it lists, and cannot satisfy a
+// request that asks for every namespace (an unfiltered subscription) - that is denied outright rather
+// than narrowed, so a client is never left believing it is subscribed to more than it will receive.
+func namespacesAllowed(allowed []string, req *servicepb.AuthorizeRequest) error {
+	if len(allowed) == 0 {
+		return nil
 	}
-	if err := evaluateResourcePolicy(bundle, req.GetResource(), req.GetIdentity()); err != nil {
-		logger.Debugf("Stream re-authorization denied for [%s]: %v", req.GetResource(), err)
-		return nil, grpcerror.WrapPermissionDenied(err)
+	if req.GetAllNamespaces() {
+		return errors.Newf(
+			"resource %s requests every namespace, which a namespace-scoped token cannot satisfy; "+
+				"restrict the request to %v", req.GetResource(), allowed,
+		)
 	}
-	return &servicepb.AuthorizeResponse{Authorized: true, Identity: req.GetIdentity()}, nil
+	for _, nsID := range req.GetNamespaces() {
+		if !slices.Contains(allowed, nsID) {
+			return errors.Newf("namespace %s is outside the token's namespace scope %v", nsID, allowed)
+		}
+	}
+	return nil
 }

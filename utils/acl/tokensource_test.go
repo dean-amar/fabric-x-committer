@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -44,6 +45,55 @@ func TestTokenSourceAuthenticatesAndCaches(t *testing.T) {
 	require.Equal(t, 1, auth.calls)
 
 	require.True(t, source.RequireTransportSecurity())
+}
+
+// TestTokenSourceFetchesNonceAndEmbedsIt verifies the challenge pre-step: every authentication
+// attempt fetches a nonce and signs it into the envelope's SignatureHeader, which is what makes a
+// captured envelope useless to a replayer.
+func TestTokenSourceFetchesNonceAndEmbedsIt(t *testing.T) {
+	t.Parallel()
+	auth := &fakeAuthenticator{token: "tok-1", expiresAt: time.Now().Add(time.Hour).Unix()}
+	source := NewTokenSource(TokenSourceConfig{
+		Client:    auth,
+		Signer:    fakeSigner{},
+		ChannelID: testChannel,
+	})
+
+	_, err := source.GetRequestMetadata(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, auth.nonceCalls, "authentication must be preceded by a nonce request")
+
+	// The nonce the server issued is signed into the envelope, not merely sent alongside it.
+	envelope, err := protoutil.UnmarshalEnvelope(auth.lastEnvelope)
+	require.NoError(t, err)
+	payload, err := protoutil.UnmarshalPayload(envelope.Payload)
+	require.NoError(t, err)
+	shdr, err := protoutil.UnmarshalSignatureHeader(payload.Header.SignatureHeader)
+	require.NoError(t, err)
+	require.Equal(t, []byte("nonce"), shdr.GetNonce())
+	require.Empty(t, payload.Data, "an authentication envelope must carry no application data")
+
+	// A forced re-authentication fetches a fresh nonce: a spent one cannot be reused.
+	source.expiresAt = time.Now().Add(-time.Second)
+	_, err = source.GetRequestMetadata(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, auth.nonceCalls)
+}
+
+// TestTokenSourceNonceFailureFailsAuthentication verifies authentication fails closed when the nonce
+// cannot be obtained, rather than falling back to an envelope without a challenge.
+func TestTokenSourceNonceFailureFailsAuthentication(t *testing.T) {
+	t.Parallel()
+	auth := &fakeAuthenticator{nonceErr: errors.New("auth service unreachable")}
+	source := NewTokenSource(TokenSourceConfig{
+		Client:    auth,
+		Signer:    fakeSigner{},
+		ChannelID: testChannel,
+	})
+
+	_, err := source.GetRequestMetadata(context.Background())
+	require.ErrorContains(t, err, "failed to obtain an authentication nonce")
+	require.Equal(t, 0, auth.calls, "Authenticate must not be attempted without a nonce")
 }
 
 func TestTokenSourceRefreshesExpiredToken(t *testing.T) {
@@ -92,16 +142,20 @@ func TestTokenSourceAuthenticateError(t *testing.T) {
 // fakeAuthenticator is a test double for servicepb.AuthServiceClient's Authenticate. It returns its
 // token/expiry, or err on every call.
 type fakeAuthenticator struct {
-	token     string
-	expiresAt int64
-	err       error
-	calls     int
+	token        string
+	expiresAt    int64
+	err          error
+	calls        int
+	lastEnvelope []byte
+	nonceErr     error
+	nonceCalls   int
 }
 
 func (f *fakeAuthenticator) Authenticate(
-	context.Context, *servicepb.AuthenticateRequest, ...grpc.CallOption,
+	_ context.Context, req *servicepb.AuthenticateRequest, _ ...grpc.CallOption,
 ) (*servicepb.AuthenticateResponse, error) {
 	f.calls++
+	f.lastEnvelope = req.GetSignedEnvelope()
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -114,10 +168,16 @@ func (*fakeAuthenticator) Authorize(
 	return nil, errors.New("not implemented")
 }
 
-func (*fakeAuthenticator) ReAuthorize(
-	context.Context, *servicepb.ReAuthorizeRequest, ...grpc.CallOption,
-) (*servicepb.AuthorizeResponse, error) {
-	return nil, errors.New("not implemented")
+// GetNonce hands out a fixed nonce and counts the call, so a test can assert that every
+// authentication attempt fetches a fresh challenge rather than reusing a spent one.
+func (f *fakeAuthenticator) GetNonce(
+	context.Context, *servicepb.GetNonceRequest, ...grpc.CallOption,
+) (*servicepb.GetNonceResponse, error) {
+	f.nonceCalls++
+	if f.nonceErr != nil {
+		return nil, f.nonceErr
+	}
+	return &servicepb.GetNonceResponse{Nonce: []byte("nonce")}, nil
 }
 
 // fakeSigner is a minimal identity.SignerSerializer: the envelope it produces is well-formed but not

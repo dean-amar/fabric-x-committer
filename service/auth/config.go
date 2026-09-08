@@ -26,8 +26,13 @@ type Config struct {
 	// TokenTTL is the lifetime of a minted token. Clients refresh by re-authenticating before it elapses.
 	TokenTTL time.Duration `mapstructure:"token-ttl" default:"5m" validate:"gt=0"`
 	// EnvelopeFreshnessWindow bounds how far an authentication envelope's timestamp may deviate from
-	// the server's clock, so a captured envelope cannot be replayed once it goes stale.
+	// the server's clock. The single-use nonce is what actually prevents replay; this window is
+	// defence in depth and bounds how long an unredeemed envelope stays presentable.
 	EnvelopeFreshnessWindow time.Duration `mapstructure:"envelope-freshness-window" default:"5m" validate:"gt=0"`
+	// NonceTTL is how long an issued authentication nonce remains redeemable. It only has to cover
+	// the round trip between GetNonce and Authenticate, so it is deliberately short: a shorter window
+	// means fewer unredeemed nonces held in the database.
+	NonceTTL time.Duration `mapstructure:"nonce-ttl" default:"1m" validate:"gt=0"`
 	// ConfigRefreshInterval is how often the service reads the latest committed channel configuration
 	// from the state database to refresh its evaluation bundle.
 	ConfigRefreshInterval time.Duration `mapstructure:"config-refresh-interval" default:"1m" validate:"gt=0"`

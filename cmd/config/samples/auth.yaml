@@ -98,9 +98,17 @@ signing-key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/au
 # delete, effective within this window). Default: 5m
 token-ttl: 5m
 
-# Bounds how far an authentication envelope's timestamp may deviate from the server's clock, so a
-# captured envelope cannot be replayed once it goes stale. Default: 5m
+# Bounds how far an authentication envelope's timestamp may deviate from the server's clock. Replay is
+# prevented by the single-use nonce (see nonce-ttl); this window is defence in depth and bounds how
+# long an unredeemed envelope stays presentable. Default: 5m
 envelope-freshness-window: 5m
+
+# How long a server-issued authentication nonce remains redeemable. A client must call GetNonce and
+# sign the returned nonce into its envelope before calling Authenticate; the nonce is consumed on use,
+# so a captured envelope cannot be replayed. This only has to cover the GetNonce -> Authenticate round
+# trip, so keep it short: a shorter window means fewer unredeemed nonces held in the database.
+# Default: 1m
+nonce-ttl: 1m
 
 # How often the service reads the latest committed channel configuration from the state database to
 # rebuild its policy/MSP evaluation bundle. Default: 1m

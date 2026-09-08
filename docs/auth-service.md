@@ -35,17 +35,38 @@ The service is composed of focused collaborators, each with one responsibility:
 - `Authenticate(signed_envelope, requested_scope) -> token, expires_at` — verifies the envelope
   (channel and empty-payload scope, timestamp freshness, TLS certificate binding, MSP identity
   resolution, signature), writes the token-to-identity binding, and mints a cert-bound ES256 JWT.
-- `Authorize(token, resource, tls_cert_hash) -> authorized, identity` — verifies the token, checks
-  the certificate binding and optional scope, resolves the bound identity from the store, evaluates
-  the resource's policy against the latest configuration, and returns the resolved identity so a
-  resource server can bind it to a stream session.
-- `ReAuthorize(identity, resource) -> authorized` — re-evaluates an identity already bound to a
-  stream session against the latest policy, without re-presenting the token.
+- `GetNonce() -> nonce, expires_at` — issues the single-use challenge a client must sign into its
+  envelope. It is the mandatory first step of authentication.
+- `Authorize(token, resource, tls_cert_hash) -> authorized, identity, namespaces, token_expires_at` —
+  verifies the token, checks the certificate binding and optional scope, resolves the bound identity
+  from the store, checks the requested namespaces against the token's namespace scope, evaluates the
+  resource's policy against the latest configuration, and returns the resolved identity and the token's
+  expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached decision
+  lapses.
 
 Every non-authorized outcome is a gRPC status error, so the resource server propagates the exact
 code: `Unauthenticated` (invalid/expired/unknown token or certificate mismatch), `PermissionDenied`
 (scope or policy denial), or `Unavailable` (before the configuration is loaded, or AuthService
 unreachable).
+
+## Replay protection: the nonce challenge
+
+Authentication is a two-step challenge-response. The client calls `GetNonce`, receives 32 bytes of
+server-chosen randomness, and places it in the `SignatureHeader.Nonce` of the envelope it then presents
+to `Authenticate`. Because the envelope's signature covers the whole marshaled payload — and the
+`SignatureHeader` is part of that payload — the nonce cannot be substituted without invalidating the
+signature.
+
+The nonce is **consumed** when redeemed: `Authenticate` deletes the row and requires that exactly one
+row was removed, so a second presentation of the same envelope fails. That single `DELETE` is what
+makes the guarantee atomic even when two redemptions race, and even across instances.
+
+Nonces are held in the shared state database (`auth_nonces`), not in one instance's memory, because a
+client behind a load balancer has no guarantee its `GetNonce` and `Authenticate` calls reach the same
+instance. Unredeemed nonces are swept on the same tick as expired tokens.
+
+This is what makes a captured envelope worthless rather than merely short-lived: the freshness window
+and the certificate binding remain as defence in depth, but replay is closed by the nonce itself.
 
 ## Token and certificate binding
 
@@ -65,18 +86,19 @@ non-mTLS path exists only for local development and tests and must not be used i
 ## Client and interceptors (`utils/acl`)
 
 - **Server side — `Enforcer`**: the unary and stream interceptors installed on a resource server.
-  They forward the caller's token (and TLS certificate hash) to `Authorize`, bind the returned
-  identity to each stream, and re-authorize that identity via `ReAuthorize` on an interval. Health
-  checks (`grpc.health.v1.Health`) are exempt.
-- **Client side — `TokenSource`**: a `credentials.PerRPCCredentials` that authenticates once, caches
-  the token, refreshes it before expiry, and attaches it to every outgoing RPC.
+  They forward the caller's token (and TLS certificate hash) to `Authorize`; a stream binds the
+  *token* to its session and renews the decision from it. Health checks (`grpc.health.v1.Health`) are
+  exempt. The interceptor also reads the namespaces the request touches out of its body and forwards
+  them, so the `AuthService` decides on them rather than the resource server.
+- **Client side — `TokenSource`**: a `credentials.PerRPCCredentials` that fetches a nonce, authenticates
+  once, caches the token, refreshes it before expiry, and attaches it to every outgoing RPC.
 
 ## Configuration
 
 - **`AuthService`** (`cmd/config/samples/auth.yaml`): `signing-key-path` (a shared PEM EC key across
-  instances; ephemeral if empty), `token-ttl`, `envelope-freshness-window`, `config-refresh-interval`,
-  `token-cleanup-interval`, and the state `database`. Use `mtls` for the server TLS mode so tokens are
-  certificate-bound.
+  instances; ephemeral if empty), `token-ttl`, `envelope-freshness-window`, `nonce-ttl`,
+  `config-refresh-interval`, `token-cleanup-interval`, and the state `database`. Use `mtls` for the
+  server TLS mode so tokens are certificate-bound.
 - **Resource servers** (Query, Sidecar): an optional `auth:` section (`utils/acl.ClientConfig`) with
   the `AuthService` endpoint + TLS and an optional `stream-revalidate-interval`. When absent, the
   service serves without ACL enforcement, preserving existing behavior.
@@ -96,24 +118,35 @@ policy, the request is denied.
   re-checks it on the next interval, so a blip does not tear down every live stream at once. New
   admissions never benefit from this tolerance. Run multiple `AuthService` instances behind a load
   balancer; all state is in the shared database, so any instance can serve any request.
-- **Replay resistance.** An authentication envelope is scoped to this channel and must carry an empty
-  payload. An ordinary transaction shares the envelope's header type and channel but always carries a
-  payload, so it cannot be replayed to `Authenticate` to mint a token in its signer's name - a
-  necessary guard, because any channel reader can observe committed transactions. The freshness window
-  bounds replay of a captured authentication envelope, and under mutual TLS the certificate binding
-  makes even a captured envelope useless without the signer's private key.
-- **Streaming re-authorization is identity-based.** A stream is authorized at establishment; the
-  resolved identity is bound to the stream and re-evaluated against the latest policy every
-  `stream-revalidate-interval`. Because re-authorization checks the *identity* (not the token), a
-  long-lived stream is torn down when a configuration change removes the identity's organization, but
-  is never dropped merely because the establishment token's TTL elapsed - stream lifetime is
-  decoupled from token lifetime. Re-authorization runs on a background timer per stream, so a
-  definitive denial cancels the stream context immediately; an idle stream is torn down at the next
-  tick rather than waiting for its next message.
+- **Replay resistance.** The single-use nonce is the primary guard (see *Replay protection* above).
+  Behind it: an authentication envelope is scoped to this channel and must carry an empty payload, so an
+  ordinary transaction - which shares the envelope's header type and channel but always carries a
+  payload - cannot be replayed to `Authenticate` to mint a token in its signer's name, a necessary guard
+  because any channel reader can observe committed transactions. The freshness window bounds how long an
+  unredeemed envelope stays presentable, and under mutual TLS the certificate binding makes a captured
+  envelope useless without the signer's private key.
+- **Streaming re-authorization is token-based.** A stream binds the *token* it was established with. On
+  every receive and send the wrapper checks whether its cached decision has lapsed and, if so,
+  re-`Authorize`s with that token: the token is resolved to its record (catching expiry and revocation)
+  and the resulting identity re-evaluated against the latest configuration (catching a policy change,
+  such as the identity's organization being removed). A valid decision is reused until it lapses, so the
+  common case costs no round trip - checking per message would put `AuthService` latency on the data
+  path of every block and batch. A decision is never reused past `stream-revalidate-interval`, and never
+  past the bound token's own expiry, which the resource server enforces locally.
 - **Revocation.** Revocation is a delete of the token record (`tokenStore.delete`), an operational
   primitive not yet exposed through a client-facing RPC. Because each instance fronts the store with a
   short-lived read-through cache, cross-instance revocation takes effect within the token TTL rather
-  than instantly - an accepted trade-off of caching. Note that revocation affects new unary calls and
-  new stream establishments; a stream already established re-authorizes on identity, not token.
+  than instantly - an accepted trade-off of caching. It applies to new unary calls, new stream
+  establishments, **and** established streams, whose next lapsed re-check re-resolves the token and
+  finds the record gone.
+- **Namespace scope.** A token may additionally be restricted to a set of namespaces
+  (`requested_namespaces` at authentication). The decision stays in the `AuthService`: the resource
+  server's interceptor reads the namespaces the request *touches* out of its body and forwards them on
+  the `Authorize` call, and the `AuthService` checks them against the token's scope. A request naming a
+  namespace outside the scope is denied, and so is one that asks for *every* namespace (an unfiltered
+  subscription), which a scoped token cannot satisfy - refused outright rather than silently narrowed,
+  so a client is never left believing it is subscribed to more than it will receive. A stream
+  interceptor cannot see the request body at establishment, so a subscription's namespaces are
+  authorized by the wrapper as the request arrives, before the handler sees it.
 - **Bootstrap.** Until the first configuration block is committed and observed, the `AuthService`
   returns `Unavailable`; protected APIs reject calls until enforcement becomes active.

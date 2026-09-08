@@ -13,3 +13,8 @@
 {{ include "rateLimit" . | indent 2 }}
 
 {{ include "database" . | indent 0 }}
+{{- if .AuthConfigRefreshInterval }}
+
+# How often the committed channel configuration is re-read to rebuild the evaluation bundle.
+config-refresh-interval: {{ .AuthConfigRefreshInterval }}
+{{- end }}

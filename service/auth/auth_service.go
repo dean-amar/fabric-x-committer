@@ -27,7 +27,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
-var logger = flogging.MustGetLogger("auth")
+var logger = flogging.MustGetLogger("authentication-service")
 
 // Service is the central authentication and authorization gRPC service. It composes focused
 // collaborators, each with a single responsibility: a configProvider that reads the latest committed
@@ -44,6 +44,7 @@ type Service struct {
 
 	provider      *configProvider
 	store         *tokenStore
+	nonces        *nonceStore
 	authenticator *authenticator
 	authorizer    *authorizer
 }
@@ -79,6 +80,10 @@ func (s *Service) Run(ctx context.Context) error {
 	if err = s.store.ensureTable(ctx); err != nil {
 		return err
 	}
+	s.nonces = newNonceStore(pool, s.config.NonceTTL)
+	if err = s.nonces.ensureTable(ctx); err != nil {
+		return err
+	}
 	if warmed, warmErr := s.store.warmCache(ctx, time.Now()); warmErr != nil {
 		// A warm-up failure is non-fatal: bindings still resolve from the database on demand.
 		logger.Warnf("Token store warm-up failed: %v", warmErr)
@@ -88,7 +93,13 @@ func (s *Service) Run(ctx context.Context) error {
 	promutil.SetGauge(s.metrics.tokenStoreSize, s.store.size())
 
 	s.provider = newConfigProvider(pool, s.metrics)
-	s.authenticator = newAuthenticator(signer, s.store, s.config.EnvelopeFreshnessWindow, s.config.TokenTTL)
+	s.authenticator = newAuthenticator(&authenticatorConfig{
+		signer:          signer,
+		store:           s.store,
+		nonces:          s.nonces,
+		freshnessWindow: s.config.EnvelopeFreshnessWindow,
+		tokenTTL:        s.config.TokenTTL,
+	})
 	s.authorizer = newAuthorizer(signer, s.store)
 
 	s.ready.SignalReady()
@@ -113,7 +124,8 @@ func (s *Service) sweepExpiredLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			deleted, err := s.store.sweep(ctx, time.Now())
+			now := time.Now()
+			deleted, err := s.store.sweep(ctx, now)
 			if err != nil {
 				logger.Errorf("Token sweep failed: %v", err)
 				continue
@@ -122,6 +134,14 @@ func (s *Service) sweepExpiredLoop(ctx context.Context) {
 				logger.Infof("Swept %d expired token records", deleted)
 			}
 			promutil.SetGauge(s.metrics.tokenStoreSize, s.store.size())
+
+			// Unredeemed nonces accumulate whenever a client asks for one and never authenticates,
+			// so they are swept on the same tick as tokens.
+			if staleNonces, nonceErr := s.nonces.sweep(ctx, now); nonceErr != nil {
+				logger.Errorf("Nonce sweep failed: %v", nonceErr)
+			} else if staleNonces > 0 {
+				logger.Infof("Swept %d expired nonces", staleNonces)
+			}
 		}
 	}
 }
@@ -140,6 +160,20 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
+// GetNonce issues a single-use nonce for the client's next Authenticate call. It needs no
+// configuration bundle: a nonce carries no authority on its own, and handing one out before the
+// service can authenticate lets a client have its challenge ready the moment enforcement is active.
+func (s *Service) GetNonce(
+	ctx context.Context, _ *servicepb.GetNonceRequest,
+) (*servicepb.GetNonceResponse, error) {
+	nonce, expiresAt, err := s.nonces.issue(ctx, time.Now())
+	if err != nil {
+		logger.Errorf("%+v", err)
+		return nil, grpcerror.WrapInternalError(err)
+	}
+	return &servicepb.GetNonceResponse{Nonce: nonce, ExpiresAt: expiresAt.Unix()}, nil
+}
+
 // Authenticate exchanges a signed envelope for a cert-bound token. The signature is verified once
 // here; subsequent authorization carries the identity forward via the persisted binding.
 func (s *Service) Authenticate(
@@ -149,10 +183,13 @@ func (s *Service) Authenticate(
 	if err != nil {
 		return nil, grpcerror.WrapUnavailable(err)
 	}
-	return s.authenticator.authenticate(ctx, req.GetSignedEnvelope(), req.GetRequestedScope(), bundle)
+	return s.authenticator.authenticate(ctx, req, bundle)
 }
 
-// Authorize evaluates a token against a resource policy for a resource server.
+// Authorize evaluates a token against a resource policy for a resource server. A resource server
+// calls it at every RPC and, for a stream, whenever its cached decision lapses, so token expiry,
+// revocation, and configuration changes all take effect without the stream re-presenting anything
+// other than the token it was established with.
 func (s *Service) Authorize(
 	ctx context.Context, req *servicepb.AuthorizeRequest,
 ) (*servicepb.AuthorizeResponse, error) {
@@ -161,17 +198,6 @@ func (s *Service) Authorize(
 		return nil, grpcerror.WrapUnavailable(err)
 	}
 	return s.authorizer.authorize(ctx, req, bundle)
-}
-
-// ReAuthorize re-evaluates a stream session's bound identity against the latest resource policy.
-func (s *Service) ReAuthorize(
-	_ context.Context, req *servicepb.ReAuthorizeRequest,
-) (*servicepb.AuthorizeResponse, error) {
-	bundle, err := s.provider.current()
-	if err != nil {
-		return nil, grpcerror.WrapUnavailable(err)
-	}
-	return s.authorizer.reAuthorize(req, bundle)
 }
 
 // newTokenID generates a random, opaque token id (the jti claim and the store's row key).

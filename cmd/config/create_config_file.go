@@ -55,6 +55,9 @@ type (
 		MaxRequestKeys          int                     // query
 		QueryTLSRefreshInterval time.Duration           // query
 		MaxConcurrentStreams    int                     // sidecar
+		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed channel
+		// configuration. Tests set it low so enforcement becomes active promptly after bootstrap.
+		AuthConfigRefreshInterval time.Duration // auth
 
 		// Keep-alive configuration for exposing API services (sidecar, query) for testing.
 		//
@@ -86,6 +89,10 @@ type (
 		Sidecar     ServiceConfig
 		Query       ServiceConfig
 		LoadGen     ServiceConfig
+		// Auth is the AuthService. Its GrpcEndpoint is nil unless the topology enables ACL
+		// enforcement, and the query and sidecar templates key their optional `auth:` section off
+		// that, so an ACL-free topology renders exactly as before.
+		Auth ServiceConfig
 	}
 
 	// ServiceConfig stores the service's server and metrics endpoints, along with their TLS configuration.

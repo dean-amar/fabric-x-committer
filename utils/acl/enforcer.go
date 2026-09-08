@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -89,81 +89,134 @@ func (e *Enforcer) UnaryInterceptor() grpc.UnaryServerInterceptor {
 		if isExempt(info.FullMethod) {
 			return handler(ctx, req)
 		}
-		if _, err := e.authorize(ctx, info.FullMethod); err != nil {
+		token, err := tokenFromMetadata(ctx)
+		if err != nil {
+			return nil, grpcerror.WrapUnauthenticated(err)
+		}
+		// The request body is available here, so the namespaces it touches are forwarded with the
+		// authorization call and the AuthService decides on them.
+		if _, err = e.authorize(ctx, token, info.FullMethod, scopeOfRequest(req)); err != nil {
 			return nil, err
 		}
 		return handler(ctx, req)
 	}
 }
 
-// StreamInterceptor authorizes a stream at establishment, binds the returned identity to it, and runs
-// a background loop that re-authorizes that identity every revalidation interval. Exempt methods run
-// without authorization and are not wrapped.
+// StreamInterceptor authorizes a stream at establishment and binds the caller's token to the session,
+// so the decision can be renewed from the token alone for as long as the stream lives. Exempt methods
+// run without authorization and are not wrapped.
 func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if isExempt(info.FullMethod) {
 			return handler(srv, ss)
 		}
 
-		identity, err := e.authorize(ss.Context(), info.FullMethod)
+		token, err := tokenFromMetadata(ss.Context())
+		if err != nil {
+			return grpcerror.WrapUnauthenticated(err)
+		}
+		// A stream interceptor cannot see the request body - it arrives later through RecvMsg - so
+		// establishment authorizes the method alone, and the wrapper authorizes the namespaces the
+		// subscription asks for as soon as it receives them.
+		resp, err := e.authorize(ss.Context(), token, info.FullMethod, requestScope{})
 		if err != nil {
 			return err
 		}
 
-		// The revalidation loop cancels this context to tear the stream down on a definitive denial;
-		// cancelling it when the handler returns also stops the loop.
+		// Cancelled when a re-check reaches a definitive denial, so a handler parked on the context
+		// observes the teardown; cancelling on handler return also releases the stream's resources.
 		ctx, cancel := context.WithCancel(ss.Context())
 		defer cancel()
+		now := time.Now()
 		stream := &aclServerStream{
-			ServerStream: ss,
-			ctx:          ctx,
-			cancel:       cancel,
-			enforcer:     e,
-			resource:     info.FullMethod,
-			identity:     identity,
+			ServerStream:   ss,
+			ctx:            ctx,
+			cancel:         cancel,
+			enforcer:       e,
+			resource:       info.FullMethod,
+			token:          token,
+			certHash:       util.ExtractCertificateHashFromContext(ss.Context()),
+			tokenExpiresAt: tokenExpiry(resp),
+			validUntil:     e.decisionValidUntil(resp, now),
 		}
-		go stream.revalidate()
 		return handler(srv, stream)
 	}
 }
 
-// authorize authorizes an incoming call at establishment: it forwards the caller's token and TLS
-// certificate hash to the AuthService and returns the identity the AuthService bound to the token,
-// so a stream can bind it for later re-authorization. It fails closed: a policy denial, an invalid
-// token, and an unreachable AuthService all surface as a gRPC status error the caller must not
-// proceed past. The certificate hash is whatever the connection presented (empty without mutual
-// TLS); the AuthService checks it against the token's binding. The AuthService call is bounded by
-// authorizeTimeout so a hung AuthService cannot pin the caller's handler indefinitely - for a unary
-// RPC without a client deadline, and for stream establishment (the stream context has none).
-func (e *Enforcer) authorize(ctx context.Context, resource string) ([]byte, error) {
-	token, err := tokenFromMetadata(ctx)
-	if err != nil {
-		return nil, grpcerror.WrapUnauthenticated(err)
-	}
-
+// authorize authorizes a call against the AuthService, forwarding the caller's token and the TLS
+// certificate hash the connection presented (empty without mutual TLS; the AuthService checks it
+// against the token's binding). It fails closed: a policy denial, an invalid or expired token, and an
+// unreachable AuthService all surface as a gRPC status error the caller must not proceed past. The
+// call is bounded by authorizeTimeout so a hung AuthService cannot pin a handler indefinitely - for a
+// unary RPC without a client deadline, and for a stream, whose context carries none.
+func (e *Enforcer) authorize(
+	ctx context.Context, token, resource string, scope requestScope,
+) (*servicepb.AuthorizeResponse, error) {
 	callCtx, cancel := context.WithTimeout(ctx, authorizeTimeout)
 	defer cancel()
 	resp, err := e.client.Authorize(callCtx, &servicepb.AuthorizeRequest{
-		Token:       token,
-		Resource:    resource,
-		TlsCertHash: util.ExtractCertificateHashFromContext(ctx),
+		Token:         token,
+		Resource:      resource,
+		TlsCertHash:   util.ExtractCertificateHashFromContext(ctx),
+		Namespaces:    scope.namespaces,
+		AllNamespaces: scope.all,
 	})
 	if err != nil {
 		return nil, grpcerror.WrapWithContext(err, fmt.Sprintf("ACL check failed for [%s]", resource))
 	}
-	return resp.GetIdentity(), nil
+	return resp, nil
 }
 
-// reAuthorize re-evaluates a stream's bound identity against the latest resource policy, bounded by
-// authorizeTimeout so a hung AuthService cannot block the revalidation loop.
-func (e *Enforcer) reAuthorize(ctx context.Context, identity []byte, resource string) error {
+// reAuthorize renews a stream's decision from its bound token, bounded by authorizeTimeout. Passing
+// the token (rather than the identity alone) is what makes token expiry and revocation observable to
+// an established stream: the AuthService resolves the token to its record before evaluating policy, so
+// a deleted or lapsed record denies the stream just as a policy change does.
+func (e *Enforcer) reAuthorize(
+	ctx context.Context, params *reAuthorizeParams,
+) (*servicepb.AuthorizeResponse, error) {
 	callCtx, cancel := context.WithTimeout(ctx, authorizeTimeout)
 	defer cancel()
-	_, err := e.client.ReAuthorize(callCtx, &servicepb.ReAuthorizeRequest{Identity: identity, Resource: resource})
+	resp, err := e.client.Authorize(callCtx, &servicepb.AuthorizeRequest{
+		Token:         params.token,
+		Resource:      params.resource,
+		TlsCertHash:   params.certHash,
+		Namespaces:    params.scope.namespaces,
+		AllNamespaces: params.scope.all,
+	})
 	if err != nil {
-		return grpcerror.WrapWithContext(err, fmt.Sprintf("ACL re-check failed for [%s]", resource))
+		return nil, grpcerror.WrapWithContext(err,
+			fmt.Sprintf("ACL re-check failed for [%s]", params.resource))
 	}
-	return nil
+	return resp, nil
+}
+
+// reAuthorizeParams groups a re-authorization's inputs, which exceed the argument limit.
+type reAuthorizeParams struct {
+	token    string
+	resource string
+	certHash []byte
+	scope    requestScope
+}
+
+// decisionValidUntil returns how long a stream may reuse an authorization decision: the revalidation
+// interval, but never past the bound token's own expiry, so an expired token cannot keep a stream
+// alive even if the AuthService becomes unreachable in the meantime.
+func (e *Enforcer) decisionValidUntil(resp *servicepb.AuthorizeResponse, now time.Time) time.Time {
+	validUntil := now.Add(e.revalidateInterval)
+	if expiry := tokenExpiry(resp); !expiry.IsZero() && expiry.Before(validUntil) {
+		return expiry
+	}
+	return validUntil
+}
+
+// tokenExpiry reads the bound token's expiry from an authorization response, returning the zero time
+// when the AuthService did not report one. A zero expiry means "no locally known bound", not "expired
+// at the epoch": the revalidation interval still bounds how long such a decision is reused.
+func tokenExpiry(resp *servicepb.AuthorizeResponse) time.Time {
+	if expiry := resp.GetTokenExpiresAt(); expiry > 0 {
+		return time.Unix(expiry, 0)
+	}
+	return time.Time{}
 }
 
 // isExempt reports whether a gRPC method bypasses ACL enforcement.
@@ -184,75 +237,150 @@ func tokenFromMetadata(ctx context.Context) (string, error) {
 	return values[0], nil
 }
 
-// denial records the terminal error that ends a stream, published once by the revalidation loop and
-// observed by RecvMsg/SendMsg without a lock.
-type denial struct {
-	err error
-}
-
-// aclServerStream wraps a server stream whose bound identity is re-authorized on a background timer.
-// On a definitive denial the loop records the terminal error and cancels the wrapped context, so the
-// next receive or send returns that error and a handler that selects on its context observes the
-// cancellation. Data reaches the client only through SendMsg, which checks the denial before every
-// send, so a revoked client receives nothing further even if its handler is parked in RecvMsg; the
-// connection itself is bounded by the server's keep-alive max-connection-age.
+// aclServerStream wraps a server stream whose authorization is renewed from its bound token. Every
+// receive and send first calls authorizeIfLapsed, so no message crosses the wrapper while the stream's
+// decision is stale: the token is re-resolved to its record (catching expiry and revocation) and the
+// resulting identity re-evaluated against the latest configuration (catching a policy change). A valid
+// decision is reused until it lapses, so the common case costs no round trip - a per-message check
+// against the AuthService would put its latency on the data path of every block and batch.
 type aclServerStream struct {
 	grpc.ServerStream
 	//nolint:containedctx // the wrapped stream must return this (cancelable) context from Context().
 	ctx context.Context
-	// cancel tears the stream down when revalidation reaches a definitive denial.
+	// cancel tears the stream down when a re-check reaches a definitive denial.
 	cancel   context.CancelFunc
 	enforcer *Enforcer
 	resource string
-	identity []byte
-	denied   atomic.Pointer[denial]
+	token    string
+	certHash []byte
+
+	// mu guards the cached decision. Recv and Send run on separate goroutines for a bidirectional
+	// stream, so both the check and the refresh must be serialized; the refresh is held under the lock
+	// deliberately, since letting a message through while the decision is being renewed would defeat
+	// the check.
+	mu sync.Mutex
+	// tokenExpiresAt is the hard limit: past it the stream is denied without consulting the
+	// AuthService, because the bound token is known to be dead.
+	tokenExpiresAt time.Time
+	// validUntil is when the cached decision must be renewed.
+	validUntil time.Time
+	// scope is the namespace scope the stream's subscription requested, once known, so later
+	// re-checks re-verify it and not merely the method.
+	scope requestScope
+	// denied is the terminal error once a re-check has definitively failed.
+	denied error
 }
 
 func (s *aclServerStream) Context() context.Context {
 	return s.ctx
 }
 
+// RecvMsg authorizes the stream, receives the message, and - when that message is the subscription
+// request naming the namespaces the stream wants - authorizes those namespaces before the handler ever
+// sees it. That is the only point at which a stream's requested namespaces are known.
 func (s *aclServerStream) RecvMsg(m any) error {
-	if d := s.denied.Load(); d != nil {
-		return d.err
+	if err := s.authorizeIfLapsed(); err != nil {
+		return err
 	}
-	return s.ServerStream.RecvMsg(m)
+	if err := s.ServerStream.RecvMsg(m); err != nil {
+		return err
+	}
+	return s.authorizeRequestScope(m)
 }
 
 func (s *aclServerStream) SendMsg(m any) error {
-	if d := s.denied.Load(); d != nil {
-		return d.err
+	if err := s.authorizeIfLapsed(); err != nil {
+		return err
 	}
 	return s.ServerStream.SendMsg(m)
 }
 
-// revalidate re-authorizes the bound identity every revalidation interval until the stream ends. A
-// transient error (the AuthService is briefly unreachable) is tolerated: the established stream keeps
-// serving and the check is retried next tick, mirroring the client's cached-token fallback. Only a
-// definitive denial - a policy or identity rejection - terminates the stream: the loop records the
-// error (so the next receive/send returns it) and cancels the stream context.
-func (s *aclServerStream) revalidate() {
-	ticker := time.NewTicker(s.enforcer.revalidateInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-ticker.C:
-			err := s.enforcer.reAuthorize(s.ctx, s.identity, s.resource)
-			if err == nil {
-				continue
-			}
-			if grpcerror.FilterUnavailableErrorCode(err) == nil {
-				// Transient (Unavailable / DeadlineExceeded): keep the stream, retry next tick.
-				logger.Warnf("ACL re-check for [%s] failed transiently; keeping the stream open: %v",
-					s.resource, err)
-				continue
-			}
-			logger.Warnf("ACL re-check for [%s] denied; terminating the stream: %v", s.resource, err)
-			s.denied.Store(&denial{err: err})
-			s.cancel()
-			return
-		}
+// authorizeIfLapsed renews the stream's authorization when the cached decision has lapsed, and
+// terminates the stream on a definitive denial. A transient failure (the AuthService is briefly
+// unreachable) leaves the established stream serving and is retried on the next message - but only
+// until the bound token's own expiry, which is enforced locally, so an outage can never extend a
+// stream past the lifetime of the token that established it.
+func (s *aclServerStream) authorizeIfLapsed() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.denied != nil {
+		return s.denied
 	}
+	now := time.Now()
+	if !s.tokenExpiresAt.IsZero() && now.After(s.tokenExpiresAt) {
+		s.terminate(grpcerror.WrapUnauthenticated(
+			errors.Newf("the token bound to stream [%s] has expired", s.resource),
+		))
+		return s.denied
+	}
+	if now.Before(s.validUntil) {
+		return nil
+	}
+
+	resp, err := s.enforcer.reAuthorize(s.ctx, s.reAuthorizeParams(s.scope))
+	if err != nil {
+		if grpcerror.FilterUnavailableErrorCode(err) == nil {
+			// Transient (Unavailable / DeadlineExceeded): keep serving and retry on the next message.
+			// The token-expiry guard above still bounds how long this can continue.
+			logger.Warnf("ACL re-check for [%s] failed transiently; keeping the stream open: %v",
+				s.resource, err)
+			return nil
+		}
+		logger.Warnf("ACL re-check for [%s] denied; terminating the stream: %v", s.resource, err)
+		s.terminate(err)
+		return s.denied
+	}
+
+	s.validUntil = s.enforcer.decisionValidUntil(resp, now)
+	return nil
+}
+
+// authorizeRequestScope authorizes the namespaces a just-received subscription request asks for, and
+// remembers them so every later re-check re-verifies them too. Messages that name no namespaces (every
+// message after the request, on the methods that address namespaces at all) are left alone.
+func (s *aclServerStream) authorizeRequestScope(m any) error {
+	scope := scopeOfRequest(m)
+	if !scope.isSet() {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.denied != nil {
+		return s.denied
+	}
+
+	resp, err := s.enforcer.reAuthorize(s.ctx, s.reAuthorizeParams(scope))
+	if err != nil {
+		if grpcerror.FilterUnavailableErrorCode(err) != nil {
+			logger.Warnf("ACL check of the requested namespaces for [%s] denied: %v", s.resource, err)
+			s.terminate(err)
+			return s.denied
+		}
+		// Transient: the stream keeps its establishment authorization and the scope is re-checked on
+		// the next lapse, which the token-expiry bound still limits.
+		logger.Warnf("ACL check of the requested namespaces for [%s] failed transiently: %v", s.resource, err)
+		return nil
+	}
+
+	s.scope = scope
+	s.validUntil = s.enforcer.decisionValidUntil(resp, time.Now())
+	return nil
+}
+
+// reAuthorizeParams builds the inputs for a re-check of this stream against the given namespace scope.
+func (s *aclServerStream) reAuthorizeParams(scope requestScope) *reAuthorizeParams {
+	return &reAuthorizeParams{
+		token:    s.token,
+		resource: s.resource,
+		certHash: s.certHash,
+		scope:    scope,
+	}
+}
+
+// terminate records the terminal error and cancels the stream context. The caller must hold mu.
+func (s *aclServerStream) terminate(err error) {
+	s.denied = err
+	s.cancel()
 }

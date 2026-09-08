@@ -44,7 +44,7 @@ func TestTokenMintVerifyRoundTrip(t *testing.T) {
 				Jti:            "jti-1",
 				MspId:          testMSPID,
 				CertHashSha256: []byte{0x01, 0x02, 0x03, 0x04},
-				Scope:          []string{"ns2", "/committerpb.QueryService/GetRows"},
+				Scope:          []string{testNS2, "/committerpb.QueryService/GetRows"},
 				IssuedSequence: 7,
 				ExpiresAt:      issuedAt.Add(5 * time.Minute).Unix(),
 			},

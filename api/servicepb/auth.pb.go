@@ -26,22 +26,118 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type GetNonceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetNonceRequest) Reset() {
+	*x = GetNonceRequest{}
+	mi := &file_api_servicepb_auth_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetNonceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetNonceRequest) ProtoMessage() {}
+
+func (x *GetNonceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_servicepb_auth_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetNonceRequest.ProtoReflect.Descriptor instead.
+func (*GetNonceRequest) Descriptor() ([]byte, []int) {
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{0}
+}
+
+type GetNonceResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// nonce is the server-issued challenge the client places in its envelope's SignatureHeader.Nonce.
+	// It is valid for a single Authenticate call and expires at expires_at.
+	Nonce []byte `protobuf:"bytes,1,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	// expires_at is the nonce expiry in unix seconds.
+	ExpiresAt     int64 `protobuf:"varint,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetNonceResponse) Reset() {
+	*x = GetNonceResponse{}
+	mi := &file_api_servicepb_auth_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetNonceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetNonceResponse) ProtoMessage() {}
+
+func (x *GetNonceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_servicepb_auth_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetNonceResponse.ProtoReflect.Descriptor instead.
+func (*GetNonceResponse) Descriptor() ([]byte, []int) {
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GetNonceResponse) GetNonce() []byte {
+	if x != nil {
+		return x.Nonce
+	}
+	return nil
+}
+
+func (x *GetNonceResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
 type AuthenticateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// signed_envelope is a marshaled common.Envelope carrying the client's serialized MSP identity
 	// and a signature over the payload; under mutual TLS its ChannelHeader also carries the TLS
-	// certificate hash the token is bound to.
+	// certificate hash the token is bound to. Its SignatureHeader.Nonce must be an unconsumed nonce
+	// previously issued by GetNonce.
 	SignedEnvelope []byte `protobuf:"bytes,1,opt,name=signed_envelope,json=signedEnvelope,proto3" json:"signed_envelope,omitempty"`
-	// requested_scope optionally narrows the token's authority (least privilege). A requested scope
-	// may only narrow, never broaden, the identity's authority.
+	// requested_scope optionally narrows the token's authority to these gRPC full-method names
+	// (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
 	RequestedScope []string `protobuf:"bytes,2,rep,name=requested_scope,json=requestedScope,proto3" json:"requested_scope,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// requested_namespaces optionally narrows the token's authority to these namespace ids, so a
+	// token may read or observe only the namespaces it lists. Empty means every namespace the
+	// identity's channel policy allows.
+	RequestedNamespaces []string `protobuf:"bytes,3,rep,name=requested_namespaces,json=requestedNamespaces,proto3" json:"requested_namespaces,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AuthenticateRequest) Reset() {
 	*x = AuthenticateRequest{}
-	mi := &file_api_servicepb_auth_proto_msgTypes[0]
+	mi := &file_api_servicepb_auth_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -53,7 +149,7 @@ func (x *AuthenticateRequest) String() string {
 func (*AuthenticateRequest) ProtoMessage() {}
 
 func (x *AuthenticateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_servicepb_auth_proto_msgTypes[0]
+	mi := &file_api_servicepb_auth_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -66,7 +162,7 @@ func (x *AuthenticateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthenticateRequest.ProtoReflect.Descriptor instead.
 func (*AuthenticateRequest) Descriptor() ([]byte, []int) {
-	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{0}
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AuthenticateRequest) GetSignedEnvelope() []byte {
@@ -83,6 +179,13 @@ func (x *AuthenticateRequest) GetRequestedScope() []string {
 	return nil
 }
 
+func (x *AuthenticateRequest) GetRequestedNamespaces() []string {
+	if x != nil {
+		return x.RequestedNamespaces
+	}
+	return nil
+}
+
 type AuthenticateResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// token is the minted cert-bound JWT the client attaches to subsequent RPCs.
@@ -95,7 +198,7 @@ type AuthenticateResponse struct {
 
 func (x *AuthenticateResponse) Reset() {
 	*x = AuthenticateResponse{}
-	mi := &file_api_servicepb_auth_proto_msgTypes[1]
+	mi := &file_api_servicepb_auth_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -107,7 +210,7 @@ func (x *AuthenticateResponse) String() string {
 func (*AuthenticateResponse) ProtoMessage() {}
 
 func (x *AuthenticateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_servicepb_auth_proto_msgTypes[1]
+	mi := &file_api_servicepb_auth_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -120,7 +223,7 @@ func (x *AuthenticateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthenticateResponse.ProtoReflect.Descriptor instead.
 func (*AuthenticateResponse) Descriptor() ([]byte, []int) {
-	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{1}
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AuthenticateResponse) GetToken() string {
@@ -145,14 +248,22 @@ type AuthorizeRequest struct {
 	Resource string `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
 	// tls_cert_hash is the SHA-256 of the caller's TLS certificate observed at the resource server.
 	// It is empty when the caller connected without a client certificate.
-	TlsCertHash   []byte `protobuf:"bytes,3,opt,name=tls_cert_hash,json=tlsCertHash,proto3" json:"tls_cert_hash,omitempty"`
+	TlsCertHash []byte `protobuf:"bytes,3,opt,name=tls_cert_hash,json=tlsCertHash,proto3" json:"tls_cert_hash,omitempty"`
+	// namespaces are the namespace ids the request actually touches, read out of the request body by
+	// the resource server's interceptor. The AuthService checks them against the token's namespace
+	// scope, so the decision stays here rather than being delegated back to the resource server.
+	Namespaces []string `protobuf:"bytes,4,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
+	// all_namespaces is true when the request is not restricted to particular namespaces - an
+	// unfiltered subscription, for instance. A namespace-scoped token cannot satisfy such a request,
+	// so it is denied rather than being silently narrowed.
+	AllNamespaces bool `protobuf:"varint,5,opt,name=all_namespaces,json=allNamespaces,proto3" json:"all_namespaces,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AuthorizeRequest) Reset() {
 	*x = AuthorizeRequest{}
-	mi := &file_api_servicepb_auth_proto_msgTypes[2]
+	mi := &file_api_servicepb_auth_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -164,7 +275,7 @@ func (x *AuthorizeRequest) String() string {
 func (*AuthorizeRequest) ProtoMessage() {}
 
 func (x *AuthorizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_servicepb_auth_proto_msgTypes[2]
+	mi := &file_api_servicepb_auth_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -177,7 +288,7 @@ func (x *AuthorizeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeRequest.ProtoReflect.Descriptor instead.
 func (*AuthorizeRequest) Descriptor() ([]byte, []int) {
-	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{2}
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AuthorizeRequest) GetToken() string {
@@ -201,61 +312,18 @@ func (x *AuthorizeRequest) GetTlsCertHash() []byte {
 	return nil
 }
 
-type ReAuthorizeRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// identity is the MSP SerializedIdentity that Authorize bound to the stream session at
-	// establishment. Re-authorization re-resolves it against the latest configuration and evaluates
-	// the resource policy again; it deliberately does not re-present the token, so a stream's
-	// authorization tracks the identity's live permissions rather than the establishment token's TTL.
-	Identity []byte `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
-	// resource is the gRPC full method the stream belongs to.
-	Resource      string `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReAuthorizeRequest) Reset() {
-	*x = ReAuthorizeRequest{}
-	mi := &file_api_servicepb_auth_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReAuthorizeRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReAuthorizeRequest) ProtoMessage() {}
-
-func (x *ReAuthorizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_servicepb_auth_proto_msgTypes[3]
+func (x *AuthorizeRequest) GetNamespaces() []string {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReAuthorizeRequest.ProtoReflect.Descriptor instead.
-func (*ReAuthorizeRequest) Descriptor() ([]byte, []int) {
-	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *ReAuthorizeRequest) GetIdentity() []byte {
-	if x != nil {
-		return x.Identity
+		return x.Namespaces
 	}
 	return nil
 }
 
-func (x *ReAuthorizeRequest) GetResource() string {
+func (x *AuthorizeRequest) GetAllNamespaces() bool {
 	if x != nil {
-		return x.Resource
+		return x.AllNamespaces
 	}
-	return ""
+	return false
 }
 
 type AuthorizeResponse struct {
@@ -266,16 +334,20 @@ type AuthorizeResponse struct {
 	// Unavailable before the configuration is loaded), so a successful response always has
 	// authorized = true.
 	Authorized bool `protobuf:"varint,1,opt,name=authorized,proto3" json:"authorized,omitempty"`
-	// identity is the resolved MSP SerializedIdentity bound to the token. Authorize returns it so a
-	// resource server can bind it to a stream session and later pass it to ReAuthorize.
-	Identity      []byte `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// identity is the resolved MSP SerializedIdentity bound to the token, for logging and for a
+	// resource server that records who a stream belongs to.
+	Identity []byte `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	// token_expires_at is the bound token's expiry in unix seconds. A resource server caches an
+	// authorization decision for a stream no longer than this, so an expired token cannot keep an
+	// established stream alive.
+	TokenExpiresAt int64 `protobuf:"varint,4,opt,name=token_expires_at,json=tokenExpiresAt,proto3" json:"token_expires_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AuthorizeResponse) Reset() {
 	*x = AuthorizeResponse{}
-	mi := &file_api_servicepb_auth_proto_msgTypes[4]
+	mi := &file_api_servicepb_auth_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -287,7 +359,7 @@ func (x *AuthorizeResponse) String() string {
 func (*AuthorizeResponse) ProtoMessage() {}
 
 func (x *AuthorizeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_servicepb_auth_proto_msgTypes[4]
+	mi := &file_api_servicepb_auth_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +372,7 @@ func (x *AuthorizeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeResponse.ProtoReflect.Descriptor instead.
 func (*AuthorizeResponse) Descriptor() ([]byte, []int) {
-	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{4}
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AuthorizeResponse) GetAuthorized() bool {
@@ -317,6 +389,13 @@ func (x *AuthorizeResponse) GetIdentity() []byte {
 	return nil
 }
 
+func (x *AuthorizeResponse) GetTokenExpiresAt() int64 {
+	if x != nil {
+		return x.TokenExpiresAt
+	}
+	return 0
+}
+
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
 // in the auth service's identity store. It - not the raw JWT - holds the client's serialized MSP
 // identity, so the identity can be re-resolved against the latest configuration at authorization
@@ -331,8 +410,12 @@ type TokenRecord struct {
 	MspId string `protobuf:"bytes,3,opt,name=msp_id,json=mspId,proto3" json:"msp_id,omitempty"`
 	// cert_hash_sha256 is the cnf/x5t#S256 binding to the client's TLS certificate.
 	CertHashSha256 []byte `protobuf:"bytes,4,opt,name=cert_hash_sha256,json=certHashSha256,proto3" json:"cert_hash_sha256,omitempty"`
-	// scope is the optional least-privilege scope granted at issuance.
+	// scope is the optional least-privilege scope granted at issuance, as gRPC full-method names.
 	Scope []string `protobuf:"bytes,5,rep,name=scope,proto3" json:"scope,omitempty"`
+	// namespaces is the optional namespace allowlist granted at issuance. Unlike scope, which the
+	// interceptor checks against the method name, this is enforced by the resource service against
+	// the namespaces the request body actually touches.
+	Namespaces []string `protobuf:"bytes,8,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
 	// issued_sequence is the config sequence the identity was first resolved against.
 	IssuedSequence uint64 `protobuf:"varint,6,opt,name=issued_sequence,json=issuedSequence,proto3" json:"issued_sequence,omitempty"`
 	// expires_at is the token expiry in unix seconds, used for TTL cleanup.
@@ -343,7 +426,7 @@ type TokenRecord struct {
 
 func (x *TokenRecord) Reset() {
 	*x = TokenRecord{}
-	mi := &file_api_servicepb_auth_proto_msgTypes[5]
+	mi := &file_api_servicepb_auth_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -355,7 +438,7 @@ func (x *TokenRecord) String() string {
 func (*TokenRecord) ProtoMessage() {}
 
 func (x *TokenRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_api_servicepb_auth_proto_msgTypes[5]
+	mi := &file_api_servicepb_auth_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -368,7 +451,7 @@ func (x *TokenRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRecord.ProtoReflect.Descriptor instead.
 func (*TokenRecord) Descriptor() ([]byte, []int) {
-	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{5}
+	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TokenRecord) GetJti() string {
@@ -406,6 +489,13 @@ func (x *TokenRecord) GetScope() []string {
 	return nil
 }
 
+func (x *TokenRecord) GetNamespaces() []string {
+	if x != nil {
+		return x.Namespaces
+	}
+	return nil
+}
+
 func (x *TokenRecord) GetIssuedSequence() uint64 {
 	if x != nil {
 		return x.IssuedSequence
@@ -424,39 +514,50 @@ var File_api_servicepb_auth_proto protoreflect.FileDescriptor
 
 const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/servicepb/auth.proto\x12\tservicepb\"g\n" +
+	"\x18api/servicepb/auth.proto\x12\tservicepb\"\x11\n" +
+	"\x0fGetNonceRequest\"G\n" +
+	"\x10GetNonceResponse\x12\x14\n" +
+	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\x9a\x01\n" +
 	"\x13AuthenticateRequest\x12'\n" +
 	"\x0fsigned_envelope\x18\x01 \x01(\fR\x0esignedEnvelope\x12'\n" +
-	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScope\"K\n" +
+	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScope\x121\n" +
+	"\x14requested_namespaces\x18\x03 \x03(\tR\x13requestedNamespaces\"K\n" +
 	"\x14AuthenticateResponse\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"h\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\xaf\x01\n" +
 	"\x10AuthorizeRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bresource\x18\x02 \x01(\tR\bresource\x12\"\n" +
-	"\rtls_cert_hash\x18\x03 \x01(\fR\vtlsCertHash\"L\n" +
-	"\x12ReAuthorizeRequest\x12\x1a\n" +
-	"\bidentity\x18\x01 \x01(\fR\bidentity\x12\x1a\n" +
-	"\bresource\x18\x02 \x01(\tR\bresource\"O\n" +
+	"\rtls_cert_hash\x18\x03 \x01(\fR\vtlsCertHash\x12\x1e\n" +
+	"\n" +
+	"namespaces\x18\x04 \x03(\tR\n" +
+	"namespaces\x12%\n" +
+	"\x0eall_namespaces\x18\x05 \x01(\bR\rallNamespaces\"y\n" +
 	"\x11AuthorizeResponse\x12\x1e\n" +
 	"\n" +
 	"authorized\x18\x01 \x01(\bR\n" +
 	"authorized\x12\x1a\n" +
-	"\bidentity\x18\x02 \x01(\fR\bidentity\"\xef\x01\n" +
+	"\bidentity\x18\x02 \x01(\fR\bidentity\x12(\n" +
+	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAt\"\x8f\x02\n" +
 	"\vTokenRecord\x12\x10\n" +
 	"\x03jti\x18\x01 \x01(\tR\x03jti\x12/\n" +
 	"\x13serialized_identity\x18\x02 \x01(\fR\x12serializedIdentity\x12\x15\n" +
 	"\x06msp_id\x18\x03 \x01(\tR\x05mspId\x12(\n" +
 	"\x10cert_hash_sha256\x18\x04 \x01(\fR\x0ecertHashSha256\x12\x14\n" +
-	"\x05scope\x18\x05 \x03(\tR\x05scope\x12'\n" +
+	"\x05scope\x18\x05 \x03(\tR\x05scope\x12\x1e\n" +
+	"\n" +
+	"namespaces\x18\b \x03(\tR\n" +
+	"namespaces\x12'\n" +
 	"\x0fissued_sequence\x18\x06 \x01(\x04R\x0eissuedSequence\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\a \x01(\x03R\texpiresAt2\xf2\x01\n" +
-	"\vAuthService\x12O\n" +
+	"expires_at\x18\a \x01(\x03R\texpiresAt2\xeb\x01\n" +
+	"\vAuthService\x12C\n" +
+	"\bGetNonce\x12\x1a.servicepb.GetNonceRequest\x1a\x1b.servicepb.GetNonceResponse\x12O\n" +
 	"\fAuthenticate\x12\x1e.servicepb.AuthenticateRequest\x1a\x1f.servicepb.AuthenticateResponse\x12F\n" +
-	"\tAuthorize\x12\x1b.servicepb.AuthorizeRequest\x1a\x1c.servicepb.AuthorizeResponse\x12J\n" +
-	"\vReAuthorize\x12\x1d.servicepb.ReAuthorizeRequest\x1a\x1c.servicepb.AuthorizeResponseB9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"\tAuthorize\x12\x1b.servicepb.AuthorizeRequest\x1a\x1c.servicepb.AuthorizeResponseB9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_auth_proto_rawDescOnce sync.Once
@@ -470,22 +571,23 @@ func file_api_servicepb_auth_proto_rawDescGZIP() []byte {
 	return file_api_servicepb_auth_proto_rawDescData
 }
 
-var file_api_servicepb_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_api_servicepb_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_servicepb_auth_proto_goTypes = []any{
-	(*AuthenticateRequest)(nil),  // 0: servicepb.AuthenticateRequest
-	(*AuthenticateResponse)(nil), // 1: servicepb.AuthenticateResponse
-	(*AuthorizeRequest)(nil),     // 2: servicepb.AuthorizeRequest
-	(*ReAuthorizeRequest)(nil),   // 3: servicepb.ReAuthorizeRequest
-	(*AuthorizeResponse)(nil),    // 4: servicepb.AuthorizeResponse
-	(*TokenRecord)(nil),          // 5: servicepb.TokenRecord
+	(*GetNonceRequest)(nil),      // 0: servicepb.GetNonceRequest
+	(*GetNonceResponse)(nil),     // 1: servicepb.GetNonceResponse
+	(*AuthenticateRequest)(nil),  // 2: servicepb.AuthenticateRequest
+	(*AuthenticateResponse)(nil), // 3: servicepb.AuthenticateResponse
+	(*AuthorizeRequest)(nil),     // 4: servicepb.AuthorizeRequest
+	(*AuthorizeResponse)(nil),    // 5: servicepb.AuthorizeResponse
+	(*TokenRecord)(nil),          // 6: servicepb.TokenRecord
 }
 var file_api_servicepb_auth_proto_depIdxs = []int32{
-	0, // 0: servicepb.AuthService.Authenticate:input_type -> servicepb.AuthenticateRequest
-	2, // 1: servicepb.AuthService.Authorize:input_type -> servicepb.AuthorizeRequest
-	3, // 2: servicepb.AuthService.ReAuthorize:input_type -> servicepb.ReAuthorizeRequest
-	1, // 3: servicepb.AuthService.Authenticate:output_type -> servicepb.AuthenticateResponse
-	4, // 4: servicepb.AuthService.Authorize:output_type -> servicepb.AuthorizeResponse
-	4, // 5: servicepb.AuthService.ReAuthorize:output_type -> servicepb.AuthorizeResponse
+	0, // 0: servicepb.AuthService.GetNonce:input_type -> servicepb.GetNonceRequest
+	2, // 1: servicepb.AuthService.Authenticate:input_type -> servicepb.AuthenticateRequest
+	4, // 2: servicepb.AuthService.Authorize:input_type -> servicepb.AuthorizeRequest
+	1, // 3: servicepb.AuthService.GetNonce:output_type -> servicepb.GetNonceResponse
+	3, // 4: servicepb.AuthService.Authenticate:output_type -> servicepb.AuthenticateResponse
+	5, // 5: servicepb.AuthService.Authorize:output_type -> servicepb.AuthorizeResponse
 	3, // [3:6] is the sub-list for method output_type
 	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -504,7 +606,7 @@ func file_api_servicepb_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_servicepb_auth_proto_rawDesc), len(file_api_servicepb_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

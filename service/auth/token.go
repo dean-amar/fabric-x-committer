@@ -79,7 +79,7 @@ func newTokenSigner(keyPath string) (*tokenSigner, error) {
 // mint builds and signs a JWT for the given token record. issuedAt is the "iat" claim; the record's
 // ExpiresAt is the "exp" claim.
 func (s *tokenSigner) mint(rec *servicepb.TokenRecord, issuedAt time.Time) (string, error) {
-	claims := &tokenClaims{
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodES256, &tokenClaims{
 		Issuer:    tokenIssuer,
 		Subject:   rec.GetMspId(),
 		ID:        rec.GetJti(),
@@ -88,9 +88,7 @@ func (s *tokenSigner) mint(rec *servicepb.TokenRecord, issuedAt time.Time) (stri
 		Cnf:       confirmation{X5tS256: base64.RawURLEncoding.EncodeToString(rec.GetCertHashSha256())},
 		Scope:     rec.GetScope(),
 		Seq:       rec.GetIssuedSequence(),
-	}
-
-	signed, err := jwt.NewWithClaims(jwt.SigningMethodES256, claims).SignedString(s.privateKey)
+	}).SignedString(s.privateKey)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to sign token")
 	}

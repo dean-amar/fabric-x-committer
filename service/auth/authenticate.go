@@ -59,16 +59,27 @@ type verifiedIdentity struct {
 type authenticator struct {
 	signer          *tokenSigner
 	store           *tokenStore
+	nonces          *nonceStore
 	freshnessWindow time.Duration
 	tokenTTL        time.Duration
 }
 
-func newAuthenticator(signer *tokenSigner, store *tokenStore, freshnessWindow, tokenTTL time.Duration) *authenticator {
+// authenticatorConfig groups the authenticator's dependencies, which exceed the argument limit.
+type authenticatorConfig struct {
+	signer          *tokenSigner
+	store           *tokenStore
+	nonces          *nonceStore
+	freshnessWindow time.Duration
+	tokenTTL        time.Duration
+}
+
+func newAuthenticator(cfg *authenticatorConfig) *authenticator {
 	return &authenticator{
-		signer:          signer,
-		store:           store,
-		freshnessWindow: freshnessWindow,
-		tokenTTL:        tokenTTL,
+		signer:          cfg.signer,
+		store:           cfg.store,
+		nonces:          cfg.nonces,
+		freshnessWindow: cfg.freshnessWindow,
+		tokenTTL:        cfg.tokenTTL,
 	}
 }
 
@@ -76,13 +87,28 @@ func newAuthenticator(signer *tokenSigner, store *tokenStore, freshnessWindow, t
 // binding, and returns a freshly minted cert-bound token. It returns gRPC status errors:
 // Unauthenticated when the envelope is invalid, Internal when persistence or signing fails.
 func (a *authenticator) authenticate(
-	ctx context.Context, envBytes []byte, requestedScope []string, bundle *channelconfig.Bundle,
+	ctx context.Context, req *servicepb.AuthenticateRequest, bundle *channelconfig.Bundle,
 ) (*servicepb.AuthenticateResponse, error) {
+	envBytes := req.GetSignedEnvelope()
 	if len(envBytes) == 0 {
 		return nil, grpcerror.WrapInvalidArgument(errors.New("signed envelope is required"))
 	}
 
 	now := time.Now()
+	parsed, err := parseSignedEnvelope(envBytes)
+	if err != nil {
+		logger.Warnf("Authentication failed: %v", err)
+		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+	}
+
+	// Redeem the nonce before verifying the signature: an envelope whose nonce is spent is a replay
+	// however well it is signed, and redeeming first denies a replayer the ability to make the service
+	// repeat the expensive signature check.
+	if err = a.nonces.consume(ctx, parsed.nonce, now); err != nil {
+		logger.Warnf("Authentication failed: %v", err)
+		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+	}
+
 	identity, err := a.verifyEnvelope(ctx, envBytes, bundle, now)
 	if err != nil {
 		logger.Warnf("Authentication failed: %v", err)
@@ -99,7 +125,8 @@ func (a *authenticator) authenticate(
 		SerializedIdentity: identity.serialized,
 		MspId:              identity.mspID,
 		CertHashSha256:     identity.certHash,
-		Scope:              normalizeScope(requestedScope),
+		Scope:              normalizeScope(req.GetRequestedScope()),
+		Namespaces:         normalizeScope(req.GetRequestedNamespaces()),
 		IssuedSequence:     bundle.ConfigtxValidator().Sequence(),
 		ExpiresAt:          now.Add(a.tokenTTL).Unix(),
 	}
@@ -121,10 +148,15 @@ func (a *authenticator) authenticate(
 	return &servicepb.AuthenticateResponse{Token: token, ExpiresAt: rec.GetExpiresAt()}, nil
 }
 
-// verifyEnvelope verifies a signed authentication envelope against the given bundle and returns the
-// authenticated identity. It performs, in order: timestamp freshness, TLS certificate binding,
-// signed-data extraction, MSP identity resolution and validation, and signature verification -
+// verifyEnvelope verifies an already-parsed authentication envelope against the given bundle and
+// returns the authenticated identity. It performs, in order: envelope scoping, timestamp freshness,
+// TLS certificate binding, MSP identity resolution and validation, and signature verification -
 // mirroring the envelope-processing steps the committer already uses for config envelopes.
+//
+// Redeeming the nonce is deliberately not part of this: that is the one stateful step, and keeping it
+// in authenticate leaves this function a pure check over the envelope and the bundle. It re-parses the
+// envelope rather than taking the parsed form, which costs nothing worth optimizing - authentication
+// happens once per token, not per RPC - and keeps the signature a plain byte slice.
 func (a *authenticator) verifyEnvelope(
 	ctx context.Context, envBytes []byte, bundle *channelconfig.Bundle, now time.Time,
 ) (*verifiedIdentity, error) {
@@ -194,15 +226,19 @@ func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) 
 }
 
 // parsedEnvelope holds the pieces of a signed envelope that verifyEnvelope inspects: the channel
-// header, the application payload bytes (empty for a genuine authentication envelope), and the single
-// signed-data unit (serialized identity, signed payload bytes, and signature).
+// header, the application payload bytes (empty for a genuine authentication envelope), the nonce the
+// client claims from the SignatureHeader, and the single signed-data unit (serialized identity,
+// signed payload bytes, and signature).
 type parsedEnvelope struct {
 	chdr        *common.ChannelHeader
 	payloadData []byte
+	nonce       []byte
 	signedData  *protoutil.SignedData
 }
 
-// parseSignedEnvelope unmarshals an envelope into the pieces verifyEnvelope inspects.
+// parseSignedEnvelope unmarshals an envelope into the pieces verifyEnvelope inspects. The nonce comes
+// from the SignatureHeader, which the payload signature covers (the signature is over the whole
+// marshaled payload), so a replayer cannot swap in a fresh nonce without invalidating the signature.
 func parseSignedEnvelope(envBytes []byte) (*parsedEnvelope, error) {
 	env, err := protoutil.UnmarshalEnvelope(envBytes)
 	if err != nil {
@@ -219,6 +255,10 @@ func parseSignedEnvelope(envBytes []byte) (*parsedEnvelope, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal channel header")
 	}
+	shdr, err := protoutil.UnmarshalSignatureHeader(payload.Header.SignatureHeader)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal signature header")
+	}
 
 	signedData, err := protoutil.EnvelopeAsSignedData(env)
 	if err != nil {
@@ -227,7 +267,12 @@ func parseSignedEnvelope(envBytes []byte) (*parsedEnvelope, error) {
 	if len(signedData) != 1 {
 		return nil, errors.Newf("expected exactly one signed-data unit, got %d", len(signedData))
 	}
-	return &parsedEnvelope{chdr: chdr, payloadData: payload.Data, signedData: signedData[0]}, nil
+	return &parsedEnvelope{
+		chdr:        chdr,
+		payloadData: payload.Data,
+		nonce:       shdr.GetNonce(),
+		signedData:  signedData[0],
+	}, nil
 }
 
 // validateTimestamp rejects a timestamp that is missing, not representable, or further from now than

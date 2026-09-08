@@ -41,6 +41,10 @@ import (
 const (
 	testChannelID   = "test-channel"
 	resourceGetRows = "/committerpb.QueryService/GetRows"
+
+	testNS1 = "ns1"
+	testNS2 = "ns2"
+	testNS3 = "ns3"
 )
 
 // authTestEnv is a shared test fixture: a real channel-configuration bundle built from a config block
@@ -84,13 +88,28 @@ type envelopeParams struct {
 	channelID   string
 	payload     proto.Message
 	tlsCertHash []byte
+	nonce       []byte
 }
 
 // signedEnvelope builds a client-signed authentication envelope carrying the given TLS certificate
-// hash, marshaled ready to place in an AuthenticateRequest.
+// hash, marshaled ready to place in an AuthenticateRequest. It carries no nonce, so it is only usable
+// against verifyEnvelope; a test going through Authenticate must use signedEnvelopeWithNonce.
 func (e *authTestEnv) signedEnvelope(t *testing.T, tlsCertHash []byte) []byte {
 	t.Helper()
 	return e.signedEnvelopeFor(t, common.HeaderType_MESSAGE, testChannelID, tlsCertHash)
+}
+
+// signedEnvelopeWithNonce builds an authentication envelope carrying a server-issued nonce, as a real
+// client does after its GetNonce pre-step.
+func (e *authTestEnv) signedEnvelopeWithNonce(t *testing.T, nonce, tlsCertHash []byte) []byte {
+	t.Helper()
+	return e.signEnvelope(t, envelopeParams{
+		headerType:  common.HeaderType_MESSAGE,
+		channelID:   testChannelID,
+		payload:     &emptypb.Empty{},
+		tlsCertHash: tlsCertHash,
+		nonce:       nonce,
+	})
 }
 
 // signedEnvelopeFor builds a client-signed envelope with an explicit header type and channel id (and
@@ -115,14 +134,28 @@ func (e *authTestEnv) signedEnvelopeWithPayload(
 	return e.signEnvelope(t, envelopeParams{headerType: headerType, channelID: channelID, payload: payload})
 }
 
-// signEnvelope signs and marshals an envelope from the given parameters.
+// signEnvelope signs and marshals an envelope from the given parameters. It builds the envelope
+// directly rather than via protoutil.CreateSignedEnvelopeWithTLSBinding so a test can control the
+// SignatureHeader's nonce, which that helper always fills with a value of its own choosing.
 func (e *authTestEnv) signEnvelope(t *testing.T, p envelopeParams) []byte {
 	t.Helper()
-	env, err := protoutil.CreateSignedEnvelopeWithTLSBinding(
-		p.headerType, p.channelID, e.signer, p.payload, 0, 0, p.tlsCertHash,
-	)
+	creator, err := e.signer.Serialize()
 	require.NoError(t, err)
-	envBytes, err := proto.Marshal(env)
+
+	channelHeader := protoutil.MakeChannelHeader(p.headerType, 0, p.channelID, 0)
+	channelHeader.TlsCertHash = p.tlsCertHash
+	data, err := proto.Marshal(p.payload)
+	require.NoError(t, err)
+
+	payloadBytes, err := proto.Marshal(&common.Payload{
+		Header: protoutil.MakePayloadHeader(channelHeader, protoutil.MakeSignatureHeader(creator, p.nonce)),
+		Data:   data,
+	})
+	require.NoError(t, err)
+
+	signature, err := e.signer.Sign(payloadBytes)
+	require.NoError(t, err)
+	envBytes, err := proto.Marshal(&common.Envelope{Payload: payloadBytes, Signature: signature})
 	require.NoError(t, err)
 	return envBytes
 }
@@ -191,17 +224,36 @@ func newAuthServiceForTest(t *testing.T, env *authTestEnv) (*Service, *tokenSign
 	signer, err := newTokenSigner("")
 	require.NoError(t, err)
 
-	cfg := &Config{TokenTTL: 5 * time.Minute, EnvelopeFreshnessWindow: time.Minute}
+	cfg := &Config{TokenTTL: 5 * time.Minute, EnvelopeFreshnessWindow: time.Minute, NonceTTL: time.Minute}
+	nonces := newNonceStore(store.pool, cfg.NonceTTL)
+	require.NoError(t, nonces.ensureTable(t.Context()))
+
 	svc := &Service{
-		config:        cfg,
-		metrics:       newAuthServiceMetrics(),
-		store:         store,
-		authenticator: newAuthenticator(signer, store, cfg.EnvelopeFreshnessWindow, cfg.TokenTTL),
-		authorizer:    newAuthorizer(signer, store),
+		config:  cfg,
+		metrics: newAuthServiceMetrics(),
+		store:   store,
+		nonces:  nonces,
+		authenticator: newAuthenticator(&authenticatorConfig{
+			signer:          signer,
+			store:           store,
+			nonces:          nonces,
+			freshnessWindow: cfg.EnvelopeFreshnessWindow,
+			tokenTTL:        cfg.TokenTTL,
+		}),
+		authorizer: newAuthorizer(signer, store),
 	}
 	svc.provider = newConfigProvider(store.pool, svc.metrics)
 	svc.provider.bundle.Store(env.bundle)
 	return svc, signer
+}
+
+// issueNonce obtains a nonce from the service, as a client's mandatory pre-authentication step.
+func issueNonce(t *testing.T, svc *Service) []byte {
+	t.Helper()
+	resp, err := svc.GetNonce(t.Context(), &servicepb.GetNonceRequest{})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.GetNonce())
+	return resp.GetNonce()
 }
 
 // testRecord builds a token record with the given id and expiry.

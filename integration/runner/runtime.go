@@ -48,6 +48,7 @@ type (
 		Sidecar      *ProcessWithConfig
 		Coordinator  *ProcessWithConfig
 		QueryService *ProcessWithConfig
+		AuthService  *ProcessWithConfig
 		LoadGen      *ProcessWithConfig
 		DistLoadGen  *ProcessWithConfig
 		Verifier     []*ProcessWithConfig
@@ -89,6 +90,16 @@ type (
 		CrashTest bool
 		// RateLimit configures rate limiting for services that support it (query, sidecar).
 		RateLimit *serve.RateLimitConfig
+		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed channel
+		// configuration. Defaults to a second when EnableACL is set, so a test does not wait out the
+		// service's own one-minute default before enforcement becomes active.
+		AuthConfigRefreshInterval time.Duration
+
+		// EnableACL allocates the AuthService and renders the query service's auth section, so the
+		// topology enforces ACL. Left false, no auth process exists and every service behaves as
+		// before, which keeps every other integration test unaffected.
+		EnableACL bool
+
 		// MaxRequestKeys is the maximum number of keys allowed in a single query request.
 		// Set to 0 to disable the limit.
 		MaxRequestKeys int
@@ -135,6 +146,7 @@ const (
 	Verifier
 	VC
 	QueryService
+	AuthService
 
 	LoadGenForOnlyOrderer
 	LoadGenForOrderer
@@ -148,6 +160,9 @@ const (
 	FullTxPath            = Orderer | CommitterTxPath
 	FullTxPathWithLoadGen = FullTxPath | LoadGenForOrderer
 	FullTxPathWithQuery   = FullTxPath | QueryService
+	// FullTxPathWithAuth is the full transaction path plus the query service and the AuthService that
+	// guards it. It requires Config.EnableACL, which is what renders the query service's auth section.
+	FullTxPathWithAuth = FullTxPathWithQuery | AuthService
 
 	CommitterTxPathWithLoadGen = CommitterTxPath | LoadGenForCommitter
 
@@ -170,6 +185,9 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	}
 	if conf.NumVCService <= 0 {
 		conf.NumVCService = 1
+	}
+	if conf.EnableACL && conf.AuthConfigRefreshInterval <= 0 {
+		conf.AuthConfigRefreshInterval = time.Second
 	}
 
 	t.Log("create TLS manager and clients certificate")
@@ -234,6 +252,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			VerifierBatchTimeCutoff:             conf.VerifierBatchTimeCutoff,
 			VerifierBatchSizeCutoff:             conf.VerifierBatchSizeCutoff,
 			QueryTLSRefreshInterval:             conf.QueryTLSRefreshInterval,
+			AuthConfigRefreshInterval:           conf.AuthConfigRefreshInterval,
 
 			// Keep-alive configuration for services which exposes their API.
 			KeepAliveTime:                conf.KeepAliveTime,
@@ -299,6 +318,11 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	c.Coordinator, s.Services.Coordinator = newProcess(t, params, cmdCoordinator)
 	c.QueryService, s.Services.Query = newProcess(t, params, cmdQuery)
+	// The AuthService is allocated only when ACL is enabled, so Services.Auth.GrpcEndpoint stays nil
+	// and the query template omits its auth section for every other topology.
+	if conf.EnableACL {
+		c.AuthService, s.Services.Auth = newProcess(t, params, cmdAuth)
+	}
 	c.Sidecar, s.Services.Sidecar = newProcess(t, params, cmdSidecar)
 
 	// The load generators are pre-allocated here like every other service, but their config files are
@@ -393,6 +417,12 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
 		c.OpenNotificationStream(t.Context(), t)
+	}
+	if AuthService&serviceFlags != 0 {
+		require.NotNil(t, c.AuthService, "the AuthService requires Config.EnableACL")
+		// Started before the query service so the query service's first authorization attempt has
+		// somewhere to go; it still fails closed until the AuthService has loaded a config bundle.
+		c.AuthService.Restart(t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
@@ -694,8 +724,11 @@ func (c *CommitterRuntime) requireAllServicesAreRunning(t test.TestingT) {
 // are excluded: their template and worker count depend on the service flags passed to Start, so
 // startLoadGen writes their config and starts them.
 func (c *CommitterRuntime) serverProcesses() []*ProcessWithConfig {
-	procs := make([]*ProcessWithConfig, 0, 4+len(c.Verifier)+len(c.VcService))
+	procs := make([]*ProcessWithConfig, 0, 5+len(c.Verifier)+len(c.VcService))
 	procs = append(procs, c.MockOrderer, c.Coordinator, c.Sidecar, c.QueryService)
+	if c.AuthService != nil {
+		procs = append(procs, c.AuthService)
+	}
 	procs = append(procs, c.Verifier...)
 	procs = append(procs, c.VcService...)
 	return procs

@@ -121,7 +121,7 @@ Each module in the codebase registers a named logger. Use these names in the `lo
 
 | Module Name | Description |
 |-------------|-------------|
-| `auth` | Auth service (authentication, authorization, token issuance) |
+| `authentication-service` | Auth service (authentication, authorization, token issuance) |
 
 #### Shared
 

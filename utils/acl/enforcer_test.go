@@ -13,11 +13,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
@@ -26,6 +28,10 @@ import (
 const (
 	testResource = "/committerpb.QueryService/GetRows"
 	testToken    = "token"
+
+	testNS1 = "ns1"
+	testNS2 = "ns2"
+	testNS3 = "ns3"
 )
 
 func TestUnaryInterceptorAllows(t *testing.T) {
@@ -159,79 +165,192 @@ func TestStreamInterceptorAllowsAndDenies(t *testing.T) {
 	require.False(t, deniedHandlerRan)
 }
 
-func TestStreamReauthorizesOnInterval(t *testing.T) {
+// TestStreamReusesDecisionWithinInterval verifies the decision cache: while a decision is still
+// valid, messages flow without consulting the AuthService, so its latency stays off the data path.
+func TestStreamReusesDecisionWithinInterval(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("bound-identity")}
-	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: 10 * time.Millisecond})
+	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
 
-	// The handler stays open until released, so the background revalidation loop keeps running.
-	release := make(chan struct{})
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- enforcer.StreamInterceptor()(
-			nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
-			&grpc.StreamServerInfo{FullMethod: testResource},
-			func(any, grpc.ServerStream) error { <-release; return nil },
-		)
-	}()
-
-	// The bound identity is re-authorized on the timer, driven by the interval, not message flow.
-	require.Eventually(t, func() bool { return fake.reAuthorizeCallCount() >= 1 },
-		2*time.Second, 5*time.Millisecond)
-	require.Equal(t, []byte("bound-identity"), fake.lastReAuthorizeRequest().GetIdentity())
-
-	close(release)
-	require.NoError(t, <-errCh)
-}
-
-func TestStreamTolerantOfTransientReauthErrors(t *testing.T) {
-	t.Parallel()
-	// The AuthService is briefly unreachable; an established, already-authorized stream must survive.
-	fake := &fakeAuthClient{
-		identity:       []byte("id"),
-		reAuthorizeErr: status.Error(codes.Unavailable, "auth service restarting"),
-	}
-	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: 10 * time.Millisecond})
-
-	release := make(chan struct{})
-	errCh := make(chan error, 1)
-	streamCh := make(chan grpc.ServerStream, 1)
-	go func() {
-		errCh <- enforcer.StreamInterceptor()(
-			nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
-			&grpc.StreamServerInfo{FullMethod: testResource},
-			func(_ any, ss grpc.ServerStream) error { streamCh <- ss; <-release; return nil },
-		)
-	}()
-	wrapped := <-streamCh // synchronized handoff of the wrapped stream
-
-	// After several failed re-checks the stream is still open and messages still flow.
-	require.Eventually(t, func() bool { return fake.reAuthorizeCallCount() >= 3 },
-		2*time.Second, 5*time.Millisecond)
-	require.NoError(t, wrapped.RecvMsg(nil))
-
-	close(release)
-	require.NoError(t, <-errCh)
-}
-
-func TestStreamTerminatesWhenReauthorizationDenied(t *testing.T) {
-	t.Parallel()
-	fake := &fakeAuthClient{
-		identity:       []byte("id"),
-		reAuthorizeErr: status.Error(codes.PermissionDenied, "organization removed from channel"),
-	}
-	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: 10 * time.Millisecond})
-
-	// The handler blocks on its context; a definitive denial cancels it, then a receive returns the
-	// recorded denial - terminating even a stream that was not actively transferring messages.
 	err := enforcer.StreamInterceptor()(
 		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
 		&grpc.StreamServerInfo{FullMethod: testResource},
 		func(_ any, ss grpc.ServerStream) error {
-			<-ss.Context().Done()
-			return ss.RecvMsg(nil)
+			for range 5 {
+				if recvErr := ss.RecvMsg(nil); recvErr != nil {
+					return recvErr
+				}
+				if sendErr := ss.SendMsg(nil); sendErr != nil {
+					return sendErr
+				}
+			}
+			return nil
 		},
 	)
+
+	require.NoError(t, err)
+	// Only the establishment call: ten messages added no round trips.
+	require.Equal(t, 1, fake.authorizeCallCount())
+}
+
+// TestStreamReauthorizesWhenDecisionLapses verifies that once the cached decision lapses, the next
+// message re-authorizes with the bound token - which is what lets the AuthService re-resolve the
+// token to its record and catch expiry, revocation, and a policy change.
+func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Nanosecond})
+
+	err := enforcer.StreamInterceptor()(
+		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
+		&grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(nil) },
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, fake.authorizeCallCount())
+	require.Equal(t, testToken, fake.lastAuthorizeRequest().GetToken(), "the re-check must carry the token")
+}
+
+// TestStreamDeniesOnceBoundTokenExpires verifies the local hard bound: past the bound token's expiry
+// the stream is denied without consulting the AuthService, so an outage cannot extend a stream beyond
+// the lifetime of the token that established it.
+func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(-time.Second).Unix()}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
+
+	err := enforcer.StreamInterceptor()(
+		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
+		&grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(nil) },
+	)
+
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
+	require.ErrorContains(t, err, "has expired")
+	// Establishment only: the expiry is enforced locally, with no further round trip.
+	require.Equal(t, 1, fake.authorizeCallCount())
+}
+
+// TestStreamTolerantOfTransientReauthErrors verifies an established stream survives a brief
+// AuthService outage, since the token-expiry bound still limits how long that can continue.
+func TestStreamTolerantOfTransientReauthErrors(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{
+		identity:       []byte("id"),
+		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+		laterErr:       status.Error(codes.Unavailable, "auth service restarting"),
+	}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Nanosecond})
+
+	err := enforcer.StreamInterceptor()(
+		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
+		&grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error {
+			for range 3 {
+				if recvErr := ss.RecvMsg(nil); recvErr != nil {
+					return recvErr
+				}
+			}
+			return nil
+		},
+	)
+
+	require.NoError(t, err, "a transient re-check failure must not tear down an established stream")
+	require.GreaterOrEqual(t, fake.authorizeCallCount(), 2)
+}
+
+// TestStreamTerminatesWhenReauthorizationDenied verifies a definitive denial on a re-check terminates
+// the stream: the receive returns the denial and the stream context is cancelled, so a handler parked
+// on its context also wakes.
+func TestStreamTerminatesWhenReauthorizationDenied(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{
+		identity:       []byte("id"),
+		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+		laterErr:       status.Error(codes.PermissionDenied, "organization removed from channel"),
+	}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Nanosecond})
+
+	ctxDone := false
+	err := enforcer.StreamInterceptor()(
+		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
+		&grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error {
+			recvErr := ss.RecvMsg(nil)
+			<-ss.Context().Done()
+			ctxDone = true
+			return recvErr
+		},
+	)
+
+	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
+	require.True(t, ctxDone, "a definitive denial must cancel the stream context")
+}
+
+// TestUnaryInterceptorForwardsRequestNamespaces verifies the namespaces a query names are forwarded
+// with the authorization call, so the AuthService - not the resource server - decides on them.
+func TestUnaryInterceptorForwardsRequestNamespaces(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{identity: []byte("id")}
+	enforcer := NewEnforcer(fake, EnforcerConfig{})
+
+	query := &committerpb.Query{Namespaces: []*committerpb.QueryNamespace{
+		{NsId: testNS1, Keys: [][]byte{[]byte("k")}},
+		{NsId: testNS2, Keys: [][]byte{[]byte("k")}},
+	}}
+	_, err := enforcer.UnaryInterceptor()(
+		ctxWithToken(testToken), query, &grpc.UnaryServerInfo{FullMethod: testResource},
+		func(context.Context, any) (any, error) { return "ok", nil },
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{testNS1, testNS2}, fake.lastAuthorizeRequest().GetNamespaces())
+	require.False(t, fake.lastAuthorizeRequest().GetAllNamespaces())
+}
+
+// TestStreamAuthorizesSubscriptionNamespaces verifies a subscription's requested namespaces are
+// authorized when they arrive, since a stream interceptor cannot see them at establishment.
+func TestStreamAuthorizesSubscriptionNamespaces(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
+
+	stream := &fakeServerStream{
+		ctx:  ctxWithToken(testToken),
+		recv: &committerpb.StreamAllRequest{FilterNamespaces: []string{testNS2}},
+	}
+	err := enforcer.StreamInterceptor()(
+		nil, stream, &grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(&committerpb.StreamAllRequest{}) },
+	)
+
+	require.NoError(t, err)
+	// Establishment authorized the method; receiving the request authorized its namespaces.
+	require.Equal(t, 2, fake.authorizeCallCount())
+	require.Equal(t, []string{testNS2}, fake.lastAuthorizeRequest().GetNamespaces())
+}
+
+// TestStreamDeniesUnpermittedSubscriptionNamespaces verifies the receive fails - so the handler never
+// sees the request - when the AuthService rejects the namespaces the subscription asked for.
+func TestStreamDeniesUnpermittedSubscriptionNamespaces(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{
+		identity:       []byte("id"),
+		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+		laterErr:       status.Error(codes.PermissionDenied, "namespace outside the token's scope"),
+	}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
+
+	stream := &fakeServerStream{
+		ctx:  ctxWithToken(testToken),
+		recv: &committerpb.StreamAllRequest{FilterNamespaces: []string{testNS1}},
+	}
+	err := enforcer.StreamInterceptor()(
+		nil, stream, &grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(&committerpb.StreamAllRequest{}) },
+	)
+
 	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
 }
 
@@ -241,17 +360,17 @@ func ctxWithToken(token string) context.Context {
 	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenMetadataKey, token))
 }
 
-// fakeAuthClient is a test double for servicepb.AuthServiceClient. Authorize returns its configured
-// identity or error; ReAuthorize returns its configured error; both record their calls.
+// fakeAuthClient is a test double for servicepb.AuthServiceClient, recording every Authorize call.
+// authorizeErr fails all of them; laterErr fails only those after the first, which is how a test
+// simulates a change - a policy denial, a revocation, or a brief outage - that only a re-check sees.
 type fakeAuthClient struct {
 	mu             sync.Mutex
 	identity       []byte
+	tokenExpiresAt int64
 	authorizeErr   error
-	reAuthorizeErr error
+	laterErr       error
 	authorizeCalls int
-	reAuthCalls    int
 	lastAuthorize  *servicepb.AuthorizeRequest
-	lastReAuth     *servicepb.ReAuthorizeRequest
 }
 
 func (f *fakeAuthClient) Authorize(
@@ -264,25 +383,25 @@ func (f *fakeAuthClient) Authorize(
 	if f.authorizeErr != nil {
 		return nil, f.authorizeErr
 	}
-	return &servicepb.AuthorizeResponse{Authorized: true, Identity: f.identity}, nil
-}
-
-func (f *fakeAuthClient) ReAuthorize(
-	_ context.Context, req *servicepb.ReAuthorizeRequest, _ ...grpc.CallOption,
-) (*servicepb.AuthorizeResponse, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.reAuthCalls++
-	f.lastReAuth = req
-	if f.reAuthorizeErr != nil {
-		return nil, f.reAuthorizeErr
+	if f.authorizeCalls > 1 && f.laterErr != nil {
+		return nil, f.laterErr
 	}
-	return &servicepb.AuthorizeResponse{Authorized: true, Identity: req.GetIdentity()}, nil
+	return &servicepb.AuthorizeResponse{
+		Authorized:     true,
+		Identity:       f.identity,
+		TokenExpiresAt: f.tokenExpiresAt,
+	}, nil
 }
 
 func (*fakeAuthClient) Authenticate(
 	context.Context, *servicepb.AuthenticateRequest, ...grpc.CallOption,
 ) (*servicepb.AuthenticateResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (*fakeAuthClient) GetNonce(
+	context.Context, *servicepb.GetNonceRequest, ...grpc.CallOption,
+) (*servicepb.GetNonceResponse, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -292,32 +411,31 @@ func (f *fakeAuthClient) authorizeCallCount() int {
 	return f.authorizeCalls
 }
 
-func (f *fakeAuthClient) reAuthorizeCallCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.reAuthCalls
-}
-
 func (f *fakeAuthClient) lastAuthorizeRequest() *servicepb.AuthorizeRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastAuthorize
 }
 
-func (f *fakeAuthClient) lastReAuthorizeRequest() *servicepb.ReAuthorizeRequest {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastReAuth
-}
-
 // fakeServerStream is a minimal grpc.ServerStream whose RecvMsg/SendMsg succeed, carrying a context.
+// When recv is set, RecvMsg delivers it, so a test can hand the wrapper a subscription request.
 type fakeServerStream struct {
 	//nolint:containedctx // a grpc.ServerStream test double must return a context from Context().
-	ctx context.Context
+	ctx  context.Context
+	recv proto.Message
 }
 
-func (s *fakeServerStream) Context() context.Context   { return s.ctx }
-func (*fakeServerStream) RecvMsg(any) error            { return nil }
+func (s *fakeServerStream) Context() context.Context { return s.ctx }
+
+func (s *fakeServerStream) RecvMsg(m any) error {
+	dst, ok := m.(proto.Message)
+	if !ok || s.recv == nil {
+		return nil
+	}
+	proto.Merge(dst, s.recv)
+	return nil
+}
+
 func (*fakeServerStream) SendMsg(any) error            { return nil }
 func (*fakeServerStream) SetHeader(metadata.MD) error  { return nil }
 func (*fakeServerStream) SendHeader(metadata.MD) error { return nil }
