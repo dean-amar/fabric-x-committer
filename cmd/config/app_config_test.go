@@ -171,7 +171,6 @@ func TestReadConfigCoordinator(t *testing.T) {
 				ChunkSize:                 500,
 			},
 			ChannelBufferSizePerGoroutine: 10,
-			QueueMonitorSamplingTime:      100 * time.Millisecond,
 		},
 	}, {
 		name:           "sample",
@@ -190,7 +189,6 @@ func TestReadConfigCoordinator(t *testing.T) {
 				ChunkSize:                 500,
 			},
 			ChannelBufferSizePerGoroutine: 10,
-			QueueMonitorSamplingTime:      100 * time.Millisecond,
 		},
 	}}
 
