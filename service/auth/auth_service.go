@@ -160,18 +160,18 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
-// GetNonce issues a single-use nonce for the client's next Authenticate call. It needs no
+// IssueNonce issues a single-use nonce for the client's next Authenticate call. It needs no
 // configuration bundle: a nonce carries no authority on its own, and handing one out before the
 // service can authenticate lets a client have its challenge ready the moment enforcement is active.
-func (s *Service) GetNonce(
-	ctx context.Context, _ *servicepb.GetNonceRequest,
-) (*servicepb.GetNonceResponse, error) {
+func (s *Service) IssueNonce(
+	ctx context.Context, _ *servicepb.IssueNonceRequest,
+) (*servicepb.IssueNonceResponse, error) {
 	nonce, expiresAt, err := s.nonces.issue(ctx, time.Now())
 	if err != nil {
 		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapInternalError(err)
 	}
-	return &servicepb.GetNonceResponse{Nonce: nonce, ExpiresAt: expiresAt.Unix()}, nil
+	return &servicepb.IssueNonceResponse{Nonce: nonce, ExpiresAt: expiresAt.Unix()}, nil
 }
 
 // Authenticate exchanges a signed envelope for a cert-bound token. The signature is verified once

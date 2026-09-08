@@ -30,7 +30,7 @@ type Config struct {
 	// defence in depth and bounds how long an unredeemed envelope stays presentable.
 	EnvelopeFreshnessWindow time.Duration `mapstructure:"envelope-freshness-window" default:"5m" validate:"gt=0"`
 	// NonceTTL is how long an issued authentication nonce remains redeemable. It only has to cover
-	// the round trip between GetNonce and Authenticate, so it is deliberately short: a shorter window
+	// the round trip between IssueNonce and Authenticate, so it is deliberately short: a shorter window
 	// means fewer unredeemed nonces held in the database.
 	NonceTTL time.Duration `mapstructure:"nonce-ttl" default:"1m" validate:"gt=0"`
 	// ConfigRefreshInterval is how often the service reads the latest committed channel configuration

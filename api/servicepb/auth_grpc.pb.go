@@ -24,7 +24,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AuthService_GetNonce_FullMethodName     = "/servicepb.AuthService/GetNonce"
+	AuthService_IssueNonce_FullMethodName   = "/servicepb.AuthService/IssueNonce"
 	AuthService_Authenticate_FullMethodName = "/servicepb.AuthService/Authenticate"
 	AuthService_Authorize_FullMethodName    = "/servicepb.AuthService/Authorize"
 )
@@ -39,11 +39,11 @@ const (
 // against the latest policy for a long-lived stream (ReAuthorize). Only the AuthService mints and
 // verifies tokens; resource servers hold no signing keys and delegate every decision here.
 type AuthServiceClient interface {
-	// GetNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
+	// IssueNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
 	// the envelope it then presents to Authenticate. It is the mandatory first step of authentication:
 	// because the server chooses the nonce and consumes it on use, a captured envelope cannot be
 	// replayed even within the freshness window.
-	GetNonce(ctx context.Context, in *GetNonceRequest, opts ...grpc.CallOption) (*GetNonceResponse, error)
+	IssueNonce(ctx context.Context, in *IssueNonceRequest, opts ...grpc.CallOption) (*IssueNonceResponse, error)
 	// Authenticate verifies a signed envelope and mints a short-lived, cert-bound JWT.
 	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
 	// Authorize evaluates a token against a resource policy for a resource server, returning the
@@ -59,10 +59,10 @@ func NewAuthServiceClient(cc grpc.ClientConnInterface) AuthServiceClient {
 	return &authServiceClient{cc}
 }
 
-func (c *authServiceClient) GetNonce(ctx context.Context, in *GetNonceRequest, opts ...grpc.CallOption) (*GetNonceResponse, error) {
+func (c *authServiceClient) IssueNonce(ctx context.Context, in *IssueNonceRequest, opts ...grpc.CallOption) (*IssueNonceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetNonceResponse)
-	err := c.cc.Invoke(ctx, AuthService_GetNonce_FullMethodName, in, out, cOpts...)
+	out := new(IssueNonceResponse)
+	err := c.cc.Invoke(ctx, AuthService_IssueNonce_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,11 +99,11 @@ func (c *authServiceClient) Authorize(ctx context.Context, in *AuthorizeRequest,
 // against the latest policy for a long-lived stream (ReAuthorize). Only the AuthService mints and
 // verifies tokens; resource servers hold no signing keys and delegate every decision here.
 type AuthServiceServer interface {
-	// GetNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
+	// IssueNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
 	// the envelope it then presents to Authenticate. It is the mandatory first step of authentication:
 	// because the server chooses the nonce and consumes it on use, a captured envelope cannot be
 	// replayed even within the freshness window.
-	GetNonce(context.Context, *GetNonceRequest) (*GetNonceResponse, error)
+	IssueNonce(context.Context, *IssueNonceRequest) (*IssueNonceResponse, error)
 	// Authenticate verifies a signed envelope and mints a short-lived, cert-bound JWT.
 	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
 	// Authorize evaluates a token against a resource policy for a resource server, returning the
@@ -119,8 +119,8 @@ type AuthServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAuthServiceServer struct{}
 
-func (UnimplementedAuthServiceServer) GetNonce(context.Context, *GetNonceRequest) (*GetNonceResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetNonce not implemented")
+func (UnimplementedAuthServiceServer) IssueNonce(context.Context, *IssueNonceRequest) (*IssueNonceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IssueNonce not implemented")
 }
 func (UnimplementedAuthServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
@@ -149,20 +149,20 @@ func RegisterAuthServiceServer(s grpc.ServiceRegistrar, srv AuthServiceServer) {
 	s.RegisterService(&AuthService_ServiceDesc, srv)
 }
 
-func _AuthService_GetNonce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetNonceRequest)
+func _AuthService_IssueNonce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueNonceRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AuthServiceServer).GetNonce(ctx, in)
+		return srv.(AuthServiceServer).IssueNonce(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AuthService_GetNonce_FullMethodName,
+		FullMethod: AuthService_IssueNonce_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthServiceServer).GetNonce(ctx, req.(*GetNonceRequest))
+		return srv.(AuthServiceServer).IssueNonce(ctx, req.(*IssueNonceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -211,8 +211,8 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*AuthServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "GetNonce",
-			Handler:    _AuthService_GetNonce_Handler,
+			MethodName: "IssueNonce",
+			Handler:    _AuthService_IssueNonce_Handler,
 		},
 		{
 			MethodName: "Authenticate",

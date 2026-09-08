@@ -93,12 +93,15 @@ func TestVerifyEnvelopeRejectsMalformed(t *testing.T) {
 	env := newAuthTestEnv(t)
 	foreign := newAuthTestEnv(t) // a different crypto set, so its identity is not in env's MSP
 
+	// The envelope arrives as a typed message, so malformed framing is rejected by the transport before
+	// the handler runs. What remains for this layer to reject is a well-framed envelope whose contents
+	// are wrong: an unparseable payload, a payload with no header, or an identity from another MSP.
 	for _, tc := range []struct {
 		name     string
-		envelope []byte
+		envelope *common.Envelope
 	}{
-		{name: "not an envelope", envelope: []byte("garbage")},
-		{name: "empty", envelope: nil},
+		{name: "payload is not a marshaled Payload", envelope: &common.Envelope{Payload: []byte("garbage")}},
+		{name: "payload has no header", envelope: &common.Envelope{}},
 		{name: "identity from a foreign MSP", envelope: foreign.signedEnvelope(t, nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

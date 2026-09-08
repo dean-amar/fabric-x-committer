@@ -35,7 +35,7 @@ The service is composed of focused collaborators, each with one responsibility:
 - `Authenticate(signed_envelope, requested_scope) -> token, expires_at` — verifies the envelope
   (channel and empty-payload scope, timestamp freshness, TLS certificate binding, MSP identity
   resolution, signature), writes the token-to-identity binding, and mints a cert-bound ES256 JWT.
-- `GetNonce() -> nonce, expires_at` — issues the single-use challenge a client must sign into its
+- `IssueNonce() -> nonce, expires_at` — issues the single-use challenge a client must sign into its
   envelope. It is the mandatory first step of authentication.
 - `Authorize(token, resource, tls_cert_hash) -> authorized, identity, namespaces, token_expires_at` —
   verifies the token, checks the certificate binding and optional scope, resolves the bound identity
@@ -51,7 +51,7 @@ unreachable).
 
 ## Replay protection: the nonce challenge
 
-Authentication is a two-step challenge-response. The client calls `GetNonce`, receives 32 bytes of
+Authentication is a two-step challenge-response. The client calls `IssueNonce`, receives 32 bytes of
 server-chosen randomness, and places it in the `SignatureHeader.Nonce` of the envelope it then presents
 to `Authenticate`. Because the envelope's signature covers the whole marshaled payload — and the
 `SignatureHeader` is part of that payload — the nonce cannot be substituted without invalidating the
@@ -62,7 +62,7 @@ row was removed, so a second presentation of the same envelope fails. That singl
 makes the guarantee atomic even when two redemptions race, and even across instances.
 
 Nonces are held in the shared state database (`auth_nonces`), not in one instance's memory, because a
-client behind a load balancer has no guarantee its `GetNonce` and `Authenticate` calls reach the same
+client behind a load balancer has no guarantee its `IssueNonce` and `Authenticate` calls reach the same
 instance. Unredeemed nonces are swept on the same tick as expired tokens.
 
 This is what makes a captured envelope worthless rather than merely short-lived: the freshness window

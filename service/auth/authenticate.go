@@ -89,13 +89,13 @@ func newAuthenticator(cfg *authenticatorConfig) *authenticator {
 func (a *authenticator) authenticate(
 	ctx context.Context, req *servicepb.AuthenticateRequest, bundle *channelconfig.Bundle,
 ) (*servicepb.AuthenticateResponse, error) {
-	envBytes := req.GetSignedEnvelope()
-	if len(envBytes) == 0 {
+	env := req.GetSignedEnvelope()
+	if env == nil {
 		return nil, grpcerror.WrapInvalidArgument(errors.New("signed envelope is required"))
 	}
 
 	now := time.Now()
-	parsed, err := parseSignedEnvelope(envBytes)
+	parsed, err := parseSignedEnvelope(env)
 	if err != nil {
 		logger.Warnf("Authentication failed: %v", err)
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
@@ -109,7 +109,7 @@ func (a *authenticator) authenticate(
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
 	}
 
-	identity, err := a.verifyEnvelope(ctx, envBytes, bundle, now)
+	identity, err := a.verifyEnvelope(ctx, env, bundle, now)
 	if err != nil {
 		logger.Warnf("Authentication failed: %v", err)
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
@@ -156,11 +156,11 @@ func (a *authenticator) authenticate(
 // Redeeming the nonce is deliberately not part of this: that is the one stateful step, and keeping it
 // in authenticate leaves this function a pure check over the envelope and the bundle. It re-parses the
 // envelope rather than taking the parsed form, which costs nothing worth optimizing - authentication
-// happens once per token, not per RPC - and keeps the signature a plain byte slice.
+// happens once per token, not per RPC - and keeps the signature a single envelope argument.
 func (a *authenticator) verifyEnvelope(
-	ctx context.Context, envBytes []byte, bundle *channelconfig.Bundle, now time.Time,
+	ctx context.Context, env *common.Envelope, bundle *channelconfig.Bundle, now time.Time,
 ) (*verifiedIdentity, error) {
-	parsed, err := parseSignedEnvelope(envBytes)
+	parsed, err := parseSignedEnvelope(env)
 	if err != nil {
 		return nil, err
 	}
@@ -236,14 +236,14 @@ type parsedEnvelope struct {
 	signedData  *protoutil.SignedData
 }
 
-// parseSignedEnvelope unmarshals an envelope into the pieces verifyEnvelope inspects. The nonce comes
-// from the SignatureHeader, which the payload signature covers (the signature is over the whole
-// marshaled payload), so a replayer cannot swap in a fresh nonce without invalidating the signature.
-func parseSignedEnvelope(envBytes []byte) (*parsedEnvelope, error) {
-	env, err := protoutil.UnmarshalEnvelope(envBytes)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal envelope")
-	}
+// parseSignedEnvelope unpacks an envelope into the pieces verifyEnvelope inspects. The nonce comes from
+// the SignatureHeader, which the payload signature covers (the signature is over the whole marshaled
+// payload), so a replayer cannot swap in a fresh nonce without invalidating the signature.
+//
+// The envelope arrives already parsed by gRPC, so only its inner payload is unmarshaled here. The
+// signature still covers the exact bytes the client signed: Envelope.payload is itself a bytes field,
+// so transporting the envelope as a typed message cannot alter them.
+func parseSignedEnvelope(env *common.Envelope) (*parsedEnvelope, error) {
 	payload, err := protoutil.UnmarshalPayload(env.Payload)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal payload")

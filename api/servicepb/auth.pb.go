@@ -12,6 +12,7 @@
 package servicepb
 
 import (
+	common "github.com/hyperledger/fabric-protos-go-apiv2/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -26,26 +27,26 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type GetNonceRequest struct {
+type IssueNonceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetNonceRequest) Reset() {
-	*x = GetNonceRequest{}
+func (x *IssueNonceRequest) Reset() {
+	*x = IssueNonceRequest{}
 	mi := &file_api_servicepb_auth_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetNonceRequest) String() string {
+func (x *IssueNonceRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetNonceRequest) ProtoMessage() {}
+func (*IssueNonceRequest) ProtoMessage() {}
 
-func (x *GetNonceRequest) ProtoReflect() protoreflect.Message {
+func (x *IssueNonceRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_api_servicepb_auth_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -57,12 +58,12 @@ func (x *GetNonceRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetNonceRequest.ProtoReflect.Descriptor instead.
-func (*GetNonceRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use IssueNonceRequest.ProtoReflect.Descriptor instead.
+func (*IssueNonceRequest) Descriptor() ([]byte, []int) {
 	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{0}
 }
 
-type GetNonceResponse struct {
+type IssueNonceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// nonce is the server-issued challenge the client places in its envelope's SignatureHeader.Nonce.
 	// It is valid for a single Authenticate call and expires at expires_at.
@@ -73,20 +74,20 @@ type GetNonceResponse struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetNonceResponse) Reset() {
-	*x = GetNonceResponse{}
+func (x *IssueNonceResponse) Reset() {
+	*x = IssueNonceResponse{}
 	mi := &file_api_servicepb_auth_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetNonceResponse) String() string {
+func (x *IssueNonceResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetNonceResponse) ProtoMessage() {}
+func (*IssueNonceResponse) ProtoMessage() {}
 
-func (x *GetNonceResponse) ProtoReflect() protoreflect.Message {
+func (x *IssueNonceResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_api_servicepb_auth_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -98,19 +99,19 @@ func (x *GetNonceResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetNonceResponse.ProtoReflect.Descriptor instead.
-func (*GetNonceResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use IssueNonceResponse.ProtoReflect.Descriptor instead.
+func (*IssueNonceResponse) Descriptor() ([]byte, []int) {
 	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *GetNonceResponse) GetNonce() []byte {
+func (x *IssueNonceResponse) GetNonce() []byte {
 	if x != nil {
 		return x.Nonce
 	}
 	return nil
 }
 
-func (x *GetNonceResponse) GetExpiresAt() int64 {
+func (x *IssueNonceResponse) GetExpiresAt() int64 {
 	if x != nil {
 		return x.ExpiresAt
 	}
@@ -119,11 +120,11 @@ func (x *GetNonceResponse) GetExpiresAt() int64 {
 
 type AuthenticateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// signed_envelope is a marshaled common.Envelope carrying the client's serialized MSP identity
+	// signed_envelope carries the client's serialized MSP identity
 	// and a signature over the payload; under mutual TLS its ChannelHeader also carries the TLS
 	// certificate hash the token is bound to. Its SignatureHeader.Nonce must be an unconsumed nonce
-	// previously issued by GetNonce.
-	SignedEnvelope []byte `protobuf:"bytes,1,opt,name=signed_envelope,json=signedEnvelope,proto3" json:"signed_envelope,omitempty"`
+	// previously issued by IssueNonce.
+	SignedEnvelope *common.Envelope `protobuf:"bytes,1,opt,name=signed_envelope,json=signedEnvelope,proto3" json:"signed_envelope,omitempty"`
 	// requested_scope optionally narrows the token's authority to these gRPC full-method names
 	// (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
 	RequestedScope []string `protobuf:"bytes,2,rep,name=requested_scope,json=requestedScope,proto3" json:"requested_scope,omitempty"`
@@ -165,7 +166,7 @@ func (*AuthenticateRequest) Descriptor() ([]byte, []int) {
 	return file_api_servicepb_auth_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *AuthenticateRequest) GetSignedEnvelope() []byte {
+func (x *AuthenticateRequest) GetSignedEnvelope() *common.Envelope {
 	if x != nil {
 		return x.SignedEnvelope
 	}
@@ -514,14 +515,14 @@ var File_api_servicepb_auth_proto protoreflect.FileDescriptor
 
 const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/servicepb/auth.proto\x12\tservicepb\"\x11\n" +
-	"\x0fGetNonceRequest\"G\n" +
-	"\x10GetNonceResponse\x12\x14\n" +
+	"\x18api/servicepb/auth.proto\x12\tservicepb\x1a\x13common/common.proto\"\x13\n" +
+	"\x11IssueNonceRequest\"I\n" +
+	"\x12IssueNonceResponse\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\x9a\x01\n" +
-	"\x13AuthenticateRequest\x12'\n" +
-	"\x0fsigned_envelope\x18\x01 \x01(\fR\x0esignedEnvelope\x12'\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\xac\x01\n" +
+	"\x13AuthenticateRequest\x129\n" +
+	"\x0fsigned_envelope\x18\x01 \x01(\v2\x10.common.EnvelopeR\x0esignedEnvelope\x12'\n" +
 	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScope\x121\n" +
 	"\x14requested_namespaces\x18\x03 \x03(\tR\x13requestedNamespaces\"K\n" +
 	"\x14AuthenticateResponse\x12\x14\n" +
@@ -553,9 +554,10 @@ const file_api_servicepb_auth_proto_rawDesc = "" +
 	"namespaces\x12'\n" +
 	"\x0fissued_sequence\x18\x06 \x01(\x04R\x0eissuedSequence\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\a \x01(\x03R\texpiresAt2\xeb\x01\n" +
-	"\vAuthService\x12C\n" +
-	"\bGetNonce\x12\x1a.servicepb.GetNonceRequest\x1a\x1b.servicepb.GetNonceResponse\x12O\n" +
+	"expires_at\x18\a \x01(\x03R\texpiresAt2\xf1\x01\n" +
+	"\vAuthService\x12I\n" +
+	"\n" +
+	"IssueNonce\x12\x1c.servicepb.IssueNonceRequest\x1a\x1d.servicepb.IssueNonceResponse\x12O\n" +
 	"\fAuthenticate\x12\x1e.servicepb.AuthenticateRequest\x1a\x1f.servicepb.AuthenticateResponse\x12F\n" +
 	"\tAuthorize\x12\x1b.servicepb.AuthorizeRequest\x1a\x1c.servicepb.AuthorizeResponseB9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
 
@@ -573,26 +575,28 @@ func file_api_servicepb_auth_proto_rawDescGZIP() []byte {
 
 var file_api_servicepb_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_servicepb_auth_proto_goTypes = []any{
-	(*GetNonceRequest)(nil),      // 0: servicepb.GetNonceRequest
-	(*GetNonceResponse)(nil),     // 1: servicepb.GetNonceResponse
+	(*IssueNonceRequest)(nil),    // 0: servicepb.IssueNonceRequest
+	(*IssueNonceResponse)(nil),   // 1: servicepb.IssueNonceResponse
 	(*AuthenticateRequest)(nil),  // 2: servicepb.AuthenticateRequest
 	(*AuthenticateResponse)(nil), // 3: servicepb.AuthenticateResponse
 	(*AuthorizeRequest)(nil),     // 4: servicepb.AuthorizeRequest
 	(*AuthorizeResponse)(nil),    // 5: servicepb.AuthorizeResponse
 	(*TokenRecord)(nil),          // 6: servicepb.TokenRecord
+	(*common.Envelope)(nil),      // 7: common.Envelope
 }
 var file_api_servicepb_auth_proto_depIdxs = []int32{
-	0, // 0: servicepb.AuthService.GetNonce:input_type -> servicepb.GetNonceRequest
-	2, // 1: servicepb.AuthService.Authenticate:input_type -> servicepb.AuthenticateRequest
-	4, // 2: servicepb.AuthService.Authorize:input_type -> servicepb.AuthorizeRequest
-	1, // 3: servicepb.AuthService.GetNonce:output_type -> servicepb.GetNonceResponse
-	3, // 4: servicepb.AuthService.Authenticate:output_type -> servicepb.AuthenticateResponse
-	5, // 5: servicepb.AuthService.Authorize:output_type -> servicepb.AuthorizeResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	7, // 0: servicepb.AuthenticateRequest.signed_envelope:type_name -> common.Envelope
+	0, // 1: servicepb.AuthService.IssueNonce:input_type -> servicepb.IssueNonceRequest
+	2, // 2: servicepb.AuthService.Authenticate:input_type -> servicepb.AuthenticateRequest
+	4, // 3: servicepb.AuthService.Authorize:input_type -> servicepb.AuthorizeRequest
+	1, // 4: servicepb.AuthService.IssueNonce:output_type -> servicepb.IssueNonceResponse
+	3, // 5: servicepb.AuthService.Authenticate:output_type -> servicepb.AuthenticateResponse
+	5, // 6: servicepb.AuthService.Authorize:output_type -> servicepb.AuthorizeResponse
+	4, // [4:7] is the sub-list for method output_type
+	1, // [1:4] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_api_servicepb_auth_proto_init() }

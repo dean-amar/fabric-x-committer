@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -64,9 +65,7 @@ func TestTokenSourceFetchesNonceAndEmbedsIt(t *testing.T) {
 	require.Equal(t, 1, auth.nonceCalls, "authentication must be preceded by a nonce request")
 
 	// The nonce the server issued is signed into the envelope, not merely sent alongside it.
-	envelope, err := protoutil.UnmarshalEnvelope(auth.lastEnvelope)
-	require.NoError(t, err)
-	payload, err := protoutil.UnmarshalPayload(envelope.Payload)
+	payload, err := protoutil.UnmarshalPayload(auth.lastEnvelope.GetPayload())
 	require.NoError(t, err)
 	shdr, err := protoutil.UnmarshalSignatureHeader(payload.Header.SignatureHeader)
 	require.NoError(t, err)
@@ -146,7 +145,7 @@ type fakeAuthenticator struct {
 	expiresAt    int64
 	err          error
 	calls        int
-	lastEnvelope []byte
+	lastEnvelope *common.Envelope
 	nonceErr     error
 	nonceCalls   int
 }
@@ -168,16 +167,16 @@ func (*fakeAuthenticator) Authorize(
 	return nil, errors.New("not implemented")
 }
 
-// GetNonce hands out a fixed nonce and counts the call, so a test can assert that every
+// IssueNonce hands out a fixed nonce and counts the call, so a test can assert that every
 // authentication attempt fetches a fresh challenge rather than reusing a spent one.
-func (f *fakeAuthenticator) GetNonce(
-	context.Context, *servicepb.GetNonceRequest, ...grpc.CallOption,
-) (*servicepb.GetNonceResponse, error) {
+func (f *fakeAuthenticator) IssueNonce(
+	context.Context, *servicepb.IssueNonceRequest, ...grpc.CallOption,
+) (*servicepb.IssueNonceResponse, error) {
 	f.nonceCalls++
 	if f.nonceErr != nil {
 		return nil, f.nonceErr
 	}
-	return &servicepb.GetNonceResponse{Nonce: []byte("nonce")}, nil
+	return &servicepb.IssueNonceResponse{Nonce: []byte("nonce")}, nil
 }
 
 // fakeSigner is a minimal identity.SignerSerializer: the envelope it produces is well-formed but not

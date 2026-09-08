@@ -94,14 +94,14 @@ type envelopeParams struct {
 // signedEnvelope builds a client-signed authentication envelope carrying the given TLS certificate
 // hash, marshaled ready to place in an AuthenticateRequest. It carries no nonce, so it is only usable
 // against verifyEnvelope; a test going through Authenticate must use signedEnvelopeWithNonce.
-func (e *authTestEnv) signedEnvelope(t *testing.T, tlsCertHash []byte) []byte {
+func (e *authTestEnv) signedEnvelope(t *testing.T, tlsCertHash []byte) *common.Envelope {
 	t.Helper()
 	return e.signedEnvelopeFor(t, common.HeaderType_MESSAGE, testChannelID, tlsCertHash)
 }
 
 // signedEnvelopeWithNonce builds an authentication envelope carrying a server-issued nonce, as a real
-// client does after its GetNonce pre-step.
-func (e *authTestEnv) signedEnvelopeWithNonce(t *testing.T, nonce, tlsCertHash []byte) []byte {
+// client does after its IssueNonce pre-step.
+func (e *authTestEnv) signedEnvelopeWithNonce(t *testing.T, nonce, tlsCertHash []byte) *common.Envelope {
 	t.Helper()
 	return e.signEnvelope(t, envelopeParams{
 		headerType:  common.HeaderType_MESSAGE,
@@ -117,7 +117,7 @@ func (e *authTestEnv) signedEnvelopeWithNonce(t *testing.T, nonce, tlsCertHash [
 // checks.
 func (e *authTestEnv) signedEnvelopeFor(
 	t *testing.T, headerType common.HeaderType, channelID string, tlsCertHash []byte,
-) []byte {
+) *common.Envelope {
 	t.Helper()
 	return e.signEnvelope(t, envelopeParams{
 		headerType: headerType, channelID: channelID, payload: &emptypb.Empty{}, tlsCertHash: tlsCertHash,
@@ -129,7 +129,7 @@ func (e *authTestEnv) signedEnvelopeFor(
 // replayed to mint a token.
 func (e *authTestEnv) signedEnvelopeWithPayload(
 	t *testing.T, headerType common.HeaderType, channelID string, payload proto.Message,
-) []byte {
+) *common.Envelope {
 	t.Helper()
 	return e.signEnvelope(t, envelopeParams{headerType: headerType, channelID: channelID, payload: payload})
 }
@@ -137,7 +137,7 @@ func (e *authTestEnv) signedEnvelopeWithPayload(
 // signEnvelope signs and marshals an envelope from the given parameters. It builds the envelope
 // directly rather than via protoutil.CreateSignedEnvelopeWithTLSBinding so a test can control the
 // SignatureHeader's nonce, which that helper always fills with a value of its own choosing.
-func (e *authTestEnv) signEnvelope(t *testing.T, p envelopeParams) []byte {
+func (e *authTestEnv) signEnvelope(t *testing.T, p envelopeParams) *common.Envelope {
 	t.Helper()
 	creator, err := e.signer.Serialize()
 	require.NoError(t, err)
@@ -155,9 +155,7 @@ func (e *authTestEnv) signEnvelope(t *testing.T, p envelopeParams) []byte {
 
 	signature, err := e.signer.Sign(payloadBytes)
 	require.NoError(t, err)
-	envBytes, err := proto.Marshal(&common.Envelope{Payload: payloadBytes, Signature: signature})
-	require.NoError(t, err)
-	return envBytes
+	return &common.Envelope{Payload: payloadBytes, Signature: signature}
 }
 
 // insertConfigTx writes a configuration transaction into the config namespace at the given version.
@@ -250,7 +248,7 @@ func newAuthServiceForTest(t *testing.T, env *authTestEnv) (*Service, *tokenSign
 // issueNonce obtains a nonce from the service, as a client's mandatory pre-authentication step.
 func issueNonce(t *testing.T, svc *Service) []byte {
 	t.Helper()
-	resp, err := svc.GetNonce(t.Context(), &servicepb.GetNonceRequest{})
+	resp, err := svc.IssueNonce(t.Context(), &servicepb.IssueNonceRequest{})
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.GetNonce())
 	return resp.GetNonce()

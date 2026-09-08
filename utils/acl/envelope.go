@@ -29,8 +29,9 @@ type authEnvelopeParams struct {
 // It builds the envelope directly rather than calling protoutil.CreateSignedEnvelopeWithTLSBinding
 // because that helper generates its own random nonce, and the whole point of the challenge is that
 // the *server* chooses it. The signature covers the entire marshaled payload - which includes the
-// SignatureHeader - so the nonce cannot be substituted without invalidating the signature.
-func buildAuthEnvelope(params *authEnvelopeParams) ([]byte, error) {
+// SignatureHeader - so the nonce cannot be substituted without invalidating the signature, and the
+// envelope can travel as a typed message because its payload is carried as opaque bytes.
+func buildAuthEnvelope(params *authEnvelopeParams) (*common.Envelope, error) {
 	creator, err := params.signer.Serialize()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to serialize signing identity")
@@ -53,10 +54,5 @@ func buildAuthEnvelope(params *authEnvelopeParams) ([]byte, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to sign authentication envelope")
 	}
-
-	envelopeBytes, err := proto.Marshal(&common.Envelope{Payload: payloadBytes, Signature: signature})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal authentication envelope")
-	}
-	return envelopeBytes, nil
+	return &common.Envelope{Payload: payloadBytes, Signature: signature}, nil
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/msp"
@@ -55,6 +56,7 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	// Step 2: Obtain a single-use nonce - the mandatory pre-step of authentication.
 	t.Log("Step 2: obtain a nonce from the auth service")
 	nonce := env.nonce(t)
+	t.Logf("got nonce %s", nonce)
 	require.NotEmpty(t, nonce)
 
 	// Step 3: Sign the nonce into an envelope and exchange it for a cert-bound token.
@@ -207,14 +209,14 @@ func newACLEnv(t *testing.T) *aclEnv {
 // nonce obtains a single-use challenge from the AuthService.
 func (e *aclEnv) nonce(t *testing.T) []byte {
 	t.Helper()
-	resp, err := e.authClient.GetNonce(t.Context(), &servicepb.GetNonceRequest{})
+	resp, err := e.authClient.IssueNonce(t.Context(), &servicepb.IssueNonceRequest{})
 	require.NoError(t, err)
 	return resp.GetNonce()
 }
 
 // envelope builds a signed authentication envelope carrying the given nonce. A nil nonce produces an
 // envelope with no challenge at all, which is what the missing-nonce case needs.
-func (e *aclEnv) envelope(t *testing.T, nonce []byte) []byte {
+func (e *aclEnv) envelope(t *testing.T, nonce []byte) *common.Envelope {
 	t.Helper()
 	envelope, err := acl.BuildAuthEnvelopeForTest(&acl.AuthEnvelopeParams{
 		Signer:    e.signer,
@@ -231,7 +233,7 @@ func (e *aclEnv) envelope(t *testing.T, nonce []byte) []byte {
 // block has been committed and observed - the documented bootstrap window. Every other outcome,
 // including a rejection, is returned on the first attempt so a negative test fails fast rather than
 // retrying a denial for the full timeout.
-func (e *aclEnv) authenticate(t *testing.T, envelope []byte, namespaces []string) string {
+func (e *aclEnv) authenticate(t *testing.T, envelope *common.Envelope, namespaces []string) string {
 	t.Helper()
 
 	var token string
@@ -262,7 +264,8 @@ func (e *aclEnv) waitForEnforcement(t *testing.T) {
 // commitRow commits the key and value into both test namespaces through the ordering service.
 func (e *aclEnv) commitRow(t *testing.T, key, value []byte) {
 	t.Helper()
-	txIDs := e.c.MakeAndSendTransactionsToOrderer(t,
+	txIDs := e.c.MakeAndSendTransactionsToOrderer(
+		t,
 		[][]*applicationpb.TxNamespace{{{
 			NsId:      aclNamespace,
 			NsVersion: 0,

@@ -38,7 +38,7 @@ var ErrNonceNotFound = errors.New("authentication nonce is unknown, already used
 // already been consumed and is worthless to a replayer; the freshness window and certificate binding
 // remain as defence in depth. Nonces live in the shared state database rather than in memory, so a
 // nonce issued by one instance can be redeemed at another - a client behind a load balancer has no
-// guarantee that its GetNonce and Authenticate calls reach the same instance.
+// guarantee that its IssueNonce and Authenticate calls reach the same instance.
 type nonceStore struct {
 	pool *pgxpool.Pool
 	ttl  time.Duration

@@ -10,17 +10,19 @@ option go_package = "github.com/hyperledger/fabric-x-committer/api/servicepb";
 
 package servicepb;
 
+import "common/common.proto";
+
 // AuthService is the central authentication and authorization service. It authenticates clients
 // from a signed envelope and mints cert-bound JWTs (Authenticate), authorizes a token against a
 // resource policy for a resource server (Authorize), and re-evaluates an already-bound identity
 // against the latest policy for a long-lived stream (ReAuthorize). Only the AuthService mints and
 // verifies tokens; resource servers hold no signing keys and delegate every decision here.
 service AuthService {
-    // GetNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
+    // IssueNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
     // the envelope it then presents to Authenticate. It is the mandatory first step of authentication:
     // because the server chooses the nonce and consumes it on use, a captured envelope cannot be
     // replayed even within the freshness window.
-    rpc GetNonce(GetNonceRequest) returns (GetNonceResponse);
+    rpc IssueNonce(IssueNonceRequest) returns (IssueNonceResponse);
     // Authenticate verifies a signed envelope and mints a short-lived, cert-bound JWT.
     rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
     // Authorize evaluates a token against a resource policy for a resource server, returning the
@@ -28,10 +30,10 @@ service AuthService {
     rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
 }
 
-message GetNonceRequest {
+message IssueNonceRequest {
 }
 
-message GetNonceResponse {
+message IssueNonceResponse {
     // nonce is the server-issued challenge the client places in its envelope's SignatureHeader.Nonce.
     // It is valid for a single Authenticate call and expires at expires_at.
     bytes nonce = 1;
@@ -40,11 +42,11 @@ message GetNonceResponse {
 }
 
 message AuthenticateRequest {
-    // signed_envelope is a marshaled common.Envelope carrying the client's serialized MSP identity
+    // signed_envelope carries the client's serialized MSP identity
     // and a signature over the payload; under mutual TLS its ChannelHeader also carries the TLS
     // certificate hash the token is bound to. Its SignatureHeader.Nonce must be an unconsumed nonce
-    // previously issued by GetNonce.
-    bytes signed_envelope = 1;
+    // previously issued by IssueNonce.
+    common.Envelope signed_envelope = 1;
     // requested_scope optionally narrows the token's authority to these gRPC full-method names
     // (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
     repeated string requested_scope = 2;

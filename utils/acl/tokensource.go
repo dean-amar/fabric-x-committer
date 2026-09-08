@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/protoutil/identity"
 	"google.golang.org/grpc/credentials"
 
@@ -138,8 +139,8 @@ func (t *TokenSource) refreshDeadline() time.Time {
 // carrying it alongside the client's TLS certificate hash. The nonce is fetched per authentication
 // attempt rather than cached: it is valid for exactly one Authenticate call, so there is nothing to
 // reuse.
-func (t *TokenSource) buildEnvelope(ctx context.Context) ([]byte, error) {
-	nonceResp, err := t.cfg.Client.GetNonce(ctx, &servicepb.GetNonceRequest{})
+func (t *TokenSource) buildEnvelope(ctx context.Context) (*common.Envelope, error) {
+	nonceResp, err := t.cfg.Client.IssueNonce(ctx, &servicepb.IssueNonceRequest{})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to obtain an authentication nonce")
 	}

@@ -103,9 +103,9 @@ token-ttl: 5m
 # long an unredeemed envelope stays presentable. Default: 5m
 envelope-freshness-window: 5m
 
-# How long a server-issued authentication nonce remains redeemable. A client must call GetNonce and
+# How long a server-issued authentication nonce remains redeemable. A client must call IssueNonce and
 # sign the returned nonce into its envelope before calling Authenticate; the nonce is consumed on use,
-# so a captured envelope cannot be replayed. This only has to cover the GetNonce -> Authenticate round
+# so a captured envelope cannot be replayed. This only has to cover the IssueNonce -> Authenticate round
 # trip, so keep it short: a shorter window means fewer unredeemed nonces held in the database.
 # Default: 1m
 nonce-ttl: 1m

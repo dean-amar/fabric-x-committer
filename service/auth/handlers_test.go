@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
@@ -261,11 +262,15 @@ func TestAuthenticateRejects(t *testing.T) {
 
 	for _, tc := range []struct {
 		name     string
-		envelope []byte
+		envelope *common.Envelope
 		wantCode codes.Code
 	}{
-		{name: "empty envelope", envelope: nil, wantCode: codes.InvalidArgument},
-		{name: "malformed envelope", envelope: []byte("garbage"), wantCode: codes.Unauthenticated},
+		{name: "absent envelope", envelope: nil, wantCode: codes.InvalidArgument},
+		{
+			name:     "envelope whose payload is not a marshaled Payload",
+			envelope: &common.Envelope{Payload: []byte("garbage")},
+			wantCode: codes.Unauthenticated,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -283,7 +288,9 @@ func TestAuthRPCsUnavailableBeforeBundle(t *testing.T) {
 	metrics := newAuthServiceMetrics()
 	svc := &Service{config: &Config{}, metrics: metrics, provider: newConfigProvider(nil, metrics)}
 
-	_, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{SignedEnvelope: []byte("x")})
+	_, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{
+		SignedEnvelope: &common.Envelope{Payload: []byte("x")},
+	})
 	require.Equal(t, codes.Unavailable, grpcerror.GetCode(err))
 
 	_, err = svc.Authorize(context.Background(), &servicepb.AuthorizeRequest{Token: "t", Resource: resourceGetRows})

@@ -399,9 +399,9 @@ func (*fakeAuthClient) Authenticate(
 	return nil, errors.New("not implemented")
 }
 
-func (*fakeAuthClient) GetNonce(
-	context.Context, *servicepb.GetNonceRequest, ...grpc.CallOption,
-) (*servicepb.GetNonceResponse, error) {
+func (*fakeAuthClient) IssueNonce(
+	context.Context, *servicepb.IssueNonceRequest, ...grpc.CallOption,
+) (*servicepb.IssueNonceResponse, error) {
 	return nil, errors.New("not implemented")
 }
 
