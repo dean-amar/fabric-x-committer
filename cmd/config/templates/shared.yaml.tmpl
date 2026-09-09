@@ -61,7 +61,8 @@ monitoring:
 {{- define "logging" }}
 logging:
   logSpec: {{ .Logging.LogSpec }}
-  format: {{ .Logging.Format }}
+  {{- /* Quoted: a flogging format starts with "%", which YAML reads as a directive indicator. */}}
+  format: {{ .Logging.Format | quote }}
 {{- end }}
 
 {{- /* {{ include "service" . | indent 0 }} */ -}}

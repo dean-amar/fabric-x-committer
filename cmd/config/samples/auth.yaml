@@ -35,12 +35,15 @@ server:
       # If true, server allows keepalive pings even when there are no active streams(RPCs).
       permit-without-stream: true
   # Rate limiting configuration for unary gRPC endpoints (token bucket).
+  # Keep this enabled here even though other services' samples disable it: IssueNonce is reachable
+  # without a token and writes a row per call, so an unauthenticated caller could otherwise grow the
+  # nonce table until the sweep catches up.
   rate-limit:
     # Maximum number of requests per second allowed. Set to 0 to disable rate limiting.
     # Default: 5,000
-    requests-per-second: 0
+    requests-per-second: 5000
     # Maximum number of requests allowed in a single burst. Default: 1,000
-    burst: 0
+    burst: 1000
 # Monitoring endpoint configuration (Prometheus metrics at /metrics and pprof profiling at /debug/pprof/).
 monitoring:
   # The endpoint where Prometheus metrics and pprof profiling are exposed.

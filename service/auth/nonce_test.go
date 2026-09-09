@@ -111,11 +111,11 @@ func TestNonceSweepRemovesExpired(t *testing.T) {
 func newNonceStoreForTest(t *testing.T) *nonceStore {
 	t.Helper()
 	dbEnv := vc.NewDatabaseTestEnv(t)
+	require.NoError(t, SetupTables(t.Context(), dbEnv.DBConf))
+
 	pool, err := statedb.NewPool(t.Context(), dbEnv.DBConf)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	store := newNonceStore(pool, time.Minute)
-	require.NoError(t, store.ensureTable(t.Context()))
-	return store
+	return newNonceStore(pool, time.Minute)
 }

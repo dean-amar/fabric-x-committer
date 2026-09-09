@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -43,23 +44,15 @@ type (
 		RegisterService(Servers)
 	}
 
-	// UnaryInterceptorProvider is an optional interface a Registerer may implement to contribute
-	// unary interceptors. They are installed when the gRPC server is constructed and chained after
-	// the built-in (rate-limit) interceptor.
-	UnaryInterceptorProvider interface {
-		UnaryServerInterceptors() []grpc.UnaryServerInterceptor
-	}
-
-	// StreamInterceptorProvider is the streaming counterpart of UnaryInterceptorProvider; its
-	// interceptors are chained after the built-in (concurrency-limit) stream interceptor.
-	StreamInterceptorProvider interface {
-		StreamServerInterceptors() []grpc.StreamServerInterceptor
-	}
-
-	// extraInterceptors holds the interceptors a Registerer contributes beyond the built-in ones.
-	extraInterceptors struct {
-		unary  []grpc.UnaryServerInterceptor
-		stream []grpc.StreamServerInterceptor
+	// ACLEnforcerProvider is an optional interface a Registerer implements to have its RPCs authorized.
+	// NewServers consults it before building the gRPC server, so the interceptors are installed on the
+	// server from the start rather than added to a running one.
+	//
+	// Services build their enforcer in their constructor, so it exists whenever configuration asks for
+	// ACL - nil therefore means "not configured", never "not ready yet". A service that does not
+	// implement this interface is served without enforcement.
+	ACLEnforcerProvider interface {
+		ACLEnforcer() *acl.Enforcer
 	}
 
 	// Servers holds the gRPC, and HTTP servers along with their listeners.
@@ -73,6 +66,10 @@ type (
 		// stats callbacks.
 		// Services opt in by registering via RegisterServerMetrics.
 		StatsHandler *ServerStatsHandler
+
+		// ACLEnforcer authorizes this server's RPCs. It is taken from the Registerer when the server is
+		// built, so the interceptors are in place before the first RPC and before RegisterService runs.
+		ACLEnforcer *acl.Enforcer
 
 		httpServer *http.Server
 
@@ -147,8 +144,6 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 // It sets up gRPC, and HTTP servers along with their listeners.
 // It create the server objects even if we do not deploy it eventually.
 // This allows us to avoid nil checks in the service.RegisterService() method in case the endpoint is empty.
-// The registerer may optionally implement UnaryInterceptorProvider / StreamInterceptorProvider to
-// contribute interceptors installed on the gRPC server; a nil registerer contributes none.
 // IMPORTANT: If error is returned, the caller is responsible for calling StopFunc() on the
 // returned Servers.
 func NewServers(ctx context.Context, conf *Config, r Registerer) (s Servers, err error) {
@@ -160,8 +155,13 @@ func NewServers(ctx context.Context, conf *Config, r Registerer) (s Servers, err
 	}
 
 	s.StatsHandler = &ServerStatsHandler{}
+	if provider, ok := r.(ACLEnforcerProvider); ok {
+		s.ACLEnforcer = provider.ACLEnforcer()
+	}
 
-	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.StatsHandler, interceptorsOf(r))
+	//nolint:contextcheck // the ACL stream interceptor derives each stream's context from the stream
+	// itself, not from this construction context.
+	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.StatsHandler, s.ACLEnforcer)
 	if err != nil {
 		return s, errors.Wrapf(err, "failed creating GRPC server")
 	}
@@ -284,23 +284,9 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 	return l, nil
 }
 
-// interceptorsOf extracts the interceptors a Registerer contributes through the optional provider
-// interfaces. A nil registerer, or one implementing neither interface, contributes none.
-func interceptorsOf(r Registerer) extraInterceptors {
-	var extra extraInterceptors
-	if provider, ok := r.(UnaryInterceptorProvider); ok {
-		extra.unary = provider.UnaryServerInterceptors()
-	}
-	if provider, ok := r.(StreamInterceptorProvider); ok {
-		extra.stream = provider.StreamServerInterceptors()
-	}
-	return extra
-}
-
-// newGRPCServer instantiate a [grpc.Server]. The built-in rate-limit and concurrency interceptors
-// come first; the registerer's contributed interceptors (e.g. ACL enforcement) are chained after.
+// newGRPCServer instantiate a [grpc.Server].
 func newGRPCServer(
-	c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler, extra extraInterceptors,
+	c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler, aclEnforcer *acl.Enforcer,
 ) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
@@ -313,7 +299,17 @@ func newGRPCServer(
 		return nil, errors.Wrap(err, "invalid rate limit configuration")
 	}
 
-	unary := extra.unary
+	var unary []grpc.UnaryServerInterceptor
+	var stream []grpc.StreamServerInterceptor
+
+	// Authorization runs before the service handlers, and after the resource limiters prepended below,
+	// so unauthenticated floods are shed before any authorization work is done.
+	if aclEnforcer != nil {
+		unary = append(unary, aclEnforcer.UnaryInterceptor())
+		stream = append(stream, aclEnforcer.StreamInterceptor())
+		logger.Info("ACL enforcement enabled")
+	}
+
 	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
 		unary = append([]grpc.UnaryServerInterceptor{RateLimitInterceptor(limiter)}, unary...)
 		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
@@ -323,7 +319,6 @@ func newGRPCServer(
 		opts = append(opts, grpc.ChainUnaryInterceptor(unary...))
 	}
 
-	stream := extra.stream
 	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
 		stream = append([]grpc.StreamServerInterceptor{StreamConcurrencyInterceptor(sem)}, stream...)
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)

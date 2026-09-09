@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
@@ -50,6 +51,10 @@ const (
 	// defaultRevalidateInterval is how often an open stream re-authorizes when the caller does not
 	// configure an interval.
 	defaultRevalidateInterval = time.Minute
+
+	// transientRetryInterval paces re-checks after the AuthService was briefly unreachable, so an
+	// outage costs one attempt per interval rather than one per message.
+	transientRetryInterval = 5 * time.Second
 )
 
 // ErrMissingToken is returned when a request carries no authorization token.
@@ -62,24 +67,48 @@ type EnforcerConfig struct {
 	RevalidateInterval time.Duration
 }
 
-// Enforcer authorizes a resource server's incoming RPCs against the AuthService. For unary calls and
-// at stream establishment it forwards the caller's token (and TLS certificate hash) to Authorize; it
-// binds the identity Authorize returns to the stream and, on a background timer, asks ReAuthorize to
-// re-evaluate that identity against the latest policy - so a stream is torn down when a configuration
-// change removes the identity's access, independently of the establishment token's lifetime and of
-// whether the stream is actively transferring messages.
+// Enforcer authorizes a resource server's incoming RPCs against the AuthService. It forwards the
+// caller's token, the TLS certificate hash, and the namespaces the request touches; a stream binds the
+// token so its decision can be renewed for as long as it lives.
 type Enforcer struct {
 	client             servicepb.AuthServiceClient
 	revalidateInterval time.Duration
+	// conn is set when the enforcer was built from a connection and therefore owns it. Nil when a
+	// client was injected directly, as tests do.
+	conn *grpc.ClientConn
 }
 
-// NewEnforcer creates an Enforcer that delegates authorization to the given AuthService client.
+// NewEnforcer creates an Enforcer that delegates authorization to the given AuthService client. The
+// caller keeps ownership of whatever the client is built on; see Dial to have the enforcer own it.
 func NewEnforcer(client servicepb.AuthServiceClient, cfg EnforcerConfig) *Enforcer {
 	interval := cfg.RevalidateInterval
 	if interval <= 0 {
 		interval = defaultRevalidateInterval
 	}
 	return &Enforcer{client: client, revalidateInterval: interval}
+}
+
+// Dial connects to the AuthService and returns an Enforcer that owns the connection, so a service can
+// build one in its constructor - before the gRPC server exists - and release it with Close.
+func Dial(config *ClientConfig) (*Enforcer, error) {
+	conn, err := connection.NewSingleConnection(config.Server)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to connect to the auth service")
+	}
+	enforcer := NewEnforcer(servicepb.NewAuthServiceClient(conn), EnforcerConfig{
+		RevalidateInterval: config.StreamRevalidateInterval,
+	})
+	enforcer.conn = conn
+	return enforcer, nil
+}
+
+// Close releases the connection the enforcer owns. It is safe on a nil Enforcer, so a service can
+// defer it without first checking whether ACL is configured.
+func (e *Enforcer) Close() {
+	if e == nil || e.conn == nil {
+		return
+	}
+	connection.CloseConnectionsLog(e.conn)
 }
 
 // UnaryInterceptor authorizes every unary RPC before its handler runs. Exempt methods (e.g. health
@@ -143,12 +172,9 @@ func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 	}
 }
 
-// authorize authorizes a call against the AuthService, forwarding the caller's token and the TLS
-// certificate hash the connection presented (empty without mutual TLS; the AuthService checks it
-// against the token's binding). It fails closed: a policy denial, an invalid or expired token, and an
-// unreachable AuthService all surface as a gRPC status error the caller must not proceed past. The
-// call is bounded by authorizeTimeout so a hung AuthService cannot pin a handler indefinitely - for a
-// unary RPC without a client deadline, and for a stream, whose context carries none.
+// authorize authorizes a call against the AuthService. It fails closed: a policy denial, an invalid
+// token, and an unreachable AuthService all surface as a gRPC status error. The call is bounded by
+// authorizeTimeout, since neither a unary RPC without a deadline nor a stream context carries one.
 func (e *Enforcer) authorize(
 	ctx context.Context, token, resource string, scope requestScope,
 ) (*servicepb.AuthorizeResponse, error) {
@@ -165,37 +191,6 @@ func (e *Enforcer) authorize(
 		return nil, grpcerror.WrapWithContext(err, fmt.Sprintf("ACL check failed for [%s]", resource))
 	}
 	return resp, nil
-}
-
-// reAuthorize renews a stream's decision from its bound token, bounded by authorizeTimeout. Passing
-// the token (rather than the identity alone) is what makes token expiry and revocation observable to
-// an established stream: the AuthService resolves the token to its record before evaluating policy, so
-// a deleted or lapsed record denies the stream just as a policy change does.
-func (e *Enforcer) reAuthorize(
-	ctx context.Context, params *reAuthorizeParams,
-) (*servicepb.AuthorizeResponse, error) {
-	callCtx, cancel := context.WithTimeout(ctx, authorizeTimeout)
-	defer cancel()
-	resp, err := e.client.Authorize(callCtx, &servicepb.AuthorizeRequest{
-		Token:         params.token,
-		Resource:      params.resource,
-		TlsCertHash:   params.certHash,
-		Namespaces:    params.scope.namespaces,
-		AllNamespaces: params.scope.all,
-	})
-	if err != nil {
-		return nil, grpcerror.WrapWithContext(err,
-			fmt.Sprintf("ACL re-check failed for [%s]", params.resource))
-	}
-	return resp, nil
-}
-
-// reAuthorizeParams groups a re-authorization's inputs, which exceed the argument limit.
-type reAuthorizeParams struct {
-	token    string
-	resource string
-	certHash []byte
-	scope    requestScope
 }
 
 // decisionValidUntil returns how long a stream may reuse an authorization decision: the revalidation
@@ -237,12 +232,9 @@ func tokenFromMetadata(ctx context.Context) (string, error) {
 	return values[0], nil
 }
 
-// aclServerStream wraps a server stream whose authorization is renewed from its bound token. Every
-// receive and send first calls authorizeIfLapsed, so no message crosses the wrapper while the stream's
-// decision is stale: the token is re-resolved to its record (catching expiry and revocation) and the
-// resulting identity re-evaluated against the latest configuration (catching a policy change). A valid
-// decision is reused until it lapses, so the common case costs no round trip - a per-message check
-// against the AuthService would put its latency on the data path of every block and batch.
+// aclServerStream wraps a server stream whose authorization is renewed from its bound token. No message
+// crosses it while the decision is stale, and a valid decision is reused until it lapses - a per-message
+// check would put AuthService latency on the data path of every block and batch.
 type aclServerStream struct {
 	grpc.ServerStream
 	//nolint:containedctx // the wrapped stream must return this (cancelable) context from Context().
@@ -255,12 +247,10 @@ type aclServerStream struct {
 	certHash []byte
 
 	// mu guards the cached decision. Recv and Send run on separate goroutines for a bidirectional
-	// stream, so both the check and the refresh must be serialized; the refresh is held under the lock
-	// deliberately, since letting a message through while the decision is being renewed would defeat
-	// the check.
+	// stream, and the refresh is held under the lock deliberately: letting a message through while the
+	// decision is being renewed would defeat the check.
 	mu sync.Mutex
-	// tokenExpiresAt is the hard limit: past it the stream is denied without consulting the
-	// AuthService, because the bound token is known to be dead.
+	// tokenExpiresAt is the hard limit: past it the stream is denied locally, with no round trip.
 	tokenExpiresAt time.Time
 	// validUntil is when the cached decision must be renewed.
 	validUntil time.Time
@@ -295,11 +285,9 @@ func (s *aclServerStream) SendMsg(m any) error {
 	return s.ServerStream.SendMsg(m)
 }
 
-// authorizeIfLapsed renews the stream's authorization when the cached decision has lapsed, and
-// terminates the stream on a definitive denial. A transient failure (the AuthService is briefly
-// unreachable) leaves the established stream serving and is retried on the next message - but only
-// until the bound token's own expiry, which is enforced locally, so an outage can never extend a
-// stream past the lifetime of the token that established it.
+// authorizeIfLapsed renews the decision when it has lapsed, and terminates the stream on a definitive
+// denial. A transient failure leaves the stream serving and is retried on the next message, bounded by
+// the bound token's expiry - so an outage cannot extend a stream past that token's lifetime.
 func (s *aclServerStream) authorizeIfLapsed() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -318,13 +306,19 @@ func (s *aclServerStream) authorizeIfLapsed() error {
 		return nil
 	}
 
-	resp, err := s.enforcer.reAuthorize(s.ctx, s.reAuthorizeParams(s.scope))
+	resp, err := s.reAuthorize(s.scope)
 	if err != nil {
 		if grpcerror.FilterUnavailableErrorCode(err) == nil {
-			// Transient (Unavailable / DeadlineExceeded): keep serving and retry on the next message.
-			// The token-expiry guard above still bounds how long this can continue.
-			logger.Warnf("ACL re-check for [%s] failed transiently; keeping the stream open: %v",
-				s.resource, err)
+			// Transient (Unavailable / DeadlineExceeded): keep serving, and hold off before trying
+			// again. Without the backoff every subsequent message would re-attempt the call and wait
+			// out its timeout while holding mu, so a brief outage would stall the stream it is meant
+			// to keep alive. The token-expiry guard above still bounds how long this can continue.
+			//
+			// Measured from after the failed call, not from `now`: the call may have burned its whole
+			// timeout, which would leave the deadline already in the past and the backoff useless.
+			s.validUntil = time.Now().Add(transientRetryInterval)
+			logger.Warnf("ACL re-check for [%s] failed transiently; retrying in %s: %v",
+				s.resource, transientRetryInterval, err)
 			return nil
 		}
 		logger.Warnf("ACL re-check for [%s] denied; terminating the stream: %v", s.resource, err)
@@ -337,8 +331,7 @@ func (s *aclServerStream) authorizeIfLapsed() error {
 }
 
 // authorizeRequestScope authorizes the namespaces a just-received subscription request asks for, and
-// remembers them so every later re-check re-verifies them too. Messages that name no namespaces (every
-// message after the request, on the methods that address namespaces at all) are left alone.
+// remembers them so later re-checks verify them too. Messages naming no namespaces are left alone.
 func (s *aclServerStream) authorizeRequestScope(m any) error {
 	scope := scopeOfRequest(m)
 	if !scope.isSet() {
@@ -351,17 +344,15 @@ func (s *aclServerStream) authorizeRequestScope(m any) error {
 		return s.denied
 	}
 
-	resp, err := s.enforcer.reAuthorize(s.ctx, s.reAuthorizeParams(scope))
+	// Fails closed on every error, including a transient one. The tolerance an established stream gets
+	// in authorizeIfLapsed applies to re-checking a decision already made; these namespaces have never
+	// been authorized, so letting the message through would admit a subscription on the strength of the
+	// establishment check alone - which only covered the method.
+	resp, err := s.reAuthorize(scope)
 	if err != nil {
-		if grpcerror.FilterUnavailableErrorCode(err) != nil {
-			logger.Warnf("ACL check of the requested namespaces for [%s] denied: %v", s.resource, err)
-			s.terminate(err)
-			return s.denied
-		}
-		// Transient: the stream keeps its establishment authorization and the scope is re-checked on
-		// the next lapse, which the token-expiry bound still limits.
-		logger.Warnf("ACL check of the requested namespaces for [%s] failed transiently: %v", s.resource, err)
-		return nil
+		logger.Warnf("ACL check of the requested namespaces for [%s] failed: %v", s.resource, err)
+		s.terminate(err)
+		return s.denied
 	}
 
 	s.scope = scope
@@ -369,14 +360,23 @@ func (s *aclServerStream) authorizeRequestScope(m any) error {
 	return nil
 }
 
-// reAuthorizeParams builds the inputs for a re-check of this stream against the given namespace scope.
-func (s *aclServerStream) reAuthorizeParams(scope requestScope) *reAuthorizeParams {
-	return &reAuthorizeParams{
-		token:    s.token,
-		resource: s.resource,
-		certHash: s.certHash,
-		scope:    scope,
+// reAuthorize renews this stream's decision from its bound token. Re-presenting the token, rather than
+// the identity alone, is what makes token expiry and revocation observable to an established stream:
+// the AuthService resolves the token to its record before evaluating policy.
+func (s *aclServerStream) reAuthorize(scope requestScope) (*servicepb.AuthorizeResponse, error) {
+	callCtx, cancel := context.WithTimeout(s.ctx, authorizeTimeout)
+	defer cancel()
+	resp, err := s.enforcer.client.Authorize(callCtx, &servicepb.AuthorizeRequest{
+		Token:         s.token,
+		Resource:      s.resource,
+		TlsCertHash:   s.certHash,
+		Namespaces:    scope.namespaces,
+		AllNamespaces: scope.all,
+	})
+	if err != nil {
+		return nil, grpcerror.WrapWithContext(err, fmt.Sprintf("ACL re-check failed for [%s]", s.resource))
 	}
+	return resp, nil
 }
 
 // terminate records the terminal error and cancels the stream context. The caller must hold mu.

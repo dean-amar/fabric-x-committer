@@ -37,11 +37,10 @@ The service is composed of focused collaborators, each with one responsibility:
   resolution, signature), writes the token-to-identity binding, and mints a cert-bound ES256 JWT.
 - `IssueNonce() -> nonce, expires_at` — issues the single-use challenge a client must sign into its
   envelope. It is the mandatory first step of authentication.
-- `Authorize(token, resource, tls_cert_hash) -> authorized, identity, namespaces, token_expires_at` —
+- `Authorize(token, resource, tls_cert_hash, namespaces) -> authorized, token_expires_at` —
   verifies the token, checks the certificate binding and optional scope, resolves the bound identity
   from the store, checks the requested namespaces against the token's namespace scope, evaluates the
-  resource's policy against the latest configuration, and returns the resolved identity and the token's
-  expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached decision
+  resource's policy against the latest configuration, and returns the token's expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached decision
   lapses.
 
 Every non-authorized outcome is a gRPC status error, so the resource server propagates the exact

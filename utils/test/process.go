@@ -30,6 +30,16 @@ const (
 	endColor = "\033[0m"
 )
 
+// prefixStart and prefixEnd wrap the process-name prefix, carrying ANSI colour only when stdout is a
+// terminal: captured output does not interpret the escapes and would show them as literal noise.
+var prefixStart, prefixEnd = func() (string, string) {
+	info, err := os.Stdout.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return "", ""
+	}
+	return redColor, endColor
+}()
+
 // NewProcess creates and starts a new managed process.
 // The process starts immediately and streams output to stdout with a name prefix.
 func NewProcess(cmd *exec.Cmd, name string) (*Process, error) {
@@ -77,7 +87,7 @@ func (p *Process) streamOutput(reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Printf(redColor+"[%-15s]"+endColor+" %s\n", p.name, line)
+		fmt.Printf(prefixStart+"[%-15s]"+prefixEnd+" %s\n", p.name, line)
 	}
 }
 

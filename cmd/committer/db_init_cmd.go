@@ -15,6 +15,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
@@ -28,8 +29,9 @@ func databaseInitializationCMD() *cobra.Command {
 		Use:   initDBCommand,
 		Short: "Initialize the database with required tables and namespaces",
 		Long: `Initialize the state database by creating system tables, metadata tables,
-				and system namespaces (meta and config). This is a one-time administrative
-				operation that must be performed before booting the committer for the first time`,
+				system namespaces (meta and config), and the auth service's token and nonce
+				tables. This is a one-time administrative operation that must be performed
+				before booting the committer for the first time`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -43,6 +45,13 @@ func databaseInitializationCMD() *cobra.Command {
 
 			if err := statedb.SetupSystemTablesAndNamespaces(ctx, cfg.Database); err != nil {
 				return errors.Wrap(err, "failed to initialize state database")
+			}
+
+			// The auth service's tables are created here too, unconditionally: they are cheap and
+			// idempotent, and creating them up front means enabling ACL later needs no second
+			// administrative step. A deployment that never enables ACL leaves them empty.
+			if err := auth.SetupTables(ctx, cfg.Database); err != nil {
+				return errors.Wrap(err, "failed to initialize the auth service tables")
 			}
 
 			cmd.Println("Database initialized successfully")

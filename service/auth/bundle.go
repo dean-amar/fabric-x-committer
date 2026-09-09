@@ -8,17 +8,13 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
@@ -29,12 +25,6 @@ import (
 // service cannot authenticate or authorize. This is expected during bootstrap, before the first
 // configuration block has been committed and observed.
 var ErrConfigUnavailable = errors.New("channel configuration not available")
-
-// sqlSelectConfig reads the committed configuration transaction from the config system namespace,
-// exactly as the query service does.
-var sqlSelectConfig = fmt.Sprintf(
-	"SELECT value, version FROM %s WHERE key = $1", statedb.TableName(committerpb.ConfigNamespaceID),
-)
 
 // configProvider reads the latest committed channel configuration from the state database and
 // exposes it as a channelconfig.Bundle. The auth service does not own or mutate configuration; it
@@ -80,7 +70,7 @@ func (p *configProvider) run(ctx context.Context, interval time.Duration) {
 // atomically installs a new bundle. The version guard uses a strict "not newer" test so a stale read
 // can never roll the configuration - and thus the ACL policy set - backward.
 func (p *configProvider) refresh(ctx context.Context) error {
-	configTX, err := readConfigTransaction(ctx, p.pool)
+	configTX, err := statedb.ReadConfigTransaction(ctx, p.pool)
 	if err != nil {
 		return err
 	}
@@ -113,20 +103,6 @@ func (p *configProvider) current() (*channelconfig.Bundle, error) {
 		return nil, ErrConfigUnavailable
 	}
 	return bundle, nil
-}
-
-// readConfigTransaction reads the committed configuration transaction from the config namespace. It
-// returns an empty transaction (nil envelope) when no configuration has been committed yet.
-func readConfigTransaction(ctx context.Context, pool *pgxpool.Pool) (*applicationpb.ConfigTransaction, error) {
-	tx := &applicationpb.ConfigTransaction{}
-	err := pool.QueryRow(ctx, sqlSelectConfig, []byte(committerpb.ConfigKey)).Scan(&tx.Envelope, &tx.Version)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return tx, nil
-	}
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read config transaction")
-	}
-	return tx, nil
 }
 
 // buildBundle constructs a channel-configuration bundle from a marshaled configuration envelope.

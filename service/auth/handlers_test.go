@@ -40,7 +40,6 @@ func TestAuthenticateAndAuthorizeNoMTLS(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, azResp.GetAuthorized())
-	require.NotEmpty(t, azResp.GetIdentity()) // returned so a stream session can bind it
 }
 
 func TestAuthenticateAndAuthorizeMTLS(t *testing.T) {
@@ -104,7 +103,6 @@ func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 		Token: authResp.GetToken(), Resource: resourceGetRows,
 	})
 	require.NoError(t, err)
-	require.NotEmpty(t, azResp.GetIdentity())
 	require.Equal(t, authResp.GetExpiresAt(), azResp.GetTokenExpiresAt(),
 		"the resource server bounds its cached decision by the token's own expiry")
 

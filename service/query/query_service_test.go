@@ -635,7 +635,8 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 	}
 	serverConfig := test.NewLocalHostServiceConfig(opts.serverTLS)
 
-	qs := NewQueryService(config)
+	qs, err := NewQueryService(config)
+	require.NoError(t, err)
 	test.RunServiceAndServeForTest(t.Context(), t, qs, serverConfig)
 	clientConn := createQueryClientWithTLS(t, &serverConfig.GRPC.Endpoint, opts.clientTLS)
 

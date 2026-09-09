@@ -13,6 +13,7 @@ package servicepb
 
 import (
 	common "github.com/hyperledger/fabric-protos-go-apiv2/common"
+	msppb "github.com/hyperledger/fabric-x-common/api/msppb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -335,9 +336,6 @@ type AuthorizeResponse struct {
 	// Unavailable before the configuration is loaded), so a successful response always has
 	// authorized = true.
 	Authorized bool `protobuf:"varint,1,opt,name=authorized,proto3" json:"authorized,omitempty"`
-	// identity is the resolved MSP SerializedIdentity bound to the token, for logging and for a
-	// resource server that records who a stream belongs to.
-	Identity []byte `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
 	// token_expires_at is the bound token's expiry in unix seconds. A resource server caches an
 	// authorization decision for a stream no longer than this, so an expired token cannot keep an
 	// established stream alive.
@@ -383,13 +381,6 @@ func (x *AuthorizeResponse) GetAuthorized() bool {
 	return false
 }
 
-func (x *AuthorizeResponse) GetIdentity() []byte {
-	if x != nil {
-		return x.Identity
-	}
-	return nil
-}
-
 func (x *AuthorizeResponse) GetTokenExpiresAt() int64 {
 	if x != nil {
 		return x.TokenExpiresAt
@@ -398,15 +389,16 @@ func (x *AuthorizeResponse) GetTokenExpiresAt() int64 {
 }
 
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
-// in the auth service's identity store. It - not the raw JWT - holds the client's serialized MSP
-// identity, so the identity can be re-resolved against the latest configuration at authorization
-// time and a token can be revoked by deleting the record.
+// in the auth service's identity store. It - not the raw JWT - holds the client's MSP identity, so the
+// identity can be re-resolved against the latest configuration at authorization time and a token can
+// be revoked by deleting the record.
 type TokenRecord struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// jti is the opaque token id and the row key.
 	Jti string `protobuf:"bytes,1,opt,name=jti,proto3" json:"jti,omitempty"`
-	// serialized_identity is the client's MSP SerializedIdentity.
-	SerializedIdentity []byte `protobuf:"bytes,2,opt,name=serialized_identity,json=serializedIdentity,proto3" json:"serialized_identity,omitempty"`
+	// identity is the client's MSP identity. It is carried as the message rather than as marshaled
+	// bytes, so neither issuing nor authorizing has to serialize it by hand.
+	Identity *msppb.Identity `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
 	// msp_id is the client's MSP identifier, kept for logging and quick filtering.
 	MspId string `protobuf:"bytes,3,opt,name=msp_id,json=mspId,proto3" json:"msp_id,omitempty"`
 	// cert_hash_sha256 is the cnf/x5t#S256 binding to the client's TLS certificate.
@@ -462,9 +454,9 @@ func (x *TokenRecord) GetJti() string {
 	return ""
 }
 
-func (x *TokenRecord) GetSerializedIdentity() []byte {
+func (x *TokenRecord) GetIdentity() *msppb.Identity {
 	if x != nil {
-		return x.SerializedIdentity
+		return x.Identity
 	}
 	return nil
 }
@@ -515,7 +507,7 @@ var File_api_servicepb_auth_proto protoreflect.FileDescriptor
 
 const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/servicepb/auth.proto\x12\tservicepb\x1a\x13common/common.proto\"\x13\n" +
+	"\x18api/servicepb/auth.proto\x12\tservicepb\x1a\x13api/msppb/msp.proto\x1a\x13common/common.proto\"\x13\n" +
 	"\x11IssueNonceRequest\"I\n" +
 	"\x12IssueNonceResponse\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1d\n" +
@@ -536,16 +528,15 @@ const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\n" +
 	"namespaces\x18\x04 \x03(\tR\n" +
 	"namespaces\x12%\n" +
-	"\x0eall_namespaces\x18\x05 \x01(\bR\rallNamespaces\"y\n" +
+	"\x0eall_namespaces\x18\x05 \x01(\bR\rallNamespaces\"i\n" +
 	"\x11AuthorizeResponse\x12\x1e\n" +
 	"\n" +
 	"authorized\x18\x01 \x01(\bR\n" +
-	"authorized\x12\x1a\n" +
-	"\bidentity\x18\x02 \x01(\fR\bidentity\x12(\n" +
-	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAt\"\x8f\x02\n" +
+	"authorized\x12(\n" +
+	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAtJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\x8b\x02\n" +
 	"\vTokenRecord\x12\x10\n" +
-	"\x03jti\x18\x01 \x01(\tR\x03jti\x12/\n" +
-	"\x13serialized_identity\x18\x02 \x01(\fR\x12serializedIdentity\x12\x15\n" +
+	"\x03jti\x18\x01 \x01(\tR\x03jti\x12+\n" +
+	"\bidentity\x18\x02 \x01(\v2\x0f.msppb.IdentityR\bidentity\x12\x15\n" +
 	"\x06msp_id\x18\x03 \x01(\tR\x05mspId\x12(\n" +
 	"\x10cert_hash_sha256\x18\x04 \x01(\fR\x0ecertHashSha256\x12\x14\n" +
 	"\x05scope\x18\x05 \x03(\tR\x05scope\x12\x1e\n" +
@@ -583,20 +574,22 @@ var file_api_servicepb_auth_proto_goTypes = []any{
 	(*AuthorizeResponse)(nil),    // 5: servicepb.AuthorizeResponse
 	(*TokenRecord)(nil),          // 6: servicepb.TokenRecord
 	(*common.Envelope)(nil),      // 7: common.Envelope
+	(*msppb.Identity)(nil),       // 8: msppb.Identity
 }
 var file_api_servicepb_auth_proto_depIdxs = []int32{
 	7, // 0: servicepb.AuthenticateRequest.signed_envelope:type_name -> common.Envelope
-	0, // 1: servicepb.AuthService.IssueNonce:input_type -> servicepb.IssueNonceRequest
-	2, // 2: servicepb.AuthService.Authenticate:input_type -> servicepb.AuthenticateRequest
-	4, // 3: servicepb.AuthService.Authorize:input_type -> servicepb.AuthorizeRequest
-	1, // 4: servicepb.AuthService.IssueNonce:output_type -> servicepb.IssueNonceResponse
-	3, // 5: servicepb.AuthService.Authenticate:output_type -> servicepb.AuthenticateResponse
-	5, // 6: servicepb.AuthService.Authorize:output_type -> servicepb.AuthorizeResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	8, // 1: servicepb.TokenRecord.identity:type_name -> msppb.Identity
+	0, // 2: servicepb.AuthService.IssueNonce:input_type -> servicepb.IssueNonceRequest
+	2, // 3: servicepb.AuthService.Authenticate:input_type -> servicepb.AuthenticateRequest
+	4, // 4: servicepb.AuthService.Authorize:input_type -> servicepb.AuthorizeRequest
+	1, // 5: servicepb.AuthService.IssueNonce:output_type -> servicepb.IssueNonceResponse
+	3, // 6: servicepb.AuthService.Authenticate:output_type -> servicepb.AuthenticateResponse
+	5, // 7: servicepb.AuthService.Authorize:output_type -> servicepb.AuthorizeResponse
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_servicepb_auth_proto_init() }

@@ -22,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/api/msppb"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 	"github.com/hyperledger/fabric-x-common/msp"
 	"github.com/hyperledger/fabric-x-common/protoutil"
@@ -201,16 +202,17 @@ func selfSignedCert(t *testing.T) *x509.Certificate {
 }
 
 // newTokenStoreForTest provisions a database and returns a token store whose table has been created.
+// It applies the schema through SetupTables, the same path the `init-db` command uses, so the tests
+// exercise the tables an operator would actually have created.
 func newTokenStoreForTest(t *testing.T) *tokenStore {
 	t.Helper()
 	dbEnv := vc.NewDatabaseTestEnv(t)
+	require.NoError(t, SetupTables(t.Context(), dbEnv.DBConf))
+
 	pool, err := statedb.NewPool(t.Context(), dbEnv.DBConf)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-
-	store := newTokenStore(pool)
-	require.NoError(t, store.ensureTable(t.Context()))
-	return store
+	return newTokenStore(pool)
 }
 
 // newAuthServiceForTest wires a fully operational Service - database-backed store, ephemeral signer,
@@ -224,20 +226,19 @@ func newAuthServiceForTest(t *testing.T, env *authTestEnv) (*Service, *tokenSign
 
 	cfg := &Config{TokenTTL: 5 * time.Minute, EnvelopeFreshnessWindow: time.Minute, NonceTTL: time.Minute}
 	nonces := newNonceStore(store.pool, cfg.NonceTTL)
-	require.NoError(t, nonces.ensureTable(t.Context()))
 
 	svc := &Service{
 		config:  cfg,
 		metrics: newAuthServiceMetrics(),
 		store:   store,
 		nonces:  nonces,
-		authenticator: newAuthenticator(&authenticatorConfig{
+		authenticator: &authenticator{
 			signer:          signer,
 			store:           store,
 			nonces:          nonces,
 			freshnessWindow: cfg.EnvelopeFreshnessWindow,
 			tokenTTL:        cfg.TokenTTL,
-		}),
+		},
 		authorizer: newAuthorizer(signer, store),
 	}
 	svc.provider = newConfigProvider(store.pool, svc.metrics)
@@ -257,12 +258,12 @@ func issueNonce(t *testing.T, svc *Service) []byte {
 // testRecord builds a token record with the given id and expiry.
 func testRecord(jti string, expiresAt time.Time) *servicepb.TokenRecord {
 	return &servicepb.TokenRecord{
-		Jti:                jti,
-		SerializedIdentity: []byte("serialized-" + jti),
-		MspId:              testMSPID,
-		CertHashSha256:     []byte{0x01, 0x02, 0x03},
-		Scope:              []string{resourceGetRows},
-		IssuedSequence:     1,
-		ExpiresAt:          expiresAt.Unix(),
+		Jti:            jti,
+		Identity:       &msppb.Identity{MspId: testMSPID},
+		MspId:          testMSPID,
+		CertHashSha256: []byte{0x01, 0x02, 0x03},
+		Scope:          []string{resourceGetRows},
+		IssuedSequence: 1,
+		ExpiresAt:      expiresAt.Unix(),
 	}
 }

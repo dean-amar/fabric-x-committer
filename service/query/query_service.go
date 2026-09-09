@@ -17,16 +17,13 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
@@ -72,13 +69,25 @@ type (
 )
 
 // NewQueryService create a new QueryService given a configuration.
-func NewQueryService(config *Config) *Service {
-	return &Service{
+func NewQueryService(config *Config) (*Service, error) {
+	queryService := &Service{
 		config:      config,
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
 	}
+	// Dialled here rather than in Run, so the enforcer exists before serve builds the gRPC server:
+	// whether ACL is enforced then follows from configuration alone, never from startup ordering.
+	if config.Auth != nil {
+		enforcer, err := acl.Dial(config.Auth)
+		if err != nil {
+			return nil, err
+		}
+		queryService.authEnforcer = enforcer
+		logger.Infof("ACL enforcement enabled via auth service at %s", config.Auth.Server.Endpoint.Address())
+	}
+
+	return queryService, nil
 }
 
 // WaitForReady waits for the service resources to initialize, so it is ready to answers requests.
@@ -89,22 +98,14 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
+	// Nil-safe, so it needs no guard for a service without an auth section.
+	defer q.authEnforcer.Close()
+
 	pool, poolErr := statedb.NewPool(ctx, q.config.Database)
 	if poolErr != nil {
 		return poolErr
 	}
 	defer pool.Close()
-
-	if q.config.Auth != nil {
-		conn, connErr := connection.NewSingleConnection(q.config.Auth.Server)
-		if connErr != nil {
-			return errors.Wrap(connErr, "failed to connect to the auth service")
-		}
-		defer connection.CloseConnectionsLog(conn)
-		// The query service exposes only unary methods, so no stream revalidation interval applies.
-		q.authEnforcer = acl.NewEnforcer(servicepb.NewAuthServiceClient(conn), acl.EnforcerConfig{})
-		logger.Infof("ACL enforcement enabled via auth service at %s", q.config.Auth.Server.Endpoint.Address())
-	}
 
 	var limitter *semaphore.Weighted
 	if q.config.MaxActiveViews > 0 {
@@ -144,14 +145,10 @@ func (q *Service) RegisterService(s serve.Servers) {
 	serve.RegisterServerMetrics(s.StatsHandler, q.metrics.serverMetrics)
 }
 
-// UnaryServerInterceptors contributes the ACL enforcement interceptor when the auth service is
-// configured. All query methods are unary, so no stream interceptor is needed. serve calls this at
-// server construction, after Run has installed the enforcer.
-func (q *Service) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
-	if q.authEnforcer == nil {
-		return nil
-	}
-	return []grpc.UnaryServerInterceptor{q.authEnforcer.UnaryInterceptor()}
+// ACLEnforcer exposes the enforcer built by the constructor, so serve installs its interceptors when it
+// builds the gRPC server. Nil when no auth service is configured, which serves without enforcement.
+func (q *Service) ACLEnforcer() *acl.Enforcer {
+	return q.authEnforcer
 }
 
 // BeginView implements the query-service interface.
@@ -298,7 +295,7 @@ func (q *Service) GetConfigTransaction(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*applicationpb.ConfigTransaction, error) {
-	res, err := queryConfig(ctx, q.batcher.pool)
+	res, err := statedb.ReadConfigTransaction(ctx, q.batcher.pool)
 	return res, grpcerror.WrapInternalError(err)
 }
 
@@ -348,7 +345,7 @@ func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
 	// tryRefresh attempts a single refresh. Errors are logged but not returned,
 	// as this is a background polling loop that should continue on transient failures.
 	tryRefresh := func() {
-		configTX, err := queryConfig(ctx, pool)
+		configTX, err := statedb.ReadConfigTransaction(ctx, pool)
 		if err != nil {
 			logger.Errorf("Failed to read config transaction from DB: %v", err)
 			return

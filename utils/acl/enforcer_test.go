@@ -36,7 +36,7 @@ const (
 
 func TestUnaryInterceptorAllows(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("id")}
+	fake := &fakeAuthClient{}
 	enforcer := NewEnforcer(fake, EnforcerConfig{})
 
 	handlerRan := false
@@ -141,7 +141,7 @@ func TestStreamInterceptorAllowsAndDenies(t *testing.T) {
 	t.Parallel()
 
 	// Authorized at establishment: the handler runs and receives the wrapped stream.
-	fake := &fakeAuthClient{identity: []byte("id")}
+	fake := &fakeAuthClient{}
 	enforcer := NewEnforcer(fake, EnforcerConfig{})
 	handlerRan := false
 	err := enforcer.StreamInterceptor()(
@@ -169,7 +169,7 @@ func TestStreamInterceptorAllowsAndDenies(t *testing.T) {
 // valid, messages flow without consulting the AuthService, so its latency stays off the data path.
 func TestStreamReusesDecisionWithinInterval(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
 	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
 
 	err := enforcer.StreamInterceptor()(
@@ -198,7 +198,7 @@ func TestStreamReusesDecisionWithinInterval(t *testing.T) {
 // token to its record and catch expiry, revocation, and a policy change.
 func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
 	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Nanosecond})
 
 	err := enforcer.StreamInterceptor()(
@@ -217,7 +217,7 @@ func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
 // the lifetime of the token that established it.
 func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(-time.Second).Unix()}
+	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(-time.Second).Unix()}
 	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
 
 	err := enforcer.StreamInterceptor()(
@@ -237,7 +237,6 @@ func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
 func TestStreamTolerantOfTransientReauthErrors(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{
-		identity:       []byte("id"),
 		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 		laterErr:       status.Error(codes.Unavailable, "auth service restarting"),
 	}
@@ -266,7 +265,6 @@ func TestStreamTolerantOfTransientReauthErrors(t *testing.T) {
 func TestStreamTerminatesWhenReauthorizationDenied(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{
-		identity:       []byte("id"),
 		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 		laterErr:       status.Error(codes.PermissionDenied, "organization removed from channel"),
 	}
@@ -292,7 +290,7 @@ func TestStreamTerminatesWhenReauthorizationDenied(t *testing.T) {
 // with the authorization call, so the AuthService - not the resource server - decides on them.
 func TestUnaryInterceptorForwardsRequestNamespaces(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("id")}
+	fake := &fakeAuthClient{}
 	enforcer := NewEnforcer(fake, EnforcerConfig{})
 
 	query := &committerpb.Query{Namespaces: []*committerpb.QueryNamespace{
@@ -313,7 +311,7 @@ func TestUnaryInterceptorForwardsRequestNamespaces(t *testing.T) {
 // authorized when they arrive, since a stream interceptor cannot see them at establishment.
 func TestStreamAuthorizesSubscriptionNamespaces(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{identity: []byte("id"), tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
 	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
 
 	stream := &fakeServerStream{
@@ -336,7 +334,6 @@ func TestStreamAuthorizesSubscriptionNamespaces(t *testing.T) {
 func TestStreamDeniesUnpermittedSubscriptionNamespaces(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{
-		identity:       []byte("id"),
 		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 		laterErr:       status.Error(codes.PermissionDenied, "namespace outside the token's scope"),
 	}
@@ -354,6 +351,29 @@ func TestStreamDeniesUnpermittedSubscriptionNamespaces(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
 }
 
+// TestStreamDeniesSubscriptionNamespacesOnTransientError verifies the namespace check fails closed. An
+// established stream tolerates a transient re-check failure, but a subscription's namespaces have never
+// been authorized, so letting the message through would admit it on the establishment check alone.
+func TestStreamDeniesSubscriptionNamespacesOnTransientError(t *testing.T) {
+	t.Parallel()
+	fake := &fakeAuthClient{
+		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+		laterErr:       status.Error(codes.Unavailable, "auth service restarting"),
+	}
+	enforcer := NewEnforcer(fake, EnforcerConfig{RevalidateInterval: time.Hour})
+
+	stream := &fakeServerStream{
+		ctx:  ctxWithToken(testToken),
+		recv: &committerpb.StreamAllRequest{FilterNamespaces: []string{testNS1}},
+	}
+	err := enforcer.StreamInterceptor()(
+		nil, stream, &grpc.StreamServerInfo{FullMethod: testResource},
+		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(&committerpb.StreamAllRequest{}) },
+	)
+
+	require.Equal(t, codes.Unavailable, grpcerror.GetCode(err))
+}
+
 // --- test doubles ---
 
 func ctxWithToken(token string) context.Context {
@@ -365,7 +385,6 @@ func ctxWithToken(token string) context.Context {
 // simulates a change - a policy denial, a revocation, or a brief outage - that only a re-check sees.
 type fakeAuthClient struct {
 	mu             sync.Mutex
-	identity       []byte
 	tokenExpiresAt int64
 	authorizeErr   error
 	laterErr       error
@@ -388,7 +407,6 @@ func (f *fakeAuthClient) Authorize(
 	}
 	return &servicepb.AuthorizeResponse{
 		Authorized:     true,
-		Identity:       f.identity,
 		TokenExpiresAt: f.tokenExpiresAt,
 	}, nil
 }

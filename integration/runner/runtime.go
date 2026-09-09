@@ -26,6 +26,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -241,6 +242,13 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			},
 			Logging: flogging.Config{
 				LogSpec: "info:grpc=error",
+				// flogging's default format carries %{color} verbs, but a service started by the runtime
+				// writes to a pipe, never a terminal - the runner reads that pipe and re-prints each line
+				// with its own prefix. Those escapes could therefore never be rendered by the process that
+				// emitted them, and only end up as literal noise in captured test output, so the format
+				// here is the default with the colour verbs removed.
+				Format: "%{time:2006-01-02 15:04:05.000 MST} %{id:04x} %{level:.4s} " +
+					"[%{module}] %{shortfunc} -> %{message}",
 			},
 			RateLimit:            conf.RateLimit,
 			MaxConcurrentStreams: conf.MaxConcurrentStreams,
@@ -269,6 +277,13 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		c.DBEnv = vc.NewDatabaseTestEnv(t)
 	} else {
 		c.DBEnv = vc.NewDatabaseTestEnvWithCustomConnection(t, conf.DBConnection)
+	}
+
+	if conf.EnableACL {
+		// The AuthService does not create its own tables - schema is an operator step, applied by
+		// `init-db`. The runtime stands in for that operator here, so the topology matches production.
+		t.Log("Creating the auth service tables")
+		require.NoError(t, auth.SetupTables(t.Context(), c.DBEnv.DBConf))
 	}
 
 	s := &c.SystemConfig

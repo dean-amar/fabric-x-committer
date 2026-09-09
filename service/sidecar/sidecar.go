@@ -140,7 +140,20 @@ func New(c *Config) (*Service, error) {
 	deliveryParams.Metrics = metrics.delivery
 	relayService := newRelay(c.LastCommittedBlockSetInterval, metrics)
 
+	// 3. Dial the auth service, if ACL is configured. Done here rather than in Run so the enforcer
+	// exists before serve builds the gRPC server: whether ACL is enforced then follows from
+	// configuration alone, never from startup ordering.
+	var enforcer *acl.Enforcer
+	if c.Auth != nil {
+		enforcer, err = acl.Dial(c.Auth)
+		if err != nil {
+			return nil, err
+		}
+		logger.Infof("ACL enforcement enabled via auth service at %s", c.Auth.Server.Endpoint.Address())
+	}
+
 	return &Service{
+		authEnforcer:   enforcer,
 		deliveryParams: deliveryParams,
 		relay:          relayService,
 		notifier:       newNotifier(c.ChannelBufferSize, &c.Notification, metrics, q),
@@ -160,6 +173,9 @@ func (s *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the sidecar service. The call to Run blocks until an error occurs or the context is canceled.
 func (s *Service) Run(ctx context.Context) error {
+	// Nil-safe, so it needs no guard for a service without an auth section.
+	defer s.authEnforcer.Close()
+
 	// Deliver the block with status to client.
 	blockStoreInstance, err := newBlockStore(s.config.Ledger.Path, s.config.Ledger.SyncInterval, s.metrics)
 	if err != nil {
@@ -167,20 +183,6 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer blockStoreInstance.close()
 	s.blockStore = blockStoreInstance
-
-	// Set up ACL enforcement before signaling ready, so the interceptors are installed when the
-	// gRPC server is constructed (which happens after WaitForReady returns).
-	if s.config.Auth != nil {
-		authConn, authErr := connection.NewSingleConnection(s.config.Auth.Server)
-		if authErr != nil {
-			return errors.Wrap(authErr, "failed to connect to the auth service")
-		}
-		defer connection.CloseConnectionsLog(authConn)
-		s.authEnforcer = acl.NewEnforcer(servicepb.NewAuthServiceClient(authConn), acl.EnforcerConfig{
-			RevalidateInterval: s.config.Auth.StreamRevalidateInterval,
-		})
-		logger.Infof("ACL enforcement enabled via auth service at %s", s.config.Auth.Server.Endpoint.Address())
-	}
 
 	s.ready.SignalReady()
 	defer s.ready.Reset()
@@ -236,25 +238,11 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
-// UnaryServerInterceptors contributes the ACL enforcement interceptor for the sidecar's unary
-// block-query methods when the auth service is configured. serve installs it at server construction.
-func (s *Service) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
-	if s.authEnforcer == nil {
-		return nil
-	}
-	return []grpc.UnaryServerInterceptor{s.authEnforcer.UnaryInterceptor()}
-}
-
-// StreamServerInterceptors contributes the ACL enforcement interceptor for the sidecar's block
-// delivery and notification streams when the auth service is configured. The interceptor authorizes
-// each stream at establishment, binds the caller's token to the session, and re-checks it on the first
-// receive or send after its cached decision lapses - so a revoked or expired token, or a configuration
-// change that removes the identity's access, tears the stream down.
-func (s *Service) StreamServerInterceptors() []grpc.StreamServerInterceptor {
-	if s.authEnforcer == nil {
-		return nil
-	}
-	return []grpc.StreamServerInterceptor{s.authEnforcer.StreamInterceptor()}
+// ACLEnforcer exposes the enforcer built by the constructor, so serve installs its interceptors when it builds the
+// gRPC server: the unary one guards block query, the streaming one guards block delivery and the
+// notification streams. Nil when no auth service is configured, which serves without ACL enforcement.
+func (s *Service) ACLEnforcer() *acl.Enforcer {
+	return s.authEnforcer
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(

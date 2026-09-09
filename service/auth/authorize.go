@@ -65,14 +65,13 @@ func (a *authorizer) authorize(
 		return nil, grpcerror.WrapPermissionDenied(err)
 	}
 
-	if err = evaluateResourcePolicy(bundle, req.GetResource(), rec.GetSerializedIdentity()); err != nil {
+	if err = evaluateResourcePolicy(bundle, req.GetResource(), rec.GetIdentity()); err != nil {
 		logger.Debugf("Authorization denied for [%s]: %v", req.GetResource(), err)
 		return nil, grpcerror.WrapPermissionDenied(err)
 	}
 
 	return &servicepb.AuthorizeResponse{
 		Authorized:     true,
-		Identity:       rec.GetSerializedIdentity(),
 		TokenExpiresAt: rec.GetExpiresAt(),
 	}, nil
 }

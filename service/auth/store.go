@@ -8,7 +8,6 @@ package auth
 
 import (
 	"context"
-	_ "embed"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -19,9 +18,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils"
 )
-
-//go:embed auth_tokens.sql
-var createTokenTableSQL string
 
 const (
 	sqlInsertRecord    = `INSERT INTO auth_tokens (jti, record, expires_at) VALUES ($1, $2, $3)`
@@ -54,14 +50,6 @@ func newTokenStore(pool *pgxpool.Pool) *tokenStore {
 		pool:  pool,
 		cache: &utils.SyncMap[string, *servicepb.TokenRecord]{},
 	}
-}
-
-// ensureTable creates the token table and its expiry index if absent. Safe to run repeatedly.
-func (s *tokenStore) ensureTable(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, createTokenTableSQL); err != nil {
-		return errors.Wrap(err, "failed to create auth token table")
-	}
-	return nil
 }
 
 // warmCache loads all unexpired token records into the cache, so recently issued tokens resolve

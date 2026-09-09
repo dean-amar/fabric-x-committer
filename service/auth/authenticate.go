@@ -9,15 +9,17 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/hyperledger/fabric-x-common/api/msppb"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 	"github.com/hyperledger/fabric-x-common/common/util"
 	"github.com/hyperledger/fabric-x-common/protoutil"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -45,42 +47,25 @@ var (
 	ErrEnvelopeScope = errors.New("envelope is not an authentication request for this channel")
 )
 
-// verifiedIdentity is the outcome of authenticating an envelope: the client's serialized MSP
-// identity (re-resolved against the latest configuration at authorization time), its MSP id, and the
-// SHA-256 of its TLS certificate (nil when the client connected without a certificate).
+// verifiedIdentity is the outcome of authenticating an envelope: the client's MSP identity
+// (re-resolved against the latest configuration at authorization time), its MSP id, and the SHA-256 of
+// its TLS certificate (nil when the client connected without a certificate).
 type verifiedIdentity struct {
-	serialized []byte
-	mspID      string
-	certHash   []byte
+	identity *msppb.Identity
+	mspID    string
+	certHash []byte
 }
 
 // authenticator verifies signed envelopes and issues cert-bound tokens, persisting the resulting
-// token-to-identity binding in the identity store.
+// token-to-identity binding in the identity store. It has no constructor: every field is supplied by
+// its single caller, so a keyed struct literal says the same thing without a second type to keep in
+// step with this one.
 type authenticator struct {
 	signer          *tokenSigner
 	store           *tokenStore
 	nonces          *nonceStore
 	freshnessWindow time.Duration
 	tokenTTL        time.Duration
-}
-
-// authenticatorConfig groups the authenticator's dependencies, which exceed the argument limit.
-type authenticatorConfig struct {
-	signer          *tokenSigner
-	store           *tokenStore
-	nonces          *nonceStore
-	freshnessWindow time.Duration
-	tokenTTL        time.Duration
-}
-
-func newAuthenticator(cfg *authenticatorConfig) *authenticator {
-	return &authenticator{
-		signer:          cfg.signer,
-		store:           cfg.store,
-		nonces:          cfg.nonces,
-		freshnessWindow: cfg.freshnessWindow,
-		tokenTTL:        cfg.tokenTTL,
-	}
 }
 
 // authenticate verifies the signed envelope against the bundle, persists the token-to-identity
@@ -109,7 +94,7 @@ func (a *authenticator) authenticate(
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
 	}
 
-	identity, err := a.verifyEnvelope(ctx, env, bundle, now)
+	identity, err := a.verifyEnvelope(ctx, parsed, bundle, now)
 	if err != nil {
 		logger.Warnf("Authentication failed: %v", err)
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
@@ -121,14 +106,14 @@ func (a *authenticator) authenticate(
 		return nil, grpcerror.WrapInternalError(err)
 	}
 	rec := &servicepb.TokenRecord{
-		Jti:                jti,
-		SerializedIdentity: identity.serialized,
-		MspId:              identity.mspID,
-		CertHashSha256:     identity.certHash,
-		Scope:              normalizeScope(req.GetRequestedScope()),
-		Namespaces:         normalizeScope(req.GetRequestedNamespaces()),
-		IssuedSequence:     bundle.ConfigtxValidator().Sequence(),
-		ExpiresAt:          now.Add(a.tokenTTL).Unix(),
+		Jti:            jti,
+		Identity:       identity.identity,
+		MspId:          identity.mspID,
+		CertHashSha256: identity.certHash,
+		Scope:          normalizeScope(req.GetRequestedScope()),
+		Namespaces:     normalizeScope(req.GetRequestedNamespaces()),
+		IssuedSequence: bundle.ConfigtxValidator().Sequence(),
+		ExpiresAt:      now.Add(a.tokenTTL).Unix(),
 	}
 
 	// Mint before persisting: if persistence fails the client never receives the token, so no orphan
@@ -154,17 +139,13 @@ func (a *authenticator) authenticate(
 // mirroring the envelope-processing steps the committer already uses for config envelopes.
 //
 // Redeeming the nonce is deliberately not part of this: that is the one stateful step, and keeping it
-// in authenticate leaves this function a pure check over the envelope and the bundle. It re-parses the
-// envelope rather than taking the parsed form, which costs nothing worth optimizing - authentication
-// happens once per token, not per RPC - and keeps the signature a single envelope argument.
+// in authenticate leaves this a pure check over an already-parsed envelope and the bundle. The envelope
+// is parsed once, by the caller, because the caller needs the nonce out of it first.
 func (a *authenticator) verifyEnvelope(
-	ctx context.Context, env *common.Envelope, bundle *channelconfig.Bundle, now time.Time,
+	ctx context.Context, parsed *parsedEnvelope, bundle *channelconfig.Bundle, now time.Time,
 ) (*verifiedIdentity, error) {
-	parsed, err := parseSignedEnvelope(env)
-	if err != nil {
-		return nil, err
-	}
 	chdr, signedData := parsed.chdr, parsed.signedData
+	var err error
 
 	// Scope the envelope to an authentication request for this channel, so an envelope the client
 	// signed for another purpose cannot be exchanged for a token within the freshness window. The
@@ -203,11 +184,13 @@ func (a *authenticator) verifyEnvelope(
 		return nil, errors.Wrap(err, "signature verification failed")
 	}
 
-	serialized, err := proto.Marshal(signedData.Identity)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal identity")
-	}
-	return &verifiedIdentity{serialized: serialized, mspID: identity.GetMSPIdentifier(), certHash: certHash}, nil
+	// The identity travels on as the message the envelope carried. It is persisted in the token record
+	// as a nested message, so nothing here has to serialize it by hand.
+	return &verifiedIdentity{
+		identity: signedData.Identity,
+		mspID:    identity.GetMSPIdentifier(),
+		certHash: certHash,
+	}, nil
 }
 
 // verifyCertBinding checks the envelope's claimed TLS certificate hash against the certificate
@@ -293,4 +276,13 @@ func validateTimestamp(ts *timestamppb.Timestamp, window time.Duration, now time
 			"timestamp %s is outside the freshness window of %s around %s", t, window, now)
 	}
 	return nil
+}
+
+// newTokenID generates a random, opaque token id (the jti claim and the store's row key).
+func newTokenID() (string, error) {
+	id, err := uuid.NewRandomFromReader(rand.Reader)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to generate token id")
+	}
+	return id.String(), nil
 }

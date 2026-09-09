@@ -426,6 +426,9 @@ func TestReadConfigAuth(t *testing.T) {
 						PermitWithoutStream: true,
 					},
 				},
+				// Unlike the other samples, the auth sample leaves rate limiting on: IssueNonce is
+				// reachable without a token and writes a row per call.
+				RateLimit: serve.RateLimitConfig{RequestsPerSecond: 5000, Burst: 1000},
 			},
 			HTTP:                  *newServerConfigWithDefaultTLS("auth", authMonitoringPort),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,

@@ -9,15 +9,11 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	_ "embed"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 )
-
-//go:embed auth_nonces.sql
-var createNonceTableSQL string
 
 const (
 	sqlInsertNonce  = `INSERT INTO auth_nonces (nonce, expires_at) VALUES ($1, $2)`
@@ -47,14 +43,6 @@ type nonceStore struct {
 // newNonceStore creates a nonce store backed by the given pool, issuing nonces valid for ttl.
 func newNonceStore(pool *pgxpool.Pool, ttl time.Duration) *nonceStore {
 	return &nonceStore{pool: pool, ttl: ttl}
-}
-
-// ensureTable creates the nonce table and its expiry index if absent. Safe to run repeatedly.
-func (s *nonceStore) ensureTable(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, createNonceTableSQL); err != nil {
-		return errors.Wrap(err, "failed to create auth nonce table")
-	}
-	return nil
 }
 
 // issue generates a nonce, records it with its expiry, and returns it with the instant it lapses.

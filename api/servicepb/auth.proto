@@ -10,6 +10,7 @@ option go_package = "github.com/hyperledger/fabric-x-committer/api/servicepb";
 
 package servicepb;
 
+import "api/msppb/msp.proto";
 import "common/common.proto";
 
 // AuthService is the central authentication and authorization service. It authenticates clients
@@ -82,15 +83,16 @@ message AuthorizeRequest {
 }
 
 message AuthorizeResponse {
+    // 2 and 3 held the resolved identity and the token's namespace allowlist. The resource server no
+    // longer needs either - it binds the token, and the AuthService decides on namespaces.
+    reserved 2, 3;
+
     // authorized is true when the identity satisfies the resource policy. The RPCs return a gRPC
     // status error for every non-authorized outcome (Unauthenticated for an invalid, expired, or
     // unknown token or a certificate mismatch; PermissionDenied for a scope or policy denial;
     // Unavailable before the configuration is loaded), so a successful response always has
     // authorized = true.
     bool authorized = 1;
-    // identity is the resolved MSP SerializedIdentity bound to the token, for logging and for a
-    // resource server that records who a stream belongs to.
-    bytes identity = 2;
     // token_expires_at is the bound token's expiry in unix seconds. A resource server caches an
     // authorization decision for a stream no longer than this, so an expired token cannot keep an
     // established stream alive.
@@ -98,14 +100,15 @@ message AuthorizeResponse {
 }
 
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
-// in the auth service's identity store. It - not the raw JWT - holds the client's serialized MSP
-// identity, so the identity can be re-resolved against the latest configuration at authorization
-// time and a token can be revoked by deleting the record.
+// in the auth service's identity store. It - not the raw JWT - holds the client's MSP identity, so the
+// identity can be re-resolved against the latest configuration at authorization time and a token can
+// be revoked by deleting the record.
 message TokenRecord {
     // jti is the opaque token id and the row key.
     string jti = 1;
-    // serialized_identity is the client's MSP SerializedIdentity.
-    bytes serialized_identity = 2;
+    // identity is the client's MSP identity. It is carried as the message rather than as marshaled
+    // bytes, so neither issuing nor authorizing has to serialize it by hand.
+    msppb.Identity identity = 2;
     // msp_id is the client's MSP identifier, kept for logging and quick filtering.
     string msp_id = 3;
     // cert_hash_sha256 is the cnf/x5t#S256 binding to the client's TLS certificate.

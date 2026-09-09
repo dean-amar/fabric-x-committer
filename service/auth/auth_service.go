@@ -8,11 +8,8 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/health"
@@ -32,16 +29,23 @@ var logger = flogging.MustGetLogger("authentication-service")
 // Service is the central authentication and authorization gRPC service. It composes focused
 // collaborators, each with a single responsibility: a configProvider that reads the latest committed
 // channel configuration from the database, a tokenSigner that mints and verifies ES256 tokens, a
-// tokenStore that persists the token-to-identity binding, an authenticator that turns a signed
-// envelope into a token, and an authorizer that answers authorization decisions. The service holds
-// no per-connection state, so any instance can serve any client's request.
+// tokenStore that persists the token-to-identity binding, a nonceStore that issues and redeems
+// single-use authentication challenges, an authenticator that turns a signed envelope into a token,
+// and an authorizer that answers authorization decisions. The service holds no per-connection state,
+// so any instance can serve any client's request.
 type Service struct {
 	servicepb.UnimplementedAuthServiceServer
+
+	// Set by the constructor. These need no I/O, so they exist for the lifetime of the Service and are
+	// safe to touch before Run.
 	config      *Config
 	metrics     *perfMetrics
 	ready       *channel.Ready
 	healthcheck *health.Server
 
+	// Set by Run, once the database pool and signing key are open, since none of them can exist
+	// without those. They are nil until then; the gRPC handlers may rely on them because serve does
+	// not start the server until WaitForReady returns, which Run signals only after wiring them.
 	provider      *configProvider
 	store         *tokenStore
 	nonces        *nonceStore
@@ -60,8 +64,12 @@ func NewAuthService(config *Config) *Service {
 	}
 }
 
-// Run opens the signing key and database pool, wires the collaborators, warms the token store, starts
-// the background configuration-refresh and token-sweep loops, and blocks until the context is done.
+// Run opens the signing key and the database pool, builds the collaborators that need them, warms the
+// token cache, signals readiness, and blocks on the background loops until the context is done.
+//
+// Everything that can fail lives here rather than in NewAuthService, so constructing a Service is always
+// safe and a failure can be returned. It does not create its tables: schema is applied once by the
+// `init-db` command (see SetupTables), so a running service needs no DDL privileges.
 func (s *Service) Run(ctx context.Context) error {
 	logger.Infof("Starting auth service (token TTL: %s)", s.config.TokenTTL)
 
@@ -77,13 +85,17 @@ func (s *Service) Run(ctx context.Context) error {
 	defer pool.Close()
 
 	s.store = newTokenStore(pool)
-	if err = s.store.ensureTable(ctx); err != nil {
-		return err
-	}
 	s.nonces = newNonceStore(pool, s.config.NonceTTL)
-	if err = s.nonces.ensureTable(ctx); err != nil {
-		return err
+	s.provider = newConfigProvider(pool, s.metrics)
+	s.authenticator = &authenticator{
+		signer:          signer,
+		store:           s.store,
+		nonces:          s.nonces,
+		freshnessWindow: s.config.EnvelopeFreshnessWindow,
+		tokenTTL:        s.config.TokenTTL,
 	}
+	s.authorizer = newAuthorizer(signer, s.store)
+
 	if warmed, warmErr := s.store.warmCache(ctx, time.Now()); warmErr != nil {
 		// A warm-up failure is non-fatal: bindings still resolve from the database on demand.
 		logger.Warnf("Token store warm-up failed: %v", warmErr)
@@ -91,16 +103,6 @@ func (s *Service) Run(ctx context.Context) error {
 		logger.Infof("Warmed token store with %d records", warmed)
 	}
 	promutil.SetGauge(s.metrics.tokenStoreSize, s.store.size())
-
-	s.provider = newConfigProvider(pool, s.metrics)
-	s.authenticator = newAuthenticator(&authenticatorConfig{
-		signer:          signer,
-		store:           s.store,
-		nonces:          s.nonces,
-		freshnessWindow: s.config.EnvelopeFreshnessWindow,
-		tokenTTL:        s.config.TokenTTL,
-	})
-	s.authorizer = newAuthorizer(signer, s.store)
 
 	s.ready.SignalReady()
 	defer s.ready.Reset()
@@ -198,13 +200,4 @@ func (s *Service) Authorize(
 		return nil, grpcerror.WrapUnavailable(err)
 	}
 	return s.authorizer.authorize(ctx, req, bundle)
-}
-
-// newTokenID generates a random, opaque token id (the jti claim and the store's row key).
-func newTokenID() (string, error) {
-	id, err := uuid.NewRandomFromReader(rand.Reader)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to generate token id")
-	}
-	return id.String(), nil
 }

@@ -18,12 +18,14 @@ import (
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
@@ -68,6 +70,31 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	// this proves the whole chain: nonce -> envelope -> token -> interceptor -> Authorize -> handler.
 	t.Log("Step 4: query the committed row with the token")
 	rows, err := env.c.QueryServiceClient.GetRows(env.tokenContext(t, token), &committerpb.Query{
+		Namespaces: []*committerpb.QueryNamespace{
+			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
+		},
+	})
+	require.NoError(t, err)
+
+	test.RequireProtoElementsMatch(t, []*committerpb.RowsNamespace{{
+		NsId: aclNamespace,
+		Rows: []*committerpb.Row{{Key: []byte("k1"), Value: []byte("v1"), Version: 0}},
+	}}, rows.GetNamespaces())
+}
+
+// TestACLQueryWithTokenSource is the client-side counterpart: a caller that attaches acl.TokenSource as
+// per-RPC credentials performs no authentication steps of its own. The credential fetches the nonce,
+// signs the envelope, exchanges it for a token, and attaches that token to every call - so the query
+// below is an ordinary GetRows against an ACL-protected service.
+func TestACLQueryWithTokenSource(t *testing.T) {
+	t.Parallel()
+	env := newACLEnv(t)
+	env.commitRow(t, []byte("k1"), []byte("v1"))
+	// The credential authenticates on its first RPC, which needs the bundle already loaded.
+	env.waitForEnforcement(t)
+
+	client := committerpb.NewQueryServiceClient(env.connectionWithTokenSource(t))
+	rows, err := client.GetRows(t.Context(), &committerpb.Query{
 		Namespaces: []*committerpb.QueryNamespace{
 			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
 		},
@@ -206,6 +233,28 @@ func newACLEnv(t *testing.T) *aclEnv {
 	}
 }
 
+// connectionWithTokenSource dials the query service with acl.TokenSource attached as per-RPC
+// credentials, which is how a production client authenticates.
+func (e *aclEnv) connectionWithTokenSource(t *testing.T) *grpc.ClientConn {
+	t.Helper()
+	source := acl.NewTokenSource(acl.TokenSourceConfig{
+		Client:    e.authClient,
+		Signer:    e.signer,
+		ChannelID: runner.TestChannelName,
+	})
+
+	creds, err := e.c.SystemConfig.ClientTLS.ClientCredentials()
+	require.NoError(t, err)
+	conn, err := connection.NewConnection(connection.ClientParameters{
+		Address:        e.c.SystemConfig.Services.Query.GrpcEndpoint.Address(),
+		Creds:          creds,
+		AdditionalOpts: []grpc.DialOption{grpc.WithPerRPCCredentials(source)},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
 // nonce obtains a single-use challenge from the AuthService.
 func (e *aclEnv) nonce(t *testing.T) []byte {
 	t.Helper()
@@ -218,7 +267,7 @@ func (e *aclEnv) nonce(t *testing.T) []byte {
 // envelope with no challenge at all, which is what the missing-nonce case needs.
 func (e *aclEnv) envelope(t *testing.T, nonce []byte) *common.Envelope {
 	t.Helper()
-	envelope, err := acl.BuildAuthEnvelopeForTest(&acl.AuthEnvelopeParams{
+	envelope, err := acl.BuildAuthEnvelope(&acl.AuthEnvelopeParams{
 		Signer:    e.signer,
 		ChannelID: runner.TestChannelName,
 		Nonce:     nonce,

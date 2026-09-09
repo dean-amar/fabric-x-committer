@@ -13,7 +13,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/msppb"
 	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 	"github.com/hyperledger/fabric-x-common/msp"
-	"google.golang.org/protobuf/proto"
 )
 
 // policyReaders is the Application Readers policy every exposed resource maps to by default.
@@ -48,29 +47,14 @@ var defaultResourcePolicy = map[string]string{
 	peer.Deliver_DeliverWithPrivateData_FullMethodName: policyReaders,
 }
 
-// resolvePolicyRef returns the channel-policy reference governing a resource. The channel
-// configuration's ACLs mapping takes precedence; the built-in default map is the fallback. It
-// returns "" when neither defines the resource.
-func resolvePolicyRef(bundle *channelconfig.Bundle, resource string) string {
-	if app, ok := bundle.ApplicationConfig(); ok {
-		if ref := app.APIPolicyMapper().PolicyRefForAPI(resource); ref != "" {
-			return ref
-		}
-	}
-	return defaultResourcePolicy[resource]
-}
-
-// evaluateResourcePolicy re-resolves a token record's serialized identity against the latest bundle
-// and evaluates it against the resource's policy. Re-resolving on every call is what lets a
-// configuration change (a removed organization, a rotated MSP) take effect immediately. It returns
-// ErrNoPolicyForResource when no policy governs the resource, or the policy evaluation error when
-// the identity is not authorized.
-func evaluateResourcePolicy(bundle *channelconfig.Bundle, resource string, serializedIdentity []byte) error {
-	serialized := &msppb.Identity{}
-	if err := proto.Unmarshal(serializedIdentity, serialized); err != nil {
-		return errors.Wrap(err, "failed to unmarshal serialized identity")
-	}
-	identity, err := bundle.MSPManager().DeserializeIdentity(serialized)
+// evaluateResourcePolicy re-resolves a token record's identity against the latest bundle and evaluates
+// it against the resource's policy. Re-resolving on every call is what lets a configuration change (a
+// removed organization, a rotated MSP) take effect immediately. It returns ErrNoPolicyForResource when
+// no policy governs the resource, or the policy evaluation error when the identity is not authorized.
+func evaluateResourcePolicy(
+	bundle *channelconfig.Bundle, resource string, clientIdentity *msppb.Identity,
+) error {
+	identity, err := bundle.MSPManager().DeserializeIdentity(clientIdentity)
 	if err != nil {
 		return errors.Wrap(err, "identity is no longer valid under the current configuration")
 	}
@@ -90,4 +74,16 @@ func evaluateResourcePolicy(bundle *channelconfig.Bundle, resource string, seria
 		return errors.Wrap(err, "identity is not authorized by the resource policy")
 	}
 	return nil
+}
+
+// resolvePolicyRef returns the channel-policy reference governing a resource. The channel
+// configuration's ACLs mapping takes precedence; the built-in default map is the fallback. It
+// returns "" when neither defines the resource.
+func resolvePolicyRef(bundle *channelconfig.Bundle, resource string) string {
+	if app, ok := bundle.ApplicationConfig(); ok {
+		if ref := app.APIPolicyMapper().PolicyRefForAPI(resource); ref != "" {
+			return ref
+		}
+	}
+	return defaultResourcePolicy[resource]
 }

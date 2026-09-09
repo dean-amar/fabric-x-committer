@@ -145,10 +145,10 @@ func (t *TokenSource) buildEnvelope(ctx context.Context) (*common.Envelope, erro
 		return nil, errors.Wrap(err, "failed to obtain an authentication nonce")
 	}
 
-	return buildAuthEnvelope(&authEnvelopeParams{
-		signer:      t.cfg.Signer,
-		channelID:   t.cfg.ChannelID,
-		tlsCertHash: t.cfg.TLSCertHash,
-		nonce:       nonceResp.GetNonce(),
+	return BuildAuthEnvelope(&AuthEnvelopeParams{
+		Signer:      t.cfg.Signer,
+		ChannelID:   t.cfg.ChannelID,
+		TLSCertHash: t.cfg.TLSCertHash,
+		Nonce:       nonceResp.GetNonce(),
 	})
 }

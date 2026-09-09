@@ -4,7 +4,7 @@ Copyright IBM Corp. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 */
 
-package grpcerror
+package grpcerror_test
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
@@ -57,7 +58,7 @@ func TestHasCode(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tc.expectedReturn, HasCode(tc.inputErr, tc.inputCode))
+			require.Equal(t, tc.expectedReturn, grpcerror.HasCode(tc.inputErr, tc.inputCode))
 		})
 	}
 }
@@ -77,17 +78,17 @@ func TestHasCodeWithGRPCService(t *testing.T) {
 	client := healthgrpc.NewHealthClient(conn)
 
 	_, err := client.Check(ctx, nil)
-	require.True(t, HasCode(err, codes.Unimplemented)) // all APIs are codes.Unimplemented
+	require.True(t, grpcerror.HasCode(err, codes.Unimplemented)) // all APIs are codes.Unimplemented
 
 	_, err = client.List(ctx, nil)
-	require.False(t, HasCode(err, codes.NotFound)) // all APIs are codes.Unimplemented
+	require.False(t, grpcerror.HasCode(err, codes.NotFound)) // all APIs are codes.Unimplemented
 
 	sc.ServersStop[0]()
 	test.CheckServerStopped(t, sc.Configs[0].GRPC.Endpoint.Address())
 
 	_, err = client.Check(ctx, nil)
-	require.Truef(t, HasCode(err, codes.Unavailable), "code: %s", GetCode(err))
-	require.NoError(t, FilterUnavailableErrorCode(err))
+	require.Truef(t, grpcerror.HasCode(err, codes.Unavailable), "code: %s", grpcerror.GetCode(err))
+	require.NoError(t, grpcerror.FilterUnavailableErrorCode(err))
 }
 
 func TestWrapErrors(t *testing.T) {
@@ -102,13 +103,13 @@ func TestWrapErrors(t *testing.T) {
 	}{
 		{
 			name:             "WrapInternalError returns nil for nil input",
-			createFunc:       WrapInternalError,
+			createFunc:       grpcerror.WrapInternalError,
 			input:            nil,
 			expectedNilError: true,
 		},
 		{
 			name:             "WrapInternalError returns error with Internal code",
-			createFunc:       WrapInternalError,
+			createFunc:       grpcerror.WrapInternalError,
 			input:            errors.New("something went wrong"),
 			expectedNilError: false,
 			expectedCode:     codes.Internal,
@@ -116,13 +117,13 @@ func TestWrapErrors(t *testing.T) {
 		},
 		{
 			name:             "WrapInvalidArgument returns nil for nil input",
-			createFunc:       WrapInvalidArgument,
+			createFunc:       grpcerror.WrapInvalidArgument,
 			input:            nil,
 			expectedNilError: true,
 		},
 		{
 			name:             "WrapInvalidArgument returns error with InvalidArgument code",
-			createFunc:       WrapInvalidArgument,
+			createFunc:       grpcerror.WrapInvalidArgument,
 			input:            errors.New("invalid argument provided"),
 			expectedNilError: false,
 			expectedCode:     codes.InvalidArgument,
@@ -130,13 +131,13 @@ func TestWrapErrors(t *testing.T) {
 		},
 		{
 			name:             "WrapCancelled returns nil for nil input",
-			createFunc:       WrapCancelled,
+			createFunc:       grpcerror.WrapCancelled,
 			input:            nil,
 			expectedNilError: true,
 		},
 		{
 			name:             "WrapCancelled returns error with Canceled code",
-			createFunc:       WrapCancelled,
+			createFunc:       grpcerror.WrapCancelled,
 			input:            errors.New("operation cancelled"),
 			expectedNilError: false,
 			expectedCode:     codes.Canceled,
@@ -144,13 +145,13 @@ func TestWrapErrors(t *testing.T) {
 		},
 		{
 			name:             "WrapFailedPrecondition returns nil for nil input",
-			createFunc:       WrapFailedPrecondition,
+			createFunc:       grpcerror.WrapFailedPrecondition,
 			input:            nil,
 			expectedNilError: true,
 		},
 		{
 			name:             "WrapFailedPrecondition returns error with FailedPrecondition code",
-			createFunc:       WrapFailedPrecondition,
+			createFunc:       grpcerror.WrapFailedPrecondition,
 			input:            errors.New("system not in required state"),
 			expectedNilError: false,
 			expectedCode:     codes.FailedPrecondition,
@@ -158,13 +159,13 @@ func TestWrapErrors(t *testing.T) {
 		},
 		{
 			name:             "WrapUnimplemented returns nil for nil input",
-			createFunc:       WrapUnimplemented,
+			createFunc:       grpcerror.WrapUnimplemented,
 			input:            nil,
 			expectedNilError: true,
 		},
 		{
 			name:             "WrapUnimplemented returns error with Unimplemented code",
-			createFunc:       WrapUnimplemented,
+			createFunc:       grpcerror.WrapUnimplemented,
 			input:            errors.New("method is deprecated"),
 			expectedNilError: false,
 			expectedCode:     codes.Unimplemented,
@@ -172,13 +173,13 @@ func TestWrapErrors(t *testing.T) {
 		},
 		{
 			name:             "WrapNotFound returns nil for nil input",
-			createFunc:       WrapNotFound,
+			createFunc:       grpcerror.WrapNotFound,
 			input:            nil,
 			expectedNilError: true,
 		},
 		{
 			name:             "WrapNotFound returns error with NotFound code",
-			createFunc:       WrapNotFound,
+			createFunc:       grpcerror.WrapNotFound,
 			input:            errors.New("resource not found"),
 			expectedNilError: false,
 			expectedCode:     codes.NotFound,
@@ -209,7 +210,7 @@ func TestWrapResourceExhaustedOrCancelled(t *testing.T) {
 
 	t.Run("active context returns ResourceExhausted", func(t *testing.T) {
 		t.Parallel()
-		err := WrapResourceExhaustedOrCancelled(t.Context(), errors.New("too many streams"))
+		err := grpcerror.WrapResourceExhaustedOrCancelled(t.Context(), errors.New("too many streams"))
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		require.Equal(t, codes.ResourceExhausted, st.Code())
@@ -220,7 +221,7 @@ func TestWrapResourceExhaustedOrCancelled(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		err := WrapResourceExhaustedOrCancelled(ctx, errors.New("too many streams"))
+		err := grpcerror.WrapResourceExhaustedOrCancelled(ctx, errors.New("too many streams"))
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		require.Equal(t, codes.Canceled, st.Code())
@@ -274,7 +275,7 @@ func TestWrapWithContext(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := WrapWithContext(tc.input, tc.context)
+			err := grpcerror.WrapWithContext(tc.input, tc.context)
 			if tc.expectedNil {
 				require.NoError(t, err)
 				return
