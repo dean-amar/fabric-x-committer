@@ -131,8 +131,8 @@ MAKEFLAGS += --jobs=16
 #########################
 
 ROOT_PKG_REGEXP = github.com/hyperledger/fabric-x-committer
-CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query|auth)
-REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(loadgen|cmd|utils/testdb)
+CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query|snapshothasher|auth)
+REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(loadgen|cmd|utils/(testdb|statedb))
 HEAVY_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(docker|integration)
 
 NON_HEAVY_PACKAGES=$(shell $(go_cmd) list ./... | grep -vE "$(HEAVY_PACKAGES_REGEXP)")

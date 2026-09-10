@@ -14,21 +14,23 @@ import (
 )
 
 const (
-	sidecarService     = "sidecar"
-	coordinatorService = "coordinator"
-	vcService          = "vc"
-	verifierService    = "verifier"
-	queryService       = "query"
-	authService        = "auth"
+	sidecarService        = "sidecar"
+	coordinatorService    = "coordinator"
+	vcService             = "vc"
+	verifierService       = "verifier"
+	queryService          = "query"
+	snapshotHasherService = "snapshot-hasher"
+	authService           = "auth"
 )
 
 var serviceNames = map[string]string{
-	sidecarService:     "Sidecar",
-	coordinatorService: "Coordinator",
-	vcService:          "Validator-Committer",
-	verifierService:    "Verifier",
-	queryService:       "Query-Service",
-	authService:        "Auth-Service",
+	sidecarService:        "Sidecar",
+	coordinatorService:    "Coordinator",
+	vcService:             "Validator-Committer",
+	verifierService:       "Verifier",
+	queryService:          "Query-Service",
+	snapshotHasherService: "Snapshot-Hasher",
+	authService:           "Auth-Service",
 }
 
 func readConfig(name, configPath string) (any, *serve.Config, error) {
@@ -43,6 +45,8 @@ func readConfig(name, configPath string) (any, *serve.Config, error) {
 		return config.ReadVerifierYamlAndSetupLogging(config.NewViperWithVerifierDefaults(), configPath)
 	case queryService:
 		return config.ReadQueryYamlAndSetupLogging(config.NewViperWithQueryDefaults(), configPath)
+	case snapshotHasherService:
+		return config.ReadSnapshotHasherYamlAndSetupLogging(config.NewViperWithSnapshotHasherDefaults(), configPath)
 	case authService:
 		return config.ReadAuthYamlAndSetupLogging(config.NewViperWithAuthDefaults(), configPath)
 	default:

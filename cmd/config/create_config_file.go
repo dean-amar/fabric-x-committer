@@ -131,6 +131,8 @@ var (
 	TemplateQueryService string
 	//go:embed templates/sidecar.yaml.tmpl
 	TemplateSidecar string
+	//go:embed templates/snapshot-hasher.yaml.tmpl
+	TemplateSnapshotHasher string
 	//go:embed templates/vc.yaml.tmpl
 	TemplateVC string
 	//go:embed templates/verifier.yaml.tmpl

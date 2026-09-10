@@ -47,7 +47,7 @@ server:
 # Monitoring endpoint configuration (Prometheus metrics at /metrics and pprof profiling at /debug/pprof/).
 monitoring:
   # The endpoint where Prometheus metrics and pprof profiling are exposed.
-  endpoint: :2120
+  endpoint: :2121
   # Monitoring TLS configuration should/could be different from the GRPC server TLS
   # to only allow authorized admins to monitor the service's metrics.
   tls: *tlsConfig

@@ -25,6 +25,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/query"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
 	"github.com/hyperledger/fabric-x-committer/utils"
@@ -69,6 +70,13 @@ func ReadVerifierYamlAndSetupLogging(
 // ReadQueryYamlAndSetupLogging reading the YAML config file of the query service.
 func ReadQueryYamlAndSetupLogging(v *viper.Viper, configPath string) (*query.Config, *serve.Config, error) {
 	return readYamlAndSetupLogging[query.Config](v, configPath)
+}
+
+// ReadSnapshotHasherYamlAndSetupLogging reading the YAML config file of the snapshot hasher.
+func ReadSnapshotHasherYamlAndSetupLogging(
+	v *viper.Viper, configPath string,
+) (*snapshothasher.Config, *serve.Config, error) {
+	return readYamlAndSetupLogging[snapshothasher.Config](v, configPath)
 }
 
 // ReadAuthYamlAndSetupLogging reading the YAML config file of the auth service.

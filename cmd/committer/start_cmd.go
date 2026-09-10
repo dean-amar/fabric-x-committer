@@ -17,6 +17,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/query"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
@@ -28,7 +29,8 @@ func startCMD() *cobra.Command {
 		Short: "Start a service.",
 	}
 	for _, name := range []string{
-		sidecarService, coordinatorService, vcService, verifierService, queryService, authService,
+		sidecarService, coordinatorService, vcService, verifierService, queryService, snapshotHasherService,
+		authService,
 	} {
 		cmd.AddCommand(startServiceCommand(name))
 	}
@@ -69,6 +71,8 @@ func startServiceCommand(name string) *cobra.Command {
 				if err != nil {
 					return errors.Wrap(err, "failed to create query service")
 				}
+			case *snapshothasher.Config:
+				service = snapshothasher.NewSnapshotHasherService(c)
 			case *auth.Config:
 				service = auth.NewAuthService(c)
 			default:
