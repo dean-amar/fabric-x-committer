@@ -23,7 +23,7 @@ import (
 type ClientConfig struct {
 	// Server is the AuthService endpoint and the TLS the resource server uses to reach it.
 	Server *connection.ClientConfig `mapstructure:"server" validate:"required"`
-	// StreamRevalidateInterval is how often an open stream re-authorizes its bound identity against
-	// the latest policy. Zero uses the enforcer's default interval.
+	// StreamRevalidateInterval is how often an open stream re-authorizes its bound token against the
+	// latest policy. Zero uses the enforcer's default interval.
 	StreamRevalidateInterval time.Duration `mapstructure:"stream-revalidate-interval"`
 }

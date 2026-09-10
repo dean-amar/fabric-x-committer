@@ -408,6 +408,9 @@ func TestReadConfigAuth(t *testing.T) {
 			NonceTTL:                time.Minute,
 			ConfigRefreshInterval:   time.Minute,
 			TokenCleanupInterval:    time.Minute,
+
+			ChallengeRequestsPerSecond: 200,
+			ChallengeBurst:             50,
 		},
 	}, {
 		name:           "sample",
@@ -442,6 +445,9 @@ func TestReadConfigAuth(t *testing.T) {
 			NonceTTL:                time.Minute,
 			ConfigRefreshInterval:   time.Minute,
 			TokenCleanupInterval:    time.Minute,
+
+			ChallengeRequestsPerSecond: 200,
+			ChallengeBurst:             50,
 		},
 	}}
 

@@ -129,12 +129,8 @@ type AuthenticateRequest struct {
 	// requested_scope optionally narrows the token's authority to these gRPC full-method names
 	// (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
 	RequestedScope []string `protobuf:"bytes,2,rep,name=requested_scope,json=requestedScope,proto3" json:"requested_scope,omitempty"`
-	// requested_namespaces optionally narrows the token's authority to these namespace ids, so a
-	// token may read or observe only the namespaces it lists. Empty means every namespace the
-	// identity's channel policy allows.
-	RequestedNamespaces []string `protobuf:"bytes,3,rep,name=requested_namespaces,json=requestedNamespaces,proto3" json:"requested_namespaces,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AuthenticateRequest) Reset() {
@@ -177,13 +173,6 @@ func (x *AuthenticateRequest) GetSignedEnvelope() *common.Envelope {
 func (x *AuthenticateRequest) GetRequestedScope() []string {
 	if x != nil {
 		return x.RequestedScope
-	}
-	return nil
-}
-
-func (x *AuthenticateRequest) GetRequestedNamespaces() []string {
-	if x != nil {
-		return x.RequestedNamespaces
 	}
 	return nil
 }
@@ -250,15 +239,7 @@ type AuthorizeRequest struct {
 	Resource string `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
 	// tls_cert_hash is the SHA-256 of the caller's TLS certificate observed at the resource server.
 	// It is empty when the caller connected without a client certificate.
-	TlsCertHash []byte `protobuf:"bytes,3,opt,name=tls_cert_hash,json=tlsCertHash,proto3" json:"tls_cert_hash,omitempty"`
-	// namespaces are the namespace ids the request actually touches, read out of the request body by
-	// the resource server's interceptor. The AuthService checks them against the token's namespace
-	// scope, so the decision stays here rather than being delegated back to the resource server.
-	Namespaces []string `protobuf:"bytes,4,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
-	// all_namespaces is true when the request is not restricted to particular namespaces - an
-	// unfiltered subscription, for instance. A namespace-scoped token cannot satisfy such a request,
-	// so it is denied rather than being silently narrowed.
-	AllNamespaces bool `protobuf:"varint,5,opt,name=all_namespaces,json=allNamespaces,proto3" json:"all_namespaces,omitempty"`
+	TlsCertHash   []byte `protobuf:"bytes,3,opt,name=tls_cert_hash,json=tlsCertHash,proto3" json:"tls_cert_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -312,20 +293,6 @@ func (x *AuthorizeRequest) GetTlsCertHash() []byte {
 		return x.TlsCertHash
 	}
 	return nil
-}
-
-func (x *AuthorizeRequest) GetNamespaces() []string {
-	if x != nil {
-		return x.Namespaces
-	}
-	return nil
-}
-
-func (x *AuthorizeRequest) GetAllNamespaces() bool {
-	if x != nil {
-		return x.AllNamespaces
-	}
-	return false
 }
 
 type AuthorizeResponse struct {
@@ -389,9 +356,10 @@ func (x *AuthorizeResponse) GetTokenExpiresAt() int64 {
 }
 
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
-// in the auth service's identity store. It - not the raw JWT - holds the client's MSP identity, so the
-// identity can be re-resolved against the latest configuration at authorization time and a token can
-// be revoked by deleting the record.
+// in the auth service's token store. It - not the raw JWT - holds the client's MSP identity, so the
+// identity is re-resolved against the latest configuration on every authorization. Records are not
+// deleted to revoke: each instance caches unexpired records, so a delete on one would not be observed
+// by another before the token expired anyway. A token is valid until its expiry.
 type TokenRecord struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// jti is the opaque token id and the row key.
@@ -405,10 +373,6 @@ type TokenRecord struct {
 	CertHashSha256 []byte `protobuf:"bytes,4,opt,name=cert_hash_sha256,json=certHashSha256,proto3" json:"cert_hash_sha256,omitempty"`
 	// scope is the optional least-privilege scope granted at issuance, as gRPC full-method names.
 	Scope []string `protobuf:"bytes,5,rep,name=scope,proto3" json:"scope,omitempty"`
-	// namespaces is the optional namespace allowlist granted at issuance. Unlike scope, which the
-	// interceptor checks against the method name, this is enforced by the resource service against
-	// the namespaces the request body actually touches.
-	Namespaces []string `protobuf:"bytes,8,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
 	// issued_sequence is the config sequence the identity was first resolved against.
 	IssuedSequence uint64 `protobuf:"varint,6,opt,name=issued_sequence,json=issuedSequence,proto3" json:"issued_sequence,omitempty"`
 	// expires_at is the token expiry in unix seconds, used for TTL cleanup.
@@ -482,13 +446,6 @@ func (x *TokenRecord) GetScope() []string {
 	return nil
 }
 
-func (x *TokenRecord) GetNamespaces() []string {
-	if x != nil {
-		return x.Namespaces
-	}
-	return nil
-}
-
 func (x *TokenRecord) GetIssuedSequence() uint64 {
 	if x != nil {
 		return x.IssuedSequence
@@ -512,40 +469,32 @@ const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\x12IssueNonceResponse\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\xac\x01\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\x7f\n" +
 	"\x13AuthenticateRequest\x129\n" +
 	"\x0fsigned_envelope\x18\x01 \x01(\v2\x10.common.EnvelopeR\x0esignedEnvelope\x12'\n" +
-	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScope\x121\n" +
-	"\x14requested_namespaces\x18\x03 \x03(\tR\x13requestedNamespaces\"K\n" +
+	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScopeJ\x04\b\x03\x10\x04\"K\n" +
 	"\x14AuthenticateResponse\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\xaf\x01\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"t\n" +
 	"\x10AuthorizeRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bresource\x18\x02 \x01(\tR\bresource\x12\"\n" +
-	"\rtls_cert_hash\x18\x03 \x01(\fR\vtlsCertHash\x12\x1e\n" +
-	"\n" +
-	"namespaces\x18\x04 \x03(\tR\n" +
-	"namespaces\x12%\n" +
-	"\x0eall_namespaces\x18\x05 \x01(\bR\rallNamespaces\"i\n" +
+	"\rtls_cert_hash\x18\x03 \x01(\fR\vtlsCertHashJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"i\n" +
 	"\x11AuthorizeResponse\x12\x1e\n" +
 	"\n" +
 	"authorized\x18\x01 \x01(\bR\n" +
 	"authorized\x12(\n" +
-	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAtJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\x8b\x02\n" +
+	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAtJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\xf1\x01\n" +
 	"\vTokenRecord\x12\x10\n" +
 	"\x03jti\x18\x01 \x01(\tR\x03jti\x12+\n" +
 	"\bidentity\x18\x02 \x01(\v2\x0f.msppb.IdentityR\bidentity\x12\x15\n" +
 	"\x06msp_id\x18\x03 \x01(\tR\x05mspId\x12(\n" +
 	"\x10cert_hash_sha256\x18\x04 \x01(\fR\x0ecertHashSha256\x12\x14\n" +
-	"\x05scope\x18\x05 \x03(\tR\x05scope\x12\x1e\n" +
-	"\n" +
-	"namespaces\x18\b \x03(\tR\n" +
-	"namespaces\x12'\n" +
+	"\x05scope\x18\x05 \x03(\tR\x05scope\x12'\n" +
 	"\x0fissued_sequence\x18\x06 \x01(\x04R\x0eissuedSequence\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\a \x01(\x03R\texpiresAt2\xf1\x01\n" +
+	"expires_at\x18\a \x01(\x03R\texpiresAtJ\x04\b\b\x10\t2\xf1\x01\n" +
 	"\vAuthService\x12I\n" +
 	"\n" +
 	"IssueNonce\x12\x1c.servicepb.IssueNonceRequest\x1a\x1d.servicepb.IssueNonceResponse\x12O\n" +

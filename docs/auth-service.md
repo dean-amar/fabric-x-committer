@@ -37,11 +37,11 @@ The service is composed of focused collaborators, each with one responsibility:
   resolution, signature), writes the token-to-identity binding, and mints a cert-bound ES256 JWT.
 - `IssueNonce() -> nonce, expires_at` — issues the single-use challenge a client must sign into its
   envelope. It is the mandatory first step of authentication.
-- `Authorize(token, resource, tls_cert_hash, namespaces) -> authorized, token_expires_at` —
-  verifies the token, checks the certificate binding and optional scope, resolves the bound identity
-  from the store, checks the requested namespaces against the token's namespace scope, evaluates the
-  resource's policy against the latest configuration, and returns the token's expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached decision
-  lapses.
+- `Authorize(token, resource, tls_cert_hash) -> authorized, token_expires_at` — verifies the token,
+  checks the certificate binding and optional resource scope, resolves and validates the bound identity
+  from the store, evaluates the resource's policy against the latest configuration, and returns the
+  token's expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached
+  decision lapses.
 
 Every non-authorized outcome is a gRPC status error, so the resource server propagates the exact
 code: `Unauthenticated` (invalid/expired/unknown token or certificate mismatch), `PermissionDenied`
@@ -87,8 +87,8 @@ non-mTLS path exists only for local development and tests and must not be used i
 - **Server side — `Enforcer`**: the unary and stream interceptors installed on a resource server.
   They forward the caller's token (and TLS certificate hash) to `Authorize`; a stream binds the
   *token* to its session and renews the decision from it. Health checks (`grpc.health.v1.Health`) are
-  exempt. The interceptor also reads the namespaces the request touches out of its body and forwards
-  them, so the `AuthService` decides on them rather than the resource server.
+  exempt. The interceptors never inspect the request body: a decision depends only on the token, the
+  certificate on the connection, and the method name.
 - **Client side — `TokenSource`**: a `credentials.PerRPCCredentials` that fetches a nonce, authenticates
   once, caches the token, refreshes it before expiry, and attaches it to every outgoing RPC.
 
@@ -96,8 +96,9 @@ non-mTLS path exists only for local development and tests and must not be used i
 
 - **`AuthService`** (`cmd/config/samples/auth.yaml`): `signing-key-path` (a shared PEM EC key across
   instances; ephemeral if empty), `token-ttl`, `envelope-freshness-window`, `nonce-ttl`,
-  `config-refresh-interval`, `token-cleanup-interval`, and the state `database`. Use `mtls` for the
-  server TLS mode so tokens are certificate-bound.
+  `config-refresh-interval`, `token-cleanup-interval`, `challenge-requests-per-second` /
+  `challenge-burst`, and the state `database`. Use `mtls` for the server TLS mode so tokens are
+  certificate-bound.
 - **Resource servers** (Query, Sidecar): an optional `auth:` section (`utils/acl.ClientConfig`) with
   the `AuthService` endpoint + TLS and an optional `stream-revalidate-interval`. When absent, the
   service serves without ACL enforcement, preserving existing behavior.
@@ -126,26 +127,32 @@ policy, the request is denied.
   envelope useless without the signer's private key.
 - **Streaming re-authorization is token-based.** A stream binds the *token* it was established with. On
   every receive and send the wrapper checks whether its cached decision has lapsed and, if so,
-  re-`Authorize`s with that token: the token is resolved to its record (catching expiry and revocation)
-  and the resulting identity re-evaluated against the latest configuration (catching a policy change,
+  re-`Authorize`s with that token: the token is resolved to its record (catching expiry) and the
+  resulting identity re-evaluated against the latest configuration (catching a policy change,
   such as the identity's organization being removed). A valid decision is reused until it lapses, so the
   common case costs no round trip - checking per message would put `AuthService` latency on the data
   path of every block and batch. A decision is never reused past `stream-revalidate-interval`, and never
   past the bound token's own expiry, which the resource server enforces locally.
-- **Revocation.** Revocation is a delete of the token record (`tokenStore.delete`), an operational
-  primitive not yet exposed through a client-facing RPC. Because each instance fronts the store with a
-  short-lived read-through cache, cross-instance revocation takes effect within the token TTL rather
-  than instantly - an accepted trade-off of caching. It applies to new unary calls, new stream
-  establishments, **and** established streams, whose next lapsed re-check re-resolves the token and
-  finds the record gone.
-- **Namespace scope.** A token may additionally be restricted to a set of namespaces
-  (`requested_namespaces` at authentication). The decision stays in the `AuthService`: the resource
-  server's interceptor reads the namespaces the request *touches* out of its body and forwards them on
-  the `Authorize` call, and the `AuthService` checks them against the token's scope. A request naming a
-  namespace outside the scope is denied, and so is one that asks for *every* namespace (an unfiltered
-  subscription), which a scoped token cannot satisfy - refused outright rather than silently narrowed,
-  so a client is never left believing it is subscribed to more than it will receive. A stream
-  interceptor cannot see the request body at establishment, so a subscription's namespaces are
-  authorized by the wrapper as the request arrives, before the handler sees it.
+- **Rate limiting the front door.** `IssueNonce` and `Authenticate` are reachable without a token, and
+  each costs the service real work - a database row for a nonce, a signature verification and MSP
+  resolution for an authentication - so they share a token-bucket limit
+  (`challenge-requests-per-second` / `challenge-burst`, default 200/s burst 50) and return
+  `ResourceExhausted` above it. This is deliberately separate from the server-wide `rate-limit`:
+  `Authorize` is called once per protected RPC by the resource servers, so its rate tracks the whole
+  cluster's traffic and must not share a bucket with the two unauthenticated RPCs. The limit is global
+  per instance, not per client, so it caps total load rather than isolating one caller; mTLS is what
+  restricts who can reach the service at all.
+- **No revocation.** A token is valid until its `exp`, and `token-ttl` is the only lever on how long a
+  compromised token or a withdrawn authority remains usable. Deleting a record is deliberately not
+  offered: each instance fronts the store with a read-through cache, so a delete on one instance would
+  not be observed by another before the token expired anyway. Expiry itself is unaffected by the cache,
+  because `Authorize` verifies the JWT's `exp` before consulting the store.
+- **Namespace scope is deferred.** Restricting a token to particular namespaces is future work, not part
+  of this iteration. Only `GetRows` and `StreamAllTransactions` name the namespaces they touch; block
+  query and block delivery return whole blocks spanning every namespace, and a block cannot be filtered
+  to a subset without breaking the verification clients perform on it. A scope enforceable on two
+  resources and meaning "denied entirely" on the rest is a poor primitive, and the obvious
+  implementation fails open, since a request naming no namespaces means *every* namespace. See the RFC's
+  "Future work: namespace scoping".
 - **Bootstrap.** Until the first configuration block is committed and observed, the `AuthService`
   returns `Unavailable`; protected APIs reject calls until enforcement becomes active.

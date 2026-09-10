@@ -40,10 +40,6 @@ type configProvider struct {
 	seen        bool
 }
 
-func newConfigProvider(pool *pgxpool.Pool, metrics *perfMetrics) *configProvider {
-	return &configProvider{pool: pool, metrics: metrics}
-}
-
 // run reads the latest configuration immediately, then re-reads it every interval until the context
 // is done. It returns no error and only logs a failed refresh, so a transient database error does not
 // stop the service; the service simply keeps serving Unavailable until a bundle is available.
@@ -74,6 +70,9 @@ func (p *configProvider) refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Recorded on a successful read, not only on a version change: staleness means "we have not been
+	// able to check", so confirming the configuration is unchanged is itself a successful refresh.
+	promutil.SetGauge(p.metrics.configLastRefresh, int(time.Now().Unix()))
 	if len(configTX.GetEnvelope()) == 0 {
 		return nil // No configuration committed yet.
 	}
@@ -81,9 +80,13 @@ func (p *configProvider) refresh(ctx context.Context) error {
 		return nil // Not newer than what we already hold.
 	}
 
-	bundle, err := buildBundle(configTX.GetEnvelope())
+	envelope, err := protoutil.UnmarshalEnvelope(configTX.GetEnvelope())
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to unmarshal config envelope")
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
+	if err != nil {
+		return errors.Wrap(err, "failed to build channel configuration bundle")
 	}
 
 	sequence := bundle.ConfigtxValidator().Sequence()
@@ -101,19 +104,6 @@ func (p *configProvider) current() (*channelconfig.Bundle, error) {
 	bundle := p.bundle.Load()
 	if bundle == nil {
 		return nil, ErrConfigUnavailable
-	}
-	return bundle, nil
-}
-
-// buildBundle constructs a channel-configuration bundle from a marshaled configuration envelope.
-func buildBundle(envelopeBytes []byte) (*channelconfig.Bundle, error) {
-	envelope, err := protoutil.UnmarshalEnvelope(envelopeBytes)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal config envelope")
-	}
-	bundle, err := channelconfig.NewBundleFromEnvelope(envelope, factory.GetDefault())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to build channel configuration bundle")
 	}
 	return bundle, nil
 }

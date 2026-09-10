@@ -18,34 +18,36 @@ import (
 // policyReaders is the Application Readers policy every exposed resource maps to by default.
 const policyReaders = "/Channel/Application/Readers"
 
-// ErrNoPolicyForResource is returned when neither the channel configuration's ACLs section nor the
-// built-in default map defines a policy for a resource.
-var ErrNoPolicyForResource = errors.New("no policy defined for resource")
+var (
+	// ErrNoPolicyForResource is returned when neither the channel configuration's ACLs section nor the
+	// built-in default map defines a policy for a resource.
+	ErrNoPolicyForResource = errors.New("no policy defined for resource")
 
-// defaultResourcePolicy is the hard-coded fallback resource-to-policy map, consulted when the
-// channel configuration does not define an ACL for a resource. Every exposed method - the query
-// service, the sidecar's block query and block delivery, and the notification streams - defaults to
-// the Application Readers policy.
-var defaultResourcePolicy = map[string]string{
-	committerpb.QueryService_GetRows_FullMethodName:              policyReaders,
-	committerpb.QueryService_BeginView_FullMethodName:            policyReaders,
-	committerpb.QueryService_EndView_FullMethodName:              policyReaders,
-	committerpb.QueryService_GetNamespacePolicies_FullMethodName: policyReaders,
-	committerpb.QueryService_GetConfigTransaction_FullMethodName: policyReaders,
-	committerpb.QueryService_GetTransactionStatus_FullMethodName: policyReaders,
+	// defaultResourcePolicy is the hard-coded fallback resource-to-policy map, consulted when the
+	// channel configuration does not define an ACL for a resource. Every exposed method - the query
+	// service, the sidecar's block query and block delivery, and the notification streams - defaults to
+	// the Application Readers policy.
+	defaultResourcePolicy = map[string]string{
+		committerpb.QueryService_GetRows_FullMethodName:              policyReaders,
+		committerpb.QueryService_BeginView_FullMethodName:            policyReaders,
+		committerpb.QueryService_EndView_FullMethodName:              policyReaders,
+		committerpb.QueryService_GetNamespacePolicies_FullMethodName: policyReaders,
+		committerpb.QueryService_GetConfigTransaction_FullMethodName: policyReaders,
+		committerpb.QueryService_GetTransactionStatus_FullMethodName: policyReaders,
 
-	committerpb.BlockQueryService_GetBlockchainInfo_FullMethodName: policyReaders,
-	committerpb.BlockQueryService_GetBlockByNumber_FullMethodName:  policyReaders,
-	committerpb.BlockQueryService_GetBlockByTxID_FullMethodName:    policyReaders,
-	committerpb.BlockQueryService_GetTxByID_FullMethodName:         policyReaders,
+		committerpb.BlockQueryService_GetBlockchainInfo_FullMethodName: policyReaders,
+		committerpb.BlockQueryService_GetBlockByNumber_FullMethodName:  policyReaders,
+		committerpb.BlockQueryService_GetBlockByTxID_FullMethodName:    policyReaders,
+		committerpb.BlockQueryService_GetTxByID_FullMethodName:         policyReaders,
 
-	committerpb.Notifier_OpenNotificationStream_FullMethodName: policyReaders,
-	committerpb.Notifier_StreamAllTransactions_FullMethodName:  policyReaders,
+		committerpb.Notifier_OpenNotificationStream_FullMethodName: policyReaders,
+		committerpb.Notifier_StreamAllTransactions_FullMethodName:  policyReaders,
 
-	peer.Deliver_Deliver_FullMethodName:                policyReaders,
-	peer.Deliver_DeliverFiltered_FullMethodName:        policyReaders,
-	peer.Deliver_DeliverWithPrivateData_FullMethodName: policyReaders,
-}
+		peer.Deliver_Deliver_FullMethodName:                policyReaders,
+		peer.Deliver_DeliverFiltered_FullMethodName:        policyReaders,
+		peer.Deliver_DeliverWithPrivateData_FullMethodName: policyReaders,
+	}
+)
 
 // evaluateResourcePolicy re-resolves a token record's identity against the latest bundle and evaluates
 // it against the resource's policy. Re-resolving on every call is what lets a configuration change (a
@@ -57,6 +59,13 @@ func evaluateResourcePolicy(
 	identity, err := bundle.MSPManager().DeserializeIdentity(clientIdentity)
 	if err != nil {
 		return errors.Wrap(err, "identity is no longer valid under the current configuration")
+	}
+	// Deserializing only parses the certificate and locates its MSP; it does not check the chain or the
+	// revocation list. Validity must therefore be asserted here rather than left to the policy: a
+	// signature policy validates the identity only for the MEMBER, CLIENT and PEER principal types, so
+	// under an ADMIN or OU-based rule an expired or revoked certificate would otherwise still authorize.
+	if err = identity.Validate(); err != nil {
+		return errors.Wrap(err, "identity is not valid under the current configuration")
 	}
 
 	ref := resolvePolicyRef(bundle, resource)

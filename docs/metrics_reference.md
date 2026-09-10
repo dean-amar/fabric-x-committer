@@ -170,15 +170,16 @@ The following Query Service metrics are exported for consumption by Prometheus.
 
 The following Auth Service metrics are exported for consumption by Prometheus.
 
-| Name                                      | Type      | Labels        | Description                                                                                  |
-|-------------------------------------------|-----------|---------------|----------------------------------------------------------------------------------------------|
-| authservice_grpc_requests_total           | counter   | method        | Number of RPCs started by the service                                                        |
-| authservice_grpc_requests_latency_seconds | histogram | method status | The latency (seconds) of requests by the service, by method and gRPC status code             |
-| authservice_grpc_stream_duration_seconds  | histogram | method status | The duration (seconds) a stream was active from start to end, by method and gRPC status code |
-| authservice_grpc_active_streams           | gauge     | method        | Number of gRPC streams currently open on the server                                          |
-| authservice_grpc_active_connections       | gauge     |               | Number of client connections currently open on the server                                    |
-| authservice_grpc_config_sequence          | gauge     |               | The channel-configuration sequence the current evaluation bundle was built from.             |
-| authservice_grpc_token_store_size         | gauge     |               | Number of token records held in the in-memory cache.                                         |
+| Name                                                   | Type      | Labels        | Description                                                                                  |
+|--------------------------------------------------------|-----------|---------------|----------------------------------------------------------------------------------------------|
+| authservice_grpc_requests_total                        | counter   | method        | Number of RPCs started by the service                                                        |
+| authservice_grpc_requests_latency_seconds              | histogram | method status | The latency (seconds) of requests by the service, by method and gRPC status code             |
+| authservice_grpc_stream_duration_seconds               | histogram | method status | The duration (seconds) a stream was active from start to end, by method and gRPC status code |
+| authservice_grpc_active_streams                        | gauge     | method        | Number of gRPC streams currently open on the server                                          |
+| authservice_grpc_active_connections                    | gauge     |               | Number of client connections currently open on the server                                    |
+| authservice_grpc_config_sequence                       | gauge     |               | The channel-configuration sequence the current evaluation bundle was built from.             |
+| authservice_grpc_config_last_refresh_timestamp_seconds | gauge     |               | Unix time of the last successful channel-configuration refresh.                              |
+| authservice_grpc_token_store_size                      | gauge     |               | Number of token records held in the in-memory cache.                                         |
 
 ## Load Generator Metrics
 

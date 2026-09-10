@@ -154,9 +154,9 @@ channel-buffer-size: 100
 # Optional ACL enforcement. When this section is present, block delivery, block query, and the
 # notification streams are authorized against the central auth service. An open stream binds the token
 # it was established with and re-checks it whenever its cached decision lapses (at most
-# stream-revalidate-interval, and never past the token's own expiry), so token revocation, token expiry,
-# and a configuration change that revokes access all tear the stream down. When omitted, the sidecar
-# serves without ACL checks.
+# stream-revalidate-interval, and never past the token's own expiry), so token expiry and a configuration
+# change that withdraws access both tear the stream down. When omitted, the sidecar serves without ACL
+# checks.
 # auth:
 #   server:
 #     endpoint: auth:10001
@@ -166,7 +166,7 @@ channel-buffer-size: 100
 #       key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/sidecar/tls/server.key
 #       ca-cert-paths:
 #         - /root/artifacts/peerOrganizations/peer-org-0.com/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
-#   # How often an open stream re-authorizes its bound identity against the latest policy.
+#   # How often an open stream re-authorizes its bound token against the latest policy.
 #   # Zero uses the enforcer's default interval (1m).
 #   stream-revalidate-interval: 1m
 

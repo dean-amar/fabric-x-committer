@@ -45,20 +45,6 @@ func TestTokenStoreGetNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrTokenNotFound)
 }
 
-func TestTokenStoreDeleteRevokes(t *testing.T) {
-	t.Parallel()
-	store := newTokenStoreForTest(t)
-	rec := testRecord("jti-delete", time.Now().Add(time.Hour))
-	require.NoError(t, store.put(t.Context(), rec))
-
-	require.NoError(t, store.delete(t.Context(), rec.GetJti()))
-
-	// Gone from both the cache and the database (cache cleared to force a database read).
-	store.cache.Clear()
-	_, err := store.get(t.Context(), rec.GetJti())
-	require.ErrorIs(t, err, ErrTokenNotFound)
-}
-
 func TestTokenStoreSweepRemovesExpired(t *testing.T) {
 	t.Parallel()
 	store := newTokenStoreForTest(t)
@@ -93,7 +79,7 @@ func TestTokenStoreWarmCache(t *testing.T) {
 	}
 
 	// A fresh store sharing the same pool starts with an empty cache.
-	reader := newTokenStore(writer.pool)
+	reader := &tokenStore{pool: writer.pool}
 	require.Equal(t, 0, reader.size())
 
 	loaded, err := reader.warmCache(t.Context(), now)

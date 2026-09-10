@@ -296,6 +296,64 @@ Check `utils/` before accepting new code. Key existing utilities:
 - ✅ Max ~3 levels of nesting
 - ❌ Flag interleaved setup/logic/cleanup, ping-pong call patterns, excessive nesting
 
+### File Layout and Declaration Grouping
+
+The `development` skill's file-layout template is a review criterion, not just authoring
+advice. A PR that adds or restructures a file is checked against it — these are the
+deviations that recur most, so check each explicitly:
+
+- ✅ **Declarations grouped, not scattered.** A file declaring two or more types uses a
+  single `type ( ... )` block near the top, not repeated `type Foo struct` statements
+  spread through the file. Same for constants: one `const ( c1 = ..., c2 = ... )` block
+  rather than several standalone `const x = ...` lines.
+- ✅ **Constants at the top.** The `const` block sits directly after the imports (and the
+  package `logger`, if any) — before types, vars, and every function.
+- ✅ **Constant expressions are `const`, not `var`.** A string built only from constants —
+  e.g. `"SELECT ... FROM " + statedb.SomeTableName` where the table name is itself a
+  `const` — belongs in the `const` block. `var` for it is a missed compile-time guarantee.
+- ✅ **Caller before callee, within the file.** If `A` calls `B` and both live in the same
+  file, `B` is defined *below* `A`. When a helper has callers in more than one file, its
+  in-file caller decides its position and it sits at the bottom as a free helper.
+- ❌ Flag a helper defined above its caller, a `type`/`const` declared mid-file, a new
+  standalone `const` beside an existing `const` block, and sentinel `var` blocks split in
+  two where one would do.
+
+### Unnecessary Code, Files, and Tests
+
+Every added artifact must justify its own existence. Ask "if this were deleted, what
+breaks?" — and if the answer is "nothing", flag it.
+
+- ❌ **One-line wrappers.** A method whose whole body delegates to another method, called
+  from a single place, should be inlined into that call site. (An exception: a wrapper that
+  exists to acquire a lock *and* is called from two or more places.)
+- ❌ **Arg-only constructors and single-field config structs.** If `newFoo(a, b)` only
+  assigns its arguments to fields, delete it and let callers use a keyed struct literal;
+  export the fields if they need to be set from another package.
+- ❌ **Dead code reachable only from tests.** A production function whose only callers are
+  `_test.go` files is not production code. Delete it, along with the test that exercises it,
+  unless it is a documented extension point.
+- ❌ **Files that only exist to hold one small thing.** A 30–60 line file with a single type
+  or two tiny helpers usually belongs inside the file that consumes it. Merge it — *unless*
+  it is one of the documented role files (`config.go`, `metrics.go`), which stay separate at
+  any size because every package is expected to have them in the same place.
+- ❌ **Test files named after a source file that no longer exists.** When a PR deletes or
+  renames `foo.go`, `foo_test.go` must move too: into the test file matching whatever now
+  owns the code under test.
+- ❌ **Copy-pasted test functions.** Three or more test functions that call the same
+  function with different inputs and assert the same shape are one table-driven test. Merge
+  them (see the `tests` skill), and keep a case out of the table only when its *setup*
+  genuinely differs — say it needs a second fixture — not merely because its expectation
+  differs.
+
+### Duplication
+
+- ✅ One call site constructs each outbound request; collaborators call that one place
+  rather than rebuilding the request themselves
+- ✅ A predicate or computation used by two code paths is one named function, not two
+  copies that can drift
+- ❌ Flag any block of 3+ lines that appears twice with only argument differences, in
+  production code and test code alike
+
 ## Concurrency Patterns Compliance
 
 Verify against `@docs/core-concurrency-pattern.md`:

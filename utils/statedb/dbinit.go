@@ -34,6 +34,16 @@ const (
 
 	// TxStatusTableName is the name of the system table holding per-transaction status.
 	TxStatusTableName = "tx_status"
+
+	// AuthTokensTableName is the name of the system table holding the auth service's
+	// token-to-identity bindings.
+	//
+	//nolint:gosec // G101: a table name, not a credential.
+	AuthTokensTableName = "auth_tokens"
+
+	// AuthNoncesTableName is the name of the system table holding the auth service's unredeemed
+	// authentication nonces.
+	AuthNoncesTableName = "auth_nonces"
 )
 
 var (
@@ -91,7 +101,7 @@ func SetupSystemTablesAndNamespaces(
 		return errors.Wrap(err, "failed to determine database type")
 	}
 
-	logger.Info("Creating tx status table, metadata table, and their methods.")
+	logger.Info("Creating tx status, metadata, and auth service tables, and their methods.")
 	if execErr := retry.ExecuteSQL(ctx, config.Retry, pool,
 		fmtSplitIntoTablets(dbInitSQLStmt, tablePreSplitTablets)); execErr != nil {
 		return fmt.Errorf("failed to create system tables and functions: %w", execErr)

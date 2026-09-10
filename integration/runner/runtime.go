@@ -26,7 +26,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
-	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
@@ -277,13 +276,6 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		c.DBEnv = vc.NewDatabaseTestEnv(t)
 	} else {
 		c.DBEnv = vc.NewDatabaseTestEnvWithCustomConnection(t, conf.DBConnection)
-	}
-
-	if conf.EnableACL {
-		// The AuthService does not create its own tables - schema is an operator step, applied by
-		// `init-db`. The runtime stands in for that operator here, so the topology matches production.
-		t.Log("Creating the auth service tables")
-		require.NoError(t, auth.SetupTables(t.Context(), c.DBEnv.DBConf))
 	}
 
 	s := &c.SystemConfig

@@ -54,6 +54,7 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	// Step 1: Commit a transaction through the normal path, so the query has something real to find.
 	t.Log("Step 1: commit a transaction through the orderer")
 	env.commitRow(t, []byte("k1"), []byte("v1"))
+	env.waitForEnforcement(t)
 
 	// Step 2: Obtain a single-use nonce - the mandatory pre-step of authentication.
 	t.Log("Step 2: obtain a nonce from the auth service")
@@ -63,7 +64,7 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 
 	// Step 3: Sign the nonce into an envelope and exchange it for a cert-bound token.
 	t.Log("Step 3: authenticate with the signed envelope carrying the nonce")
-	token := env.authenticate(t, env.envelope(t, nonce), nil)
+	token := env.authenticate(t, env.envelope(t, nonce))
 	require.NotEmpty(t, token)
 
 	// Step 4: Query with the token. The query service authorizes every RPC against the AuthService, so
@@ -156,10 +157,12 @@ func TestACLAuthenticateRejectsReplayedEnvelope(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
 
+	env.waitForEnforcement(t)
+
 	// Step 1: A first authentication succeeds and consumes the nonce.
 	t.Log("Step 1: authenticate once, consuming the nonce")
 	envelope := env.envelope(t, env.nonce(t))
-	token := env.authenticate(t, envelope, nil)
+	token := env.authenticate(t, envelope)
 	require.NotEmpty(t, token)
 
 	// Step 2: Replay the very same envelope, as an attacker who captured it would.
@@ -169,41 +172,6 @@ func TestACLAuthenticateRejectsReplayedEnvelope(t *testing.T) {
 	})
 	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
 	require.ErrorContains(t, err, "already used")
-}
-
-// TestACLQueryDeniedOutsideTokenNamespaceScope verifies a token that carries authority for one
-// namespace cannot read another. The decision is the AuthService's: the query service's interceptor
-// forwards the namespaces the request names, and the AuthService checks them against the token's scope.
-func TestACLQueryDeniedOutsideTokenNamespaceScope(t *testing.T) {
-	t.Parallel()
-	env := newACLEnv(t)
-
-	// Step 1: Commit rows in both namespaces, so a denial cannot be confused with an empty result.
-	t.Log("Step 1: commit a row in each namespace")
-	env.commitRow(t, []byte("k1"), []byte("v1"))
-
-	// Step 2: Obtain a token restricted to the other namespace.
-	t.Log("Step 2: authenticate with a token scoped to a single namespace")
-	token := env.authenticate(t, env.envelope(t, env.nonce(t)), []string{aclOtherNamespace})
-
-	// Step 3: The scoped token may read the namespace it was issued for.
-	t.Log("Step 3: the in-scope namespace is readable")
-	_, err := env.c.QueryServiceClient.GetRows(env.tokenContext(t, token), &committerpb.Query{
-		Namespaces: []*committerpb.QueryNamespace{
-			{NsId: aclOtherNamespace, Keys: [][]byte{[]byte("k1")}},
-		},
-	})
-	require.NoError(t, err)
-
-	// Step 4: The same token is denied on a namespace outside its scope, even though the identity's
-	// channel policy would allow the read and the row exists.
-	t.Log("Step 4: the out-of-scope namespace is denied")
-	_, err = env.c.QueryServiceClient.GetRows(env.tokenContext(t, token), &committerpb.Query{
-		Namespaces: []*committerpb.QueryNamespace{
-			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
-		},
-	})
-	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
 }
 
 // newACLEnv starts a full committer whose query service enforces ACL against a live AuthService, and
@@ -237,11 +205,11 @@ func newACLEnv(t *testing.T) *aclEnv {
 // credentials, which is how a production client authenticates.
 func (e *aclEnv) connectionWithTokenSource(t *testing.T) *grpc.ClientConn {
 	t.Helper()
-	source := acl.NewTokenSource(acl.TokenSourceConfig{
+	source := &acl.TokenSource{
 		Client:    e.authClient,
 		Signer:    e.signer,
 		ChannelID: runner.TestChannelName,
-	})
+	}
 
 	creds, err := e.c.SystemConfig.ClientTLS.ClientCredentials()
 	require.NoError(t, err)
@@ -276,25 +244,16 @@ func (e *aclEnv) envelope(t *testing.T, nonce []byte) *common.Envelope {
 	return envelope
 }
 
-// authenticate exchanges an envelope for a token, optionally requesting a namespace-restricted one.
-//
-// It retries while the AuthService reports Unavailable, which it does until the genesis configuration
-// block has been committed and observed - the documented bootstrap window. Every other outcome,
-// including a rejection, is returned on the first attempt so a negative test fails fast rather than
-// retrying a denial for the full timeout.
-func (e *aclEnv) authenticate(t *testing.T, envelope *common.Envelope, namespaces []string) string {
+// authenticate exchanges an envelope for a token. It makes exactly one attempt: waitForEnforcement owns
+// the bootstrap wait, and the envelope's nonce is short-lived, so retrying here would only replay a
+// challenge the service has already rejected.
+func (e *aclEnv) authenticate(t *testing.T, envelope *common.Envelope) string {
 	t.Helper()
-
-	var token string
-	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		resp, err := e.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
-			SignedEnvelope:      envelope,
-			RequestedNamespaces: namespaces,
-		})
-		require.NoError(ct, err)
-		token = resp.GetToken()
-	}, 2*time.Minute, 250*time.Millisecond)
-	return token
+	resp, err := e.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
+		SignedEnvelope: envelope,
+	})
+	require.NoError(t, err)
+	return resp.GetToken()
 }
 
 // waitForEnforcement blocks until the AuthService has loaded a configuration bundle and is answering

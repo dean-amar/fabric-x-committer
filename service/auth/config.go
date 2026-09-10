@@ -9,6 +9,8 @@ package auth
 import (
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
@@ -38,4 +40,24 @@ type Config struct {
 	ConfigRefreshInterval time.Duration `mapstructure:"config-refresh-interval" default:"1m" validate:"gt=0"`
 	// TokenCleanupInterval is how often expired token records are swept from the store.
 	TokenCleanupInterval time.Duration `mapstructure:"token-cleanup-interval" default:"1m" validate:"gt=0"`
+	// ChallengeRequestsPerSecond caps the combined rate of IssueNonce and Authenticate, the two RPCs
+	// reachable without a token. Both are cheap to call and expensive to serve - a nonce costs a database
+	// row, an authentication costs a signature verification and an MSP resolution - so an unthrottled
+	// caller can spam either one into a denial of service. They are limited separately from Authorize,
+	// whose volume legitimately tracks the resource servers' whole RPC load and must not be throttled
+	// alongside them. Set to 0 to disable, which is only sensible in tests.
+	ChallengeRequestsPerSecond int `mapstructure:"challenge-requests-per-second" default:"200" validate:"gte=0"`
+	// ChallengeBurst is how far the challenge limiter may run ahead of its steady rate, absorbing the
+	// spike of many clients whose tokens expire at the same moment. It must not exceed the rate.
+	ChallengeBurst int `mapstructure:"challenge-burst" default:"50" validate:"gte=0"`
+}
+
+// Validate rejects a challenge burst larger than the rate it bursts above, mirroring the server's own
+// rate-limit validation: a burst over the rate would let a caller outrun the limit for a full second.
+func (c *Config) Validate() error {
+	if c.ChallengeRequestsPerSecond > 0 && c.ChallengeBurst > c.ChallengeRequestsPerSecond {
+		return errors.Newf("challenge-burst (%d) must not exceed challenge-requests-per-second (%d)",
+			c.ChallengeBurst, c.ChallengeRequestsPerSecond)
+	}
+	return nil
 }

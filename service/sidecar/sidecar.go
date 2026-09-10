@@ -66,7 +66,7 @@ type Service struct {
 	metrics        *perfMetrics
 	tlsUpdater     serve.DynamicTLSUpdater
 	ready          *channel.Ready
-	authEnforcer   *acl.Enforcer
+	aclEnforcer    *acl.Enforcer
 }
 
 // queues are the channels whose sizes the sidecar reports on scrape, so they are created before
@@ -143,17 +143,13 @@ func New(c *Config) (*Service, error) {
 	// 3. Dial the auth service, if ACL is configured. Done here rather than in Run so the enforcer
 	// exists before serve builds the gRPC server: whether ACL is enforced then follows from
 	// configuration alone, never from startup ordering.
-	var enforcer *acl.Enforcer
-	if c.Auth != nil {
-		enforcer, err = acl.Dial(c.Auth)
-		if err != nil {
-			return nil, err
-		}
-		logger.Infof("ACL enforcement enabled via auth service at %s", c.Auth.Server.Endpoint.Address())
+	enforcer, err := acl.NewEnforcer(c.Auth)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Service{
-		authEnforcer:   enforcer,
+		aclEnforcer:    enforcer,
 		deliveryParams: deliveryParams,
 		relay:          relayService,
 		notifier:       newNotifier(c.ChannelBufferSize, &c.Notification, metrics, q),
@@ -174,7 +170,7 @@ func (s *Service) WaitForReady(ctx context.Context) bool {
 // Run starts the sidecar service. The call to Run blocks until an error occurs or the context is canceled.
 func (s *Service) Run(ctx context.Context) error {
 	// Nil-safe, so it needs no guard for a service without an auth section.
-	defer s.authEnforcer.Close()
+	defer s.aclEnforcer.Close()
 
 	// Deliver the block with status to client.
 	blockStoreInstance, err := newBlockStore(s.config.Ledger.Path, s.config.Ledger.SyncInterval, s.metrics)
@@ -242,7 +238,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 // gRPC server: the unary one guards block query, the streaming one guards block delivery and the
 // notification streams. Nil when no auth service is configured, which serves without ACL enforcement.
 func (s *Service) ACLEnforcer() *acl.Enforcer {
-	return s.authEnforcer
+	return s.aclEnforcer
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(

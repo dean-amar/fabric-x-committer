@@ -97,8 +97,9 @@ database:
 signing-key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/auth-signing-key.pem
 
 # Lifetime of a minted token. Clients refresh by calling Authenticate again before it elapses.
-# Keep it short: it bounds how long a revoked token can still be honored (revocation is a record
-# delete, effective within this window). Default: 5m
+# Tokens cannot be revoked, so this is the only bound on how long a stolen token - or an identity that
+# has lost its channel authority - stays usable. Keep it short. It also bounds how long an open stream
+# lives, since a stream cannot outlive the token that established it. Default: 5m
 token-ttl: 5m
 
 # Bounds how far an authentication envelope's timestamp may deviate from the server's clock. Replay is
@@ -119,6 +120,19 @@ config-refresh-interval: 1m
 
 # How often expired token records are swept from the store. Default: 1m
 token-cleanup-interval: 1m
+
+# Combined rate limit for IssueNonce and Authenticate - the two RPCs a caller can reach WITHOUT already
+# holding a token. Both are cheap to call and expensive to serve: a nonce costs a database row, an
+# authentication costs a signature verification and an MSP resolution, so an unthrottled caller can spam
+# either one into a denial of service. This is separate from the server-wide `rate-limit` above on
+# purpose: Authorize is called by the resource servers once per protected RPC, so its rate tracks the
+# whole cluster's traffic and must not be throttled alongside these two.
+# A limit of 200/s serves ~60,000 clients refreshing a 5m token, and caps the nonce table at
+# roughly 200 x nonce-ttl rows. Set to 0 to disable (tests only). Default: 200
+challenge-requests-per-second: 200
+# How far the challenge limiter may run ahead of its steady rate, to absorb the spike of many clients
+# whose tokens expire at the same moment. Must not exceed challenge-requests-per-second. Default: 50
+challenge-burst: 50
 
 # Logging configuration
 logging:

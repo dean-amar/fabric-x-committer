@@ -27,12 +27,12 @@ const testChannel = "test-channel"
 func TestTokenSourceAuthenticatesAndCaches(t *testing.T) {
 	t.Parallel()
 	auth := &fakeAuthenticator{token: "tok-1", expiresAt: time.Now().Add(time.Hour).Unix()}
-	source := NewTokenSource(TokenSourceConfig{
-		Client:                   auth,
-		Signer:                   fakeSigner{},
-		ChannelID:                testChannel,
-		RequireTransportSecurity: true,
-	})
+	source := &TokenSource{
+		Client:              auth,
+		Signer:              fakeSigner{},
+		ChannelID:           testChannel,
+		SecureTransportOnly: true,
+	}
 
 	md, err := source.GetRequestMetadata(context.Background())
 	require.NoError(t, err)
@@ -54,11 +54,11 @@ func TestTokenSourceAuthenticatesAndCaches(t *testing.T) {
 func TestTokenSourceFetchesNonceAndEmbedsIt(t *testing.T) {
 	t.Parallel()
 	auth := &fakeAuthenticator{token: "tok-1", expiresAt: time.Now().Add(time.Hour).Unix()}
-	source := NewTokenSource(TokenSourceConfig{
+	source := &TokenSource{
 		Client:    auth,
 		Signer:    fakeSigner{},
 		ChannelID: testChannel,
-	})
+	}
 
 	_, err := source.GetRequestMetadata(context.Background())
 	require.NoError(t, err)
@@ -84,11 +84,11 @@ func TestTokenSourceFetchesNonceAndEmbedsIt(t *testing.T) {
 func TestTokenSourceNonceFailureFailsAuthentication(t *testing.T) {
 	t.Parallel()
 	auth := &fakeAuthenticator{nonceErr: errors.New("auth service unreachable")}
-	source := NewTokenSource(TokenSourceConfig{
+	source := &TokenSource{
 		Client:    auth,
 		Signer:    fakeSigner{},
 		ChannelID: testChannel,
-	})
+	}
 
 	_, err := source.GetRequestMetadata(context.Background())
 	require.ErrorContains(t, err, "failed to obtain an authentication nonce")
@@ -99,7 +99,7 @@ func TestTokenSourceRefreshesExpiredToken(t *testing.T) {
 	t.Parallel()
 	// A token already past expiry forces re-authentication on the next call.
 	auth := &fakeAuthenticator{token: "tok", expiresAt: time.Now().Add(-time.Second).Unix()}
-	source := NewTokenSource(TokenSourceConfig{Client: auth, Signer: fakeSigner{}, ChannelID: testChannel})
+	source := &TokenSource{Client: auth, Signer: fakeSigner{}, ChannelID: testChannel}
 
 	_, err := source.GetRequestMetadata(context.Background())
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestTokenSourceFallsBackToValidCachedToken(t *testing.T) {
 	t.Parallel()
 	// Every re-authentication attempt fails.
 	auth := &fakeAuthenticator{err: status.Error(codes.Unavailable, "auth service down")}
-	source := NewTokenSource(TokenSourceConfig{Client: auth, Signer: fakeSigner{}, ChannelID: testChannel})
+	source := &TokenSource{Client: auth, Signer: fakeSigner{}, ChannelID: testChannel}
 
 	// Simulate a previously issued token that is now inside its refresh window but not yet expired,
 	// so the next call attempts a refresh.
@@ -132,7 +132,7 @@ func TestTokenSourceFallsBackToValidCachedToken(t *testing.T) {
 func TestTokenSourceAuthenticateError(t *testing.T) {
 	t.Parallel()
 	auth := &fakeAuthenticator{err: status.Error(codes.Unauthenticated, "bad envelope")}
-	source := NewTokenSource(TokenSourceConfig{Client: auth, Signer: fakeSigner{}, ChannelID: testChannel})
+	source := &TokenSource{Client: auth, Signer: fakeSigner{}, ChannelID: testChannel}
 
 	_, err := source.GetRequestMetadata(context.Background())
 	require.Error(t, err)

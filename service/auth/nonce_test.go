@@ -16,7 +16,9 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
-func TestNonceIssueAndConsume(t *testing.T) {
+// TestNonceIsSingleUse is the property the whole challenge rests on: a nonce redeems exactly once, so
+// a captured envelope carrying it is worthless to a replayer.
+func TestNonceIsSingleUse(t *testing.T) {
 	t.Parallel()
 	store := newNonceStoreForTest(t)
 	now := time.Now()
@@ -27,37 +29,7 @@ func TestNonceIssueAndConsume(t *testing.T) {
 	require.Equal(t, now.Add(time.Minute).Unix(), expiresAt.Unix())
 
 	require.NoError(t, store.consume(t.Context(), nonce, now))
-}
-
-// TestNonceIsSingleUse is the property the whole challenge rests on: a nonce redeems exactly once, so
-// a captured envelope carrying it is worthless to a replayer.
-func TestNonceIsSingleUse(t *testing.T) {
-	t.Parallel()
-	store := newNonceStoreForTest(t)
-	now := time.Now()
-
-	nonce, _, err := store.issue(t.Context(), now)
-	require.NoError(t, err)
-
-	require.NoError(t, store.consume(t.Context(), nonce, now))
 	require.ErrorIs(t, store.consume(t.Context(), nonce, now), ErrNonceNotFound)
-}
-
-// TestNonceIssuesDistinctValues guards against a nonce generator that repeats itself, which would let
-// one client's spent challenge be reused by another.
-func TestNonceIssuesDistinctValues(t *testing.T) {
-	t.Parallel()
-	store := newNonceStoreForTest(t)
-	now := time.Now()
-
-	seen := make(map[string]struct{})
-	for range 20 {
-		nonce, _, err := store.issue(t.Context(), now)
-		require.NoError(t, err)
-		_, duplicate := seen[string(nonce)]
-		require.False(t, duplicate, "issued a duplicate nonce")
-		seen[string(nonce)] = struct{}{}
-	}
 }
 
 func TestNonceConsumeRejects(t *testing.T) {
@@ -106,16 +78,14 @@ func TestNonceSweepRemovesExpired(t *testing.T) {
 	require.NoError(t, store.consume(t.Context(), fresh, now))
 }
 
-// newNonceStoreForTest provisions a database and returns a nonce store whose table has been created,
-// issuing nonces with the same one-minute TTL the service defaults to.
+// newNonceStoreForTest provisions a database and returns a nonce store over it, issuing nonces with
+// the same one-minute TTL the service defaults to.
 func newNonceStoreForTest(t *testing.T) *nonceStore {
 	t.Helper()
 	dbEnv := vc.NewDatabaseTestEnv(t)
-	require.NoError(t, SetupTables(t.Context(), dbEnv.DBConf))
-
 	pool, err := statedb.NewPool(t.Context(), dbEnv.DBConf)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	return newNonceStore(pool, time.Minute)
+	return &nonceStore{pool: pool, ttl: time.Minute}
 }

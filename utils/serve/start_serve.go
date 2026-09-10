@@ -288,61 +288,72 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 func newGRPCServer(
 	c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler, aclEnforcer *acl.Enforcer,
 ) (*grpc.Server, error) {
-	opts := []grpc.ServerOption{
-		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
-		grpc.MaxSendMsgSize(connection.MaxMsgSize),
-		grpc.StatsHandler(statsHandler),
-	}
-	opts = append(opts, grpc.Creds(newCredentials(tlsProvider.GetServerTLSCredentials())))
-
 	if err := c.RateLimit.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid rate limit configuration")
 	}
 
+	unary, stream := serverInterceptors(c, aclEnforcer)
+	opts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
+		grpc.MaxSendMsgSize(connection.MaxMsgSize),
+		grpc.StatsHandler(statsHandler),
+		grpc.Creds(newCredentials(tlsProvider.GetServerTLSCredentials())),
+		// Chained unconditionally: gRPC drops an empty chain and unwraps a single interceptor, so
+		// neither an unlimited nor an unprotected server pays for the chain it does not use.
+		grpc.ChainUnaryInterceptor(unary...),
+		grpc.ChainStreamInterceptor(stream...),
+	}
+	return grpc.NewServer(append(opts, keepAliveOptions(c.KeepAlive)...)...), nil
+}
+
+// serverInterceptors returns the server's interceptors in the order they run: the resource limits
+// first, so a flood is shed before any authorization work is done, then ACL enforcement.
+func serverInterceptors(
+	c *ServerConfig, aclEnforcer *acl.Enforcer,
+) ([]grpc.UnaryServerInterceptor, []grpc.StreamServerInterceptor) {
 	var unary []grpc.UnaryServerInterceptor
 	var stream []grpc.StreamServerInterceptor
 
-	// Authorization runs before the service handlers, and after the resource limiters prepended below,
-	// so unauthenticated floods are shed before any authorization work is done.
+	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
+		unary = append(unary, RateLimitInterceptor(limiter))
+		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
+			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
+	}
+	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
+		stream = append(stream, StreamConcurrencyInterceptor(sem))
+		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
+	}
 	if aclEnforcer != nil {
 		unary = append(unary, aclEnforcer.UnaryInterceptor())
 		stream = append(stream, aclEnforcer.StreamInterceptor())
 		logger.Info("ACL enforcement enabled")
 	}
+	return unary, stream
+}
 
-	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
-		unary = append([]grpc.UnaryServerInterceptor{RateLimitInterceptor(limiter)}, unary...)
-		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
-			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
-	}
-	if len(unary) > 0 {
-		opts = append(opts, grpc.ChainUnaryInterceptor(unary...))
-	}
-
-	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
-		stream = append([]grpc.StreamServerInterceptor{StreamConcurrencyInterceptor(sem)}, stream...)
-		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
-	}
-	if len(stream) > 0 {
-		opts = append(opts, grpc.ChainStreamInterceptor(stream...))
+// keepAliveOptions translates the keep-alive configuration, if any, into server options.
+func keepAliveOptions(k *ServerKeepAliveConfig) []grpc.ServerOption {
+	if k == nil {
+		return nil
 	}
 
-	if c.KeepAlive != nil && c.KeepAlive.Params != nil {
+	var opts []grpc.ServerOption
+	if k.Params != nil {
 		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
-			MaxConnectionIdle:     c.KeepAlive.Params.MaxConnectionIdle,
-			MaxConnectionAge:      c.KeepAlive.Params.MaxConnectionAge,
-			MaxConnectionAgeGrace: c.KeepAlive.Params.MaxConnectionAgeGrace,
-			Time:                  c.KeepAlive.Params.Time,
-			Timeout:               c.KeepAlive.Params.Timeout,
+			MaxConnectionIdle:     k.Params.MaxConnectionIdle,
+			MaxConnectionAge:      k.Params.MaxConnectionAge,
+			MaxConnectionAgeGrace: k.Params.MaxConnectionAgeGrace,
+			Time:                  k.Params.Time,
+			Timeout:               k.Params.Timeout,
 		}))
 	}
-	if c.KeepAlive != nil && c.KeepAlive.EnforcementPolicy != nil {
+	if k.EnforcementPolicy != nil {
 		opts = append(opts, grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             c.KeepAlive.EnforcementPolicy.MinTime,
-			PermitWithoutStream: c.KeepAlive.EnforcementPolicy.PermitWithoutStream,
+			MinTime:             k.EnforcementPolicy.MinTime,
+			PermitWithoutStream: k.EnforcementPolicy.PermitWithoutStream,
 		}))
 	}
-	return grpc.NewServer(opts...), nil
+	return opts
 }
 
 func newCredentials(tlsCfg *tls.Config) credentials.TransportCredentials {

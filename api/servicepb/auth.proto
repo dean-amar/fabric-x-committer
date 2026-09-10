@@ -13,11 +13,11 @@ package servicepb;
 import "api/msppb/msp.proto";
 import "common/common.proto";
 
-// AuthService is the central authentication and authorization service. It authenticates clients
-// from a signed envelope and mints cert-bound JWTs (Authenticate), authorizes a token against a
-// resource policy for a resource server (Authorize), and re-evaluates an already-bound identity
-// against the latest policy for a long-lived stream (ReAuthorize). Only the AuthService mints and
-// verifies tokens; resource servers hold no signing keys and delegate every decision here.
+// AuthService is the central authentication and authorization service. It hands out single-use
+// challenges (IssueNonce), authenticates clients from a signed envelope and mints cert-bound JWTs
+// (Authenticate), and authorizes a token against a resource policy for a resource server
+// (Authorize). Only the AuthService mints and verifies tokens; resource servers hold no signing keys
+// and delegate every decision here.
 service AuthService {
     // IssueNonce issues a single-use, short-lived nonce the client must embed in the SignatureHeader of
     // the envelope it then presents to Authenticate. It is the mandatory first step of authentication:
@@ -26,8 +26,9 @@ service AuthService {
     rpc IssueNonce(IssueNonceRequest) returns (IssueNonceResponse);
     // Authenticate verifies a signed envelope and mints a short-lived, cert-bound JWT.
     rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
-    // Authorize evaluates a token against a resource policy for a resource server, returning the
-    // identity bound to the token so the caller can bind it to a stream session and re-present it.
+    // Authorize evaluates a token against a resource policy for a resource server. A stream calls it
+    // again with the same token whenever its cached decision lapses, so token expiry and configuration
+    // changes both take effect on an established stream.
     rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
 }
 
@@ -51,10 +52,11 @@ message AuthenticateRequest {
     // requested_scope optionally narrows the token's authority to these gRPC full-method names
     // (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
     repeated string requested_scope = 2;
-    // requested_namespaces optionally narrows the token's authority to these namespace ids, so a
-    // token may read or observe only the namespaces it lists. Empty means every namespace the
-    // identity's channel policy allows.
-    repeated string requested_namespaces = 3;
+
+    // 3 held requested_namespaces. Namespace scoping is deferred: only the two resources whose request
+    // names the namespaces it touches can enforce it, so it is a design of its own rather than a field
+    // on the token. See the RFC's "Future work: namespace scoping".
+    reserved 3;
 }
 
 message AuthenticateResponse {
@@ -72,19 +74,15 @@ message AuthorizeRequest {
     // tls_cert_hash is the SHA-256 of the caller's TLS certificate observed at the resource server.
     // It is empty when the caller connected without a client certificate.
     bytes tls_cert_hash = 3;
-    // namespaces are the namespace ids the request actually touches, read out of the request body by
-    // the resource server's interceptor. The AuthService checks them against the token's namespace
-    // scope, so the decision stays here rather than being delegated back to the resource server.
-    repeated string namespaces = 4;
-    // all_namespaces is true when the request is not restricted to particular namespaces - an
-    // unfiltered subscription, for instance. A namespace-scoped token cannot satisfy such a request,
-    // so it is denied rather than being silently narrowed.
-    bool all_namespaces = 5;
+
+    // 4 and 5 held the namespaces the request touches and an all-namespaces flag. With namespace
+    // scoping deferred, a resource server no longer inspects the request body at all.
+    reserved 4, 5;
 }
 
 message AuthorizeResponse {
-    // 2 and 3 held the resolved identity and the token's namespace allowlist. The resource server no
-    // longer needs either - it binds the token, and the AuthService decides on namespaces.
+    // 2 and 3 held the resolved identity and the token's namespace allowlist. The resource server needs
+    // neither: it re-presents the token, and namespace scoping is deferred.
     reserved 2, 3;
 
     // authorized is true when the identity satisfies the resource policy. The RPCs return a gRPC
@@ -100,9 +98,10 @@ message AuthorizeResponse {
 }
 
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
-// in the auth service's identity store. It - not the raw JWT - holds the client's MSP identity, so the
-// identity can be re-resolved against the latest configuration at authorization time and a token can
-// be revoked by deleting the record.
+// in the auth service's token store. It - not the raw JWT - holds the client's MSP identity, so the
+// identity is re-resolved against the latest configuration on every authorization. Records are not
+// deleted to revoke: each instance caches unexpired records, so a delete on one would not be observed
+// by another before the token expired anyway. A token is valid until its expiry.
 message TokenRecord {
     // jti is the opaque token id and the row key.
     string jti = 1;
@@ -115,12 +114,11 @@ message TokenRecord {
     bytes cert_hash_sha256 = 4;
     // scope is the optional least-privilege scope granted at issuance, as gRPC full-method names.
     repeated string scope = 5;
-    // namespaces is the optional namespace allowlist granted at issuance. Unlike scope, which the
-    // interceptor checks against the method name, this is enforced by the resource service against
-    // the namespaces the request body actually touches.
-    repeated string namespaces = 8;
     // issued_sequence is the config sequence the identity was first resolved against.
     uint64 issued_sequence = 6;
     // expires_at is the token expiry in unix seconds, used for TTL cleanup.
     int64 expires_at = 7;
+
+    // 8 held the namespace allowlist granted at issuance; see AuthenticateRequest's reserved 3.
+    reserved 8;
 }

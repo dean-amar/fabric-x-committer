@@ -17,6 +17,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
 const resourceGetTxStatus = "/committerpb.QueryService/GetTransactionStatus"
@@ -86,7 +87,7 @@ func TestAuthenticateScopedTokenLimitsAuthorization(t *testing.T) {
 
 // TestAuthorizeIsRepeatableForStreamRecheck covers how an established stream renews its decision: it
 // re-presents the same token, so the service resolves the token to its record every time. That is what
-// makes revocation observable to a stream, which an identity-only re-check could never see.
+// makes token expiry observable to a stream, which an identity-only re-check could never see.
 func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
@@ -113,103 +114,60 @@ func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 3: Revoke by deleting the record. The token itself is still a validly signed, unexpired JWT,
-	// so only resolving it against the store can catch this - the point of re-presenting the token.
-	t.Log("Step 3: revoke the token record and re-check")
+	// Step 3: A token whose record is gone - swept after expiry, or minted against a store that has
+	// since been reset - must fail even though the JWT itself is still validly signed and unexpired.
+	// Only resolving the token against the store catches that, which is why a stream re-presents it.
+	t.Log("Step 3: drop the token record and re-check")
 	claims, err := svc.authorizer.signer.verify(authResp.GetToken())
 	require.NoError(t, err)
-	require.NoError(t, svc.store.delete(ctx, claims.ID))
+	_, err = svc.tokens.pool.Exec(ctx,
+		"DELETE FROM "+statedb.AuthTokensTableName+" WHERE jti = $1", claims.ID)
+	require.NoError(t, err)
+	svc.tokens.cache.Delete(claims.ID)
 
 	_, err = svc.Authorize(ctx, &servicepb.AuthorizeRequest{
 		Token: authResp.GetToken(), Resource: resourceGetRows,
 	})
 	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err),
-		"a revoked token must fail the re-check even though the JWT is still valid")
+		"a token whose record is absent must fail even though the JWT is still valid")
 }
 
-// TestAuthorizeEnforcesNamespaceScope verifies the AuthService itself decides whether a token may
-// touch the namespaces a request names. The resource server only reports what the request asked for.
-func TestAuthorizeEnforcesNamespaceScope(t *testing.T) {
+// TestChallengeRateLimitRejectsSpam verifies the limit on the two RPCs reachable without a token. It is
+// what stops a caller who holds no credential from spamming IssueNonce - a database row per call - or
+// Authenticate - a signature verification per call - into a denial of service.
+func TestChallengeRateLimitRejectsSpam(t *testing.T) {
 	t.Parallel()
-	env := newAuthTestEnv(t)
-	svc, _ := newAuthServiceForTest(t, env)
-	ctx := context.Background()
+	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 1, ChallengeBurst: 1})
 
-	// The requested scope is normalized on the way in: trimmed and de-duplicated.
-	authResp, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
-		SignedEnvelope:      env.signedEnvelopeWithNonce(t, issueNonce(t, svc), nil),
-		RequestedNamespaces: []string{testNS2, testNS2, " ns3 "},
-	})
-	require.NoError(t, err)
-	scopedToken := authResp.GetToken()
+	require.NoError(t, svc.allowChallenge(t.Context(), "IssueNonce"),
+		"the first call is within the burst")
+	err := svc.allowChallenge(t.Context(), "IssueNonce")
+	require.Equal(t, codes.ResourceExhausted, grpcerror.GetCode(err),
+		"the second call in the same second exhausts a 1/s limit")
 
-	// An unscoped token may touch anything, including every namespace at once.
-	unscoped, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
-		SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), nil),
-	})
-	require.NoError(t, err)
+	// The limit is shared, so Authenticate cannot be used to sidestep a budget IssueNonce has spent.
+	err = svc.allowChallenge(t.Context(), "Authenticate")
+	require.Equal(t, codes.ResourceExhausted, grpcerror.GetCode(err))
+}
 
-	// Permitted cases.
-	for _, tc := range []struct {
-		name    string
-		token   string
-		request *servicepb.AuthorizeRequest
-	}{
-		{
-			name:    "a namespace inside the token's scope",
-			token:   scopedToken,
-			request: &servicepb.AuthorizeRequest{Resource: resourceGetRows, Namespaces: []string{testNS2}},
-		},
-		{
-			name:  "every namespace in the token's scope at once",
-			token: scopedToken,
-			request: &servicepb.AuthorizeRequest{
-				Resource: resourceGetRows, Namespaces: []string{testNS2, testNS3},
-			},
-		},
-		{
-			name:    "an unscoped token asking for every namespace",
-			token:   unscoped.GetToken(),
-			request: &servicepb.AuthorizeRequest{Resource: resourceGetRows, AllNamespaces: true},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			tc.request.Token = tc.token
-			_, err := svc.Authorize(context.Background(), tc.request)
-			require.NoError(t, err)
-		})
+// TestChallengeRateLimitDisabled verifies a zero limit disables throttling rather than rejecting
+// everything, so a test or single-user deployment can opt out.
+func TestChallengeRateLimitDisabled(t *testing.T) {
+	t.Parallel()
+	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 0})
+
+	for range 5 {
+		require.NoError(t, svc.allowChallenge(t.Context(), "IssueNonce"))
 	}
+}
 
-	// Denied cases - the gap this closes: a token bound to ns2 must not read ns1.
-	for _, tc := range []struct {
-		name    string
-		request *servicepb.AuthorizeRequest
-	}{
-		{
-			name:    "a namespace outside the token's scope",
-			request: &servicepb.AuthorizeRequest{Resource: resourceGetRows, Namespaces: []string{testNS1}},
-		},
-		{
-			name: "a permitted namespace mixed with an unpermitted one",
-			request: &servicepb.AuthorizeRequest{
-				Resource: resourceGetRows, Namespaces: []string{testNS2, testNS1},
-			},
-		},
-		{
-			// An unfiltered subscription cannot be satisfied by a scoped token, so it is refused rather
-			// than silently narrowed.
-			name:    "a request for every namespace",
-			request: &servicepb.AuthorizeRequest{Resource: resourceGetRows, AllNamespaces: true},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			tc.request.Token = scopedToken
-			_, err := svc.Authorize(context.Background(), tc.request)
-			require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
-		})
-	}
+// TestConfigRejectsBurstAboveRate verifies the cross-field rule the config loader enforces: a burst
+// larger than the rate would let a caller outrun the limit for a full second.
+func TestConfigRejectsBurstAboveRate(t *testing.T) {
+	t.Parallel()
+	require.Error(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 11}).Validate())
+	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 10}).Validate())
+	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 0, ChallengeBurst: 0}).Validate())
 }
 
 // TestAuthenticateRejectsReplayedNonce verifies the challenge is single-use: replaying a byte-identical
@@ -284,7 +242,11 @@ func TestAuthenticateRejects(t *testing.T) {
 func TestAuthRPCsUnavailableBeforeBundle(t *testing.T) {
 	t.Parallel()
 	metrics := newAuthServiceMetrics()
-	svc := &Service{config: &Config{}, metrics: metrics, provider: newConfigProvider(nil, metrics)}
+	svc := &Service{
+		config:        &Config{},
+		metrics:       metrics,
+		channelConfig: &configProvider{metrics: metrics},
+	}
 
 	_, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{
 		SignedEnvelope: &common.Envelope{Payload: []byte("x")},
@@ -367,4 +329,24 @@ func TestAuthorizeRejects(t *testing.T) {
 			require.Equal(t, tc.wantCode, grpcerror.GetCode(err))
 		})
 	}
+}
+
+// TestAuthorizeReportsStoreFailureAsUnavailable pins the classification a resource server depends on:
+// a store that cannot answer is Unavailable, never a denial. Answering Unauthenticated here would make
+// a database blip tear down every established stream at once, since a resource server treats that code
+// as definitive - the very outcome the stream enforcer's transient tolerance exists to prevent.
+func TestAuthorizeReportsStoreFailureAsUnavailable(t *testing.T) {
+	t.Parallel()
+	env := newAuthTestEnv(t)
+	svc, signer := newAuthServiceForTest(t, env)
+
+	token, err := signer.mint(testRecord("never-stored", time.Now().Add(time.Hour)), time.Now())
+	require.NoError(t, err)
+
+	// The token itself verifies, so authorization reaches the store - which can no longer answer, and
+	// so cannot report the record as merely absent.
+	svc.tokens.pool.Close()
+
+	_, err = svc.Authorize(t.Context(), &servicepb.AuthorizeRequest{Token: token, Resource: resourceGetRows})
+	require.Equal(t, codes.Unavailable, grpcerror.GetCode(err))
 }

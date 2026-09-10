@@ -17,39 +17,37 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
 const (
-	sqlInsertRecord    = `INSERT INTO auth_tokens (jti, record, expires_at) VALUES ($1, $2, $3)`
-	sqlSelectRecord    = `SELECT record FROM auth_tokens WHERE jti = $1`
-	sqlDeleteRecord    = `DELETE FROM auth_tokens WHERE jti = $1`
-	sqlDeleteExpired   = `DELETE FROM auth_tokens WHERE expires_at < $1`
-	sqlSelectUnexpired = `SELECT record FROM auth_tokens WHERE expires_at >= $1`
+	// The token table is created by `init-db` with the rest of the system schema, so these statements
+	// name it through statedb's constant rather than a literal of their own.
+	sqlInsertRecord = "INSERT INTO " + statedb.AuthTokensTableName +
+		" (jti, record, expires_at) VALUES ($1, $2, $3)"
+	sqlSelectRecord        = "SELECT record FROM " + statedb.AuthTokensTableName + " WHERE jti = $1"
+	sqlDeleteExpiredTokens = "DELETE FROM " + statedb.AuthTokensTableName + " WHERE expires_at < $1"
+	sqlSelectUnexpired     = "SELECT record FROM " + statedb.AuthTokensTableName + " WHERE expires_at >= $1"
 )
 
-// ErrTokenNotFound is returned when a token record is absent from the store, meaning the token is
-// unknown or has been revoked.
+// ErrTokenNotFound is returned when a token record is absent from the store, meaning the token was
+// never issued by this deployment or has expired and been swept.
 var ErrTokenNotFound = errors.New("token record not found")
 
 // tokenStore is the token-to-identity binding store: it maps a token id (jti) to the client's
 // resolved MSP identity (plus its certificate binding, scope, and expiry), persisted in the
 // dedicated auth_tokens namespace and fronted by an in-memory read-through cache. Authenticate
 // writes a binding here; Authorize reads it to recover the identity a token stands for. The database
-// is the single source of truth, so any AuthService instance can resolve any token and revocation is
-// a row delete. The cache accelerates repeated lookups; a stale cache entry can only be honored until
-// the token's own expiry (verified before the store is consulted), which bounds cross-instance
-// revocation latency by the token TTL.
+// is the single source of truth, so any AuthService instance can resolve any token. The cache
+// accelerates repeated lookups and is safe because a cached record can only be honored until the
+// token's own expiry, which the signature check verifies before the store is ever consulted. Tokens
+// are not revocable: deleting a record would not reach another instance's cache before the token
+// expired anyway, so expiry is the only bound on a token's life.
 type tokenStore struct {
-	pool  *pgxpool.Pool
-	cache *utils.SyncMap[string, *servicepb.TokenRecord]
-}
-
-// newTokenStore creates a token store backed by the given pool.
-func newTokenStore(pool *pgxpool.Pool) *tokenStore {
-	return &tokenStore{
-		pool:  pool,
-		cache: &utils.SyncMap[string, *servicepb.TokenRecord]{},
-	}
+	pool *pgxpool.Pool
+	// cache is held by value: SyncMap is usable at its zero value, so a tokenStore needs no
+	// constructor to be ready.
+	cache utils.SyncMap[string, *servicepb.TokenRecord]
 }
 
 // warmCache loads all unexpired token records into the cache, so recently issued tokens resolve
@@ -114,29 +112,17 @@ func (s *tokenStore) get(ctx context.Context, jti string) (*servicepb.TokenRecor
 	return rec, nil
 }
 
-// delete revokes a token by removing its record from the database and the local cache; other
-// instances' caches self-heal when the token expires. This is the operational revocation primitive
-// the design refers to. It is not yet exposed through a client-facing RPC: revocation is performed
-// out of band (an admin/operational path), so a Revoke RPC is intentionally left for a follow-up.
-func (s *tokenStore) delete(ctx context.Context, jti string) error {
-	if _, err := s.pool.Exec(ctx, sqlDeleteRecord, jti); err != nil {
-		return errors.Wrap(err, "failed to delete token record")
-	}
-	s.cache.Delete(jti)
-	return nil
-}
-
 // sweep deletes token records that expired before now from the database and evicts them from the
 // cache, so neither grows unbounded. It returns the number of rows deleted.
 func (s *tokenStore) sweep(ctx context.Context, now time.Time) (int64, error) {
-	cutoff := now.Unix()
-	tag, err := s.pool.Exec(ctx, sqlDeleteExpired, cutoff)
+	cutoffSeconds := now.Unix()
+	tag, err := s.pool.Exec(ctx, sqlDeleteExpiredTokens, cutoffSeconds)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to sweep expired token records")
 	}
 
 	for jti, rec := range s.cache.IterItems() {
-		if rec.GetExpiresAt() < cutoff {
+		if rec.GetExpiresAt() < cutoffSeconds {
 			s.cache.Delete(jti)
 		}
 	}

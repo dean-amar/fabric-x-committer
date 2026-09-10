@@ -47,26 +47,39 @@ var (
 	ErrEnvelopeScope = errors.New("envelope is not an authentication request for this channel")
 )
 
-// verifiedIdentity is the outcome of authenticating an envelope: the client's MSP identity
-// (re-resolved against the latest configuration at authorization time), its MSP id, and the SHA-256 of
-// its TLS certificate (nil when the client connected without a certificate).
-type verifiedIdentity struct {
-	identity *msppb.Identity
-	mspID    string
-	certHash []byte
-}
+type (
+	// authenticator verifies signed envelopes and issues cert-bound tokens, persisting the resulting
+	// token-to-identity binding in the token store. It has no constructor: every field is supplied by
+	// its single caller, so a keyed struct literal says the same thing without a second type to keep in
+	// step with this one.
+	authenticator struct {
+		signer          *tokenSigner
+		tokens          *tokenStore
+		nonces          *nonceStore
+		freshnessWindow time.Duration
+		tokenTTL        time.Duration
+	}
 
-// authenticator verifies signed envelopes and issues cert-bound tokens, persisting the resulting
-// token-to-identity binding in the identity store. It has no constructor: every field is supplied by
-// its single caller, so a keyed struct literal says the same thing without a second type to keep in
-// step with this one.
-type authenticator struct {
-	signer          *tokenSigner
-	store           *tokenStore
-	nonces          *nonceStore
-	freshnessWindow time.Duration
-	tokenTTL        time.Duration
-}
+	// parsedEnvelope holds the pieces of a signed envelope that verifyEnvelope inspects: the channel
+	// header, the application payload bytes (empty for a genuine authentication envelope), the nonce the
+	// client claims from the SignatureHeader, and the single signed-data unit (serialized identity,
+	// signed payload bytes, and signature).
+	parsedEnvelope struct {
+		chdr        *common.ChannelHeader
+		payloadData []byte
+		nonce       []byte
+		signedData  *protoutil.SignedData
+	}
+
+	// verifiedIdentity is the outcome of authenticating an envelope: the client's MSP identity
+	// (re-resolved against the latest configuration at authorization time), its MSP id, and the SHA-256
+	// of its TLS certificate (nil when the client connected without a certificate).
+	verifiedIdentity struct {
+		identity *msppb.Identity
+		mspID    string
+		certHash []byte
+	}
+)
 
 // authenticate verifies the signed envelope against the bundle, persists the token-to-identity
 // binding, and returns a freshly minted cert-bound token. It returns gRPC status errors:
@@ -111,7 +124,6 @@ func (a *authenticator) authenticate(
 		MspId:          identity.mspID,
 		CertHashSha256: identity.certHash,
 		Scope:          normalizeScope(req.GetRequestedScope()),
-		Namespaces:     normalizeScope(req.GetRequestedNamespaces()),
 		IssuedSequence: bundle.ConfigtxValidator().Sequence(),
 		ExpiresAt:      now.Add(a.tokenTTL).Unix(),
 	}
@@ -123,7 +135,7 @@ func (a *authenticator) authenticate(
 		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapInternalError(err)
 	}
-	if err = a.store.put(ctx, rec); err != nil {
+	if err = a.tokens.put(ctx, rec); err != nil {
 		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapInternalError(err)
 	}
@@ -206,17 +218,6 @@ func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) 
 		return nil, ErrCertBindingMismatch
 	}
 	return actualHash, nil
-}
-
-// parsedEnvelope holds the pieces of a signed envelope that verifyEnvelope inspects: the channel
-// header, the application payload bytes (empty for a genuine authentication envelope), the nonce the
-// client claims from the SignatureHeader, and the single signed-data unit (serialized identity,
-// signed payload bytes, and signature).
-type parsedEnvelope struct {
-	chdr        *common.ChannelHeader
-	payloadData []byte
-	nonce       []byte
-	signedData  *protoutil.SignedData
 }
 
 // parseSignedEnvelope unpacks an envelope into the pieces verifyEnvelope inspects. The nonce comes from

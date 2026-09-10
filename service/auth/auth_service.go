@@ -10,8 +10,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
@@ -38,16 +40,18 @@ type Service struct {
 
 	// Set by the constructor. These need no I/O, so they exist for the lifetime of the Service and are
 	// safe to touch before Run.
-	config      *Config
-	metrics     *perfMetrics
+	config  *Config
+	metrics *perfMetrics
+	// challenges throttles the two RPCs reachable without a token. Nil when the limit is disabled.
+	challenges  *rate.Limiter
 	ready       *channel.Ready
 	healthcheck *health.Server
 
 	// Set by Run, once the database pool and signing key are open, since none of them can exist
 	// without those. They are nil until then; the gRPC handlers may rely on them because serve does
 	// not start the server until WaitForReady returns, which Run signals only after wiring them.
-	provider      *configProvider
-	store         *tokenStore
+	channelConfig *configProvider
+	tokens        *tokenStore
 	nonces        *nonceStore
 	authenticator *authenticator
 	authorizer    *authorizer
@@ -56,20 +60,32 @@ type Service struct {
 // NewAuthService creates a new AuthService from a configuration. It performs only in-memory wiring;
 // the database pool, signing key, and background loops are opened in Run.
 func NewAuthService(config *Config) *Service {
-	return &Service{
+	svc := &Service{
 		config:      config,
 		metrics:     newAuthServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
 	}
+	if config.ChallengeRequestsPerSecond > 0 {
+		svc.challenges = rate.NewLimiter(
+			rate.Limit(config.ChallengeRequestsPerSecond), config.ChallengeBurst,
+		)
+		logger.Infof("Challenge rate limit: %d/s (burst %d) across IssueNonce and Authenticate",
+			config.ChallengeRequestsPerSecond, config.ChallengeBurst)
+	} else {
+		logger.Warn("Challenge rate limiting is disabled: IssueNonce and Authenticate are reachable " +
+			"without a token, so an unthrottled caller can spam them.")
+	}
+	return svc
 }
 
 // Run opens the signing key and the database pool, builds the collaborators that need them, warms the
 // token cache, signals readiness, and blocks on the background loops until the context is done.
 //
 // Everything that can fail lives here rather than in NewAuthService, so constructing a Service is always
-// safe and a failure can be returned. It does not create its tables: schema is applied once by the
-// `init-db` command (see SetupTables), so a running service needs no DDL privileges.
+// safe and a failure can be returned. It does not create its tables: they are part of the system schema
+// the `init-db` command applies (statedb.SetupSystemTablesAndNamespaces), so a running service needs no
+// DDL privileges.
 func (s *Service) Run(ctx context.Context) error {
 	logger.Infof("Starting auth service (token TTL: %s)", s.config.TokenTTL)
 
@@ -84,25 +100,25 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	s.store = newTokenStore(pool)
-	s.nonces = newNonceStore(pool, s.config.NonceTTL)
-	s.provider = newConfigProvider(pool, s.metrics)
+	s.tokens = &tokenStore{pool: pool}
+	s.nonces = &nonceStore{pool: pool, ttl: s.config.NonceTTL}
+	s.channelConfig = &configProvider{pool: pool, metrics: s.metrics}
 	s.authenticator = &authenticator{
 		signer:          signer,
-		store:           s.store,
+		tokens:          s.tokens,
 		nonces:          s.nonces,
 		freshnessWindow: s.config.EnvelopeFreshnessWindow,
 		tokenTTL:        s.config.TokenTTL,
 	}
-	s.authorizer = newAuthorizer(signer, s.store)
+	s.authorizer = &authorizer{signer: signer, tokens: s.tokens}
 
-	if warmed, warmErr := s.store.warmCache(ctx, time.Now()); warmErr != nil {
+	if warmed, warmErr := s.tokens.warmCache(ctx, time.Now()); warmErr != nil {
 		// A warm-up failure is non-fatal: bindings still resolve from the database on demand.
 		logger.Warnf("Token store warm-up failed: %v", warmErr)
 	} else {
 		logger.Infof("Warmed token store with %d records", warmed)
 	}
-	promutil.SetGauge(s.metrics.tokenStoreSize, s.store.size())
+	promutil.SetGauge(s.metrics.tokenStoreSize, s.tokens.size())
 
 	s.ready.SignalReady()
 	defer s.ready.Reset()
@@ -112,7 +128,7 @@ func (s *Service) Run(ctx context.Context) error {
 	// logs transient database errors and returns when the context ends, so the service stays up
 	// (returning Unavailable for auth operations) rather than tearing itself down.
 	g, gCtx := errgroup.WithContext(ctx)
-	g.Go(func() error { s.provider.run(gCtx, s.config.ConfigRefreshInterval); return nil })
+	g.Go(func() error { s.channelConfig.run(gCtx, s.config.ConfigRefreshInterval); return nil })
 	g.Go(func() error { s.sweepExpiredLoop(gCtx); return nil })
 	return g.Wait()
 }
@@ -127,7 +143,7 @@ func (s *Service) sweepExpiredLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			now := time.Now()
-			deleted, err := s.store.sweep(ctx, now)
+			deleted, err := s.tokens.sweep(ctx, now)
 			if err != nil {
 				logger.Errorf("Token sweep failed: %v", err)
 				continue
@@ -135,7 +151,7 @@ func (s *Service) sweepExpiredLoop(ctx context.Context) {
 			if deleted > 0 {
 				logger.Infof("Swept %d expired token records", deleted)
 			}
-			promutil.SetGauge(s.metrics.tokenStoreSize, s.store.size())
+			promutil.SetGauge(s.metrics.tokenStoreSize, s.tokens.size())
 
 			// Unredeemed nonces accumulate whenever a client asks for one and never authenticates,
 			// so they are swept on the same tick as tokens.
@@ -168,6 +184,9 @@ func (s *Service) RegisterService(srv serve.Servers) {
 func (s *Service) IssueNonce(
 	ctx context.Context, _ *servicepb.IssueNonceRequest,
 ) (*servicepb.IssueNonceResponse, error) {
+	if err := s.allowChallenge(ctx, "IssueNonce"); err != nil {
+		return nil, err
+	}
 	nonce, expiresAt, err := s.nonces.issue(ctx, time.Now())
 	if err != nil {
 		logger.Errorf("%+v", err)
@@ -181,7 +200,10 @@ func (s *Service) IssueNonce(
 func (s *Service) Authenticate(
 	ctx context.Context, req *servicepb.AuthenticateRequest,
 ) (*servicepb.AuthenticateResponse, error) {
-	bundle, err := s.provider.current()
+	if err := s.allowChallenge(ctx, "Authenticate"); err != nil {
+		return nil, err
+	}
+	bundle, err := s.channelConfig.current()
 	if err != nil {
 		return nil, grpcerror.WrapUnavailable(err)
 	}
@@ -189,15 +211,28 @@ func (s *Service) Authenticate(
 }
 
 // Authorize evaluates a token against a resource policy for a resource server. A resource server
-// calls it at every RPC and, for a stream, whenever its cached decision lapses, so token expiry,
-// revocation, and configuration changes all take effect without the stream re-presenting anything
-// other than the token it was established with.
+// calls it at every RPC and, for a stream, whenever its cached decision lapses, so token expiry and
+// configuration changes both take effect without the stream re-presenting anything other than the
+// token it was established with.
 func (s *Service) Authorize(
 	ctx context.Context, req *servicepb.AuthorizeRequest,
 ) (*servicepb.AuthorizeResponse, error) {
-	bundle, err := s.provider.current()
+	bundle, err := s.channelConfig.current()
 	if err != nil {
 		return nil, grpcerror.WrapUnavailable(err)
 	}
 	return s.authorizer.authorize(ctx, req, bundle)
+}
+
+// allowChallenge rejects an IssueNonce or Authenticate call that exceeds the challenge rate limit. It
+// covers only those two: they are the RPCs a caller can reach without already holding a token, and each
+// costs the service real work. Authorize is deliberately excluded, since its rate is the resource
+// servers' RPC rate and throttling it would throttle the data path.
+func (s *Service) allowChallenge(ctx context.Context, method string) error {
+	if s.challenges == nil || s.challenges.Allow() {
+		return nil
+	}
+	logger.Warnf("Challenge rate limit exceeded; rejecting %s", method)
+	return grpcerror.WrapResourceExhaustedOrCancelled(ctx,
+		errors.Newf("%s rate limit exceeded", method))
 }

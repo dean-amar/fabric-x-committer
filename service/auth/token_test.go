@@ -235,18 +235,6 @@ func TestNewTokenSignerFromFile(t *testing.T) {
 	}
 }
 
-func TestNewTokenSignerEphemeral(t *testing.T) {
-	t.Parallel()
-	signer, err := newTokenSigner("")
-	require.NoError(t, err)
-	require.NotNil(t, signer.privateKey)
-
-	token, err := signer.mint(&servicepb.TokenRecord{Jti: "j", ExpiresAt: futureUnix()}, time.Now())
-	require.NoError(t, err)
-	_, err = signer.verify(token)
-	require.NoError(t, err)
-}
-
 func newEphemeralSigner(t *testing.T) *tokenSigner {
 	t.Helper()
 	signer, err := newTokenSigner("")

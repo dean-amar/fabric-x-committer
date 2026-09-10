@@ -201,18 +201,16 @@ func selfSignedCert(t *testing.T) *x509.Certificate {
 	return cert
 }
 
-// newTokenStoreForTest provisions a database and returns a token store whose table has been created.
-// It applies the schema through SetupTables, the same path the `init-db` command uses, so the tests
-// exercise the tables an operator would actually have created.
+// newTokenStoreForTest provisions a database and returns a token store over it. The auth tables are
+// part of the system schema NewDatabaseTestEnv already applies, so the tests exercise exactly the
+// tables `init-db` creates for an operator.
 func newTokenStoreForTest(t *testing.T) *tokenStore {
 	t.Helper()
 	dbEnv := vc.NewDatabaseTestEnv(t)
-	require.NoError(t, SetupTables(t.Context(), dbEnv.DBConf))
-
 	pool, err := statedb.NewPool(t.Context(), dbEnv.DBConf)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	return newTokenStore(pool)
+	return &tokenStore{pool: pool}
 }
 
 // newAuthServiceForTest wires a fully operational Service - database-backed store, ephemeral signer,
@@ -225,24 +223,24 @@ func newAuthServiceForTest(t *testing.T, env *authTestEnv) (*Service, *tokenSign
 	require.NoError(t, err)
 
 	cfg := &Config{TokenTTL: 5 * time.Minute, EnvelopeFreshnessWindow: time.Minute, NonceTTL: time.Minute}
-	nonces := newNonceStore(store.pool, cfg.NonceTTL)
+	nonces := &nonceStore{pool: store.pool, ttl: cfg.NonceTTL}
 
 	svc := &Service{
 		config:  cfg,
 		metrics: newAuthServiceMetrics(),
-		store:   store,
+		tokens:  store,
 		nonces:  nonces,
 		authenticator: &authenticator{
 			signer:          signer,
-			store:           store,
+			tokens:          store,
 			nonces:          nonces,
 			freshnessWindow: cfg.EnvelopeFreshnessWindow,
 			tokenTTL:        cfg.TokenTTL,
 		},
-		authorizer: newAuthorizer(signer, store),
+		authorizer: &authorizer{signer: signer, tokens: store},
 	}
-	svc.provider = newConfigProvider(store.pool, svc.metrics)
-	svc.provider.bundle.Store(env.bundle)
+	svc.channelConfig = &configProvider{pool: store.pool, metrics: svc.metrics}
+	svc.channelConfig.bundle.Store(env.bundle)
 	return svc, signer
 }
 

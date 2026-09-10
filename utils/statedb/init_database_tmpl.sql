@@ -51,3 +51,32 @@ EXCEPTION
         RETURN COALESCE(violating, '{}');
 END;
 $$ LANGUAGE plpgsql;
+
+-- The auth service's tables. They hold authentication state, not committer state, so they are plain
+-- system tables rather than ns_<id> namespaces: nothing reads them through the namespace machinery,
+-- and their rows are short-lived (both are swept once expired).
+
+-- One row per issued token, keyed by its JWT id (jti). The record column stores a proto-marshaled
+-- servicepb.TokenRecord; expires_at is duplicated out of it as an indexed column so the sweep does
+-- not have to unmarshal every row to find the expired ones.
+CREATE TABLE IF NOT EXISTS auth_tokens
+(
+    jti        TEXT   NOT NULL PRIMARY KEY,
+    record     BYTEA  NOT NULL,
+    expires_at BIGINT NOT NULL
+)${SPLIT_INTO_TABLETS};
+
+CREATE INDEX IF NOT EXISTS auth_tokens_expires_at ON auth_tokens (expires_at);
+
+-- One row per issued authentication nonce. A single row DELETE is what makes a nonce single-use: it
+-- removes exactly one row (valid and unused) or none (unknown, already consumed, or expired), so two
+-- concurrent redemptions cannot both succeed. The rows live here, in the shared state database,
+-- rather than in one instance's memory, so a nonce issued by one AuthService instance is redeemable
+-- at any other - a client reaching the service through a load balancer needs that.
+CREATE TABLE IF NOT EXISTS auth_nonces
+(
+    nonce      BYTEA  NOT NULL PRIMARY KEY,
+    expires_at BIGINT NOT NULL
+)${SPLIT_INTO_TABLETS};
+
+CREATE INDEX IF NOT EXISTS auth_nonces_expires_at ON auth_nonces (expires_at);

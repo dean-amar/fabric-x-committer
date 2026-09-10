@@ -49,59 +49,80 @@ func TestVerifyEnvelopeSuccess(t *testing.T) {
 	})
 }
 
-func TestVerifyEnvelopeRejectsStaleAndMismatch(t *testing.T) {
+// TestVerifyEnvelopeRejects covers every way a well-formed envelope can still fail verification. The
+// transaction-shaped case is the notable one: it shares a real transaction's header type and channel and
+// differs only by carrying application payload, which is what stops a committed transaction from being
+// replayed to mint a token in its signer's name.
+func TestVerifyEnvelopeRejects(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
 
-	// Stale: the envelope is stamped ~now, so validating an hour ahead makes it stale.
-	_, err := testVerifier().verifyEnvelope(
-		context.Background(), mustParse(t, env.signedEnvelope(t, nil)), env.bundle, time.Now().Add(time.Hour),
-	)
-	require.ErrorIs(t, err, ErrStaleEnvelope)
-
-	// Certificate binding mismatch: the envelope is bound to a different hash than the connection's.
-	ctx, _ := peerContextWithCert(t)
-	_, err = testVerifier().verifyEnvelope(
-		ctx, mustParse(t, env.signedEnvelope(t, []byte{0xDE, 0xAD})), env.bundle, time.Now(),
-	)
-	require.ErrorIs(t, err, ErrCertBindingMismatch)
+	for _, tc := range []struct {
+		name string
+		// certBound runs the case on a connection that presents a client certificate.
+		certBound bool
+		envelope  *common.Envelope
+		now       time.Time
+		wantErr   error
+	}{
+		{
+			name:     "timestamp outside the freshness window",
+			envelope: env.signedEnvelope(t, nil),
+			now:      time.Now().Add(time.Hour),
+			wantErr:  ErrStaleEnvelope,
+		},
+		{
+			name:      "claimed certificate hash does not match the connection",
+			certBound: true,
+			envelope:  env.signedEnvelope(t, []byte{0xDE, 0xAD}),
+			now:       time.Now(),
+			wantErr:   ErrCertBindingMismatch,
+		},
+		{
+			name:     "envelope is scoped to another channel",
+			envelope: env.signedEnvelopeFor(t, common.HeaderType_MESSAGE, "other-channel", nil),
+			now:      time.Now(),
+			wantErr:  ErrEnvelopeScope,
+		},
+		{
+			name:     "header type is not an authentication request",
+			envelope: env.signedEnvelopeFor(t, common.HeaderType_ENDORSER_TRANSACTION, testChannelID, nil),
+			now:      time.Now(),
+			wantErr:  ErrEnvelopeScope,
+		},
+		{
+			name: "transaction-shaped envelope carries application payload",
+			envelope: env.signedEnvelopeWithPayload(
+				t, common.HeaderType_MESSAGE, testChannelID, wrapperspb.String("transaction-body"),
+			),
+			now:     time.Now(),
+			wantErr: ErrEnvelopeScope,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			if tc.certBound {
+				ctx, _ = peerContextWithCert(t)
+			}
+			_, err := testVerifier().verifyEnvelope(ctx, mustParse(t, tc.envelope), env.bundle, tc.now)
+			require.ErrorIs(t, err, tc.wantErr)
+		})
+	}
 }
 
-func TestVerifyEnvelopeRejectsWrongScope(t *testing.T) {
-	t.Parallel()
-	env := newAuthTestEnv(t)
-
-	// An envelope for a different channel is rejected.
-	wrongChannel := env.signedEnvelopeFor(t, common.HeaderType_MESSAGE, "other-channel", nil)
-	_, err := testVerifier().verifyEnvelope(context.Background(), mustParse(t, wrongChannel), env.bundle, time.Now())
-	require.ErrorIs(t, err, ErrEnvelopeScope)
-
-	// An envelope with a non-authentication header type is rejected, even for the right channel.
-	wrongType := env.signedEnvelopeFor(t, common.HeaderType_ENDORSER_TRANSACTION, testChannelID, nil)
-	_, err = testVerifier().verifyEnvelope(context.Background(), mustParse(t, wrongType), env.bundle, time.Now())
-	require.ErrorIs(t, err, ErrEnvelopeScope)
-
-	// A transaction-shaped envelope - the same header type and channel a real transaction uses, but
-	// carrying a non-empty application payload - must be rejected. Any channel reader can observe a
-	// committed transaction, so accepting one here would let it be replayed to mint a token in its
-	// signer's name.
-	txShaped := env.signedEnvelopeWithPayload(
-		t, common.HeaderType_MESSAGE, testChannelID, wrapperspb.String("transaction-body"),
-	)
-	_, err = testVerifier().verifyEnvelope(context.Background(), mustParse(t, txShaped), env.bundle, time.Now())
-	require.ErrorIs(t, err, ErrEnvelopeScope)
-}
-
+// TestVerifyEnvelopeRejectsForeignIdentity needs a second, independent crypto set, so it cannot share
+// the table above: the envelope is perfectly well-formed and signed, and fails only because the identity
+// resolves against no MSP in this channel's configuration.
 func TestVerifyEnvelopeRejectsForeignIdentity(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
-	foreign := newAuthTestEnv(t) // a different crypto set, so its identity is not in env's MSP
+	foreign := newAuthTestEnv(t)
 
-	// A foreign identity is well-formed, so it parses; it fails when resolved against this MSP manager.
 	_, err := testVerifier().verifyEnvelope(
 		context.Background(), mustParse(t, foreign.signedEnvelope(t, nil)), env.bundle, time.Now(),
 	)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "failed to deserialize identity")
 }
 
 // TestParseSignedEnvelopeRejectsMalformed covers the layer below verifyEnvelope. The envelope arrives as

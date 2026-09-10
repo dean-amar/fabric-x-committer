@@ -58,13 +58,13 @@ type (
 	// Service is a gRPC service that implements the QueryServiceServer interface.
 	Service struct {
 		committerpb.UnimplementedQueryServiceServer
-		batcher      viewsBatcher
-		config       *Config
-		metrics      *perfMetrics
-		ready        *channel.Ready
-		healthcheck  *health.Server
-		tlsUpdater   serve.DynamicTLSUpdater
-		authEnforcer *acl.Enforcer
+		batcher     viewsBatcher
+		config      *Config
+		metrics     *perfMetrics
+		ready       *channel.Ready
+		healthcheck *health.Server
+		tlsUpdater  serve.DynamicTLSUpdater
+		aclEnforcer *acl.Enforcer
 	}
 )
 
@@ -78,14 +78,11 @@ func NewQueryService(config *Config) (*Service, error) {
 	}
 	// Dialled here rather than in Run, so the enforcer exists before serve builds the gRPC server:
 	// whether ACL is enforced then follows from configuration alone, never from startup ordering.
-	if config.Auth != nil {
-		enforcer, err := acl.Dial(config.Auth)
-		if err != nil {
-			return nil, err
-		}
-		queryService.authEnforcer = enforcer
-		logger.Infof("ACL enforcement enabled via auth service at %s", config.Auth.Server.Endpoint.Address())
+	enforcer, err := acl.NewEnforcer(config.Auth)
+	if err != nil {
+		return nil, err
 	}
+	queryService.aclEnforcer = enforcer
 
 	return queryService, nil
 }
@@ -99,7 +96,7 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
 	// Nil-safe, so it needs no guard for a service without an auth section.
-	defer q.authEnforcer.Close()
+	defer q.aclEnforcer.Close()
 
 	pool, poolErr := statedb.NewPool(ctx, q.config.Database)
 	if poolErr != nil {
@@ -148,7 +145,7 @@ func (q *Service) RegisterService(s serve.Servers) {
 // ACLEnforcer exposes the enforcer built by the constructor, so serve installs its interceptors when it
 // builds the gRPC server. Nil when no auth service is configured, which serves without enforcement.
 func (q *Service) ACLEnforcer() *acl.Enforcer {
-	return q.authEnforcer
+	return q.aclEnforcer
 }
 
 // BeginView implements the query-service interface.

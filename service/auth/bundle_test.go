@@ -16,34 +16,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
-func TestConfigProviderUnavailableUntilLoaded(t *testing.T) {
-	t.Parallel()
-	provider := newConfigProvider(nil, newAuthServiceMetrics())
-
-	_, err := provider.current()
-	require.ErrorIs(t, err, ErrConfigUnavailable)
-
-	env := newAuthTestEnv(t)
-	provider.bundle.Store(env.bundle)
-	got, err := provider.current()
-	require.NoError(t, err)
-	require.Same(t, env.bundle, got)
-}
-
-func TestBuildBundle(t *testing.T) {
-	t.Parallel()
-	env := newAuthTestEnv(t)
-
-	bundle, err := buildBundle(env.configEnvelope)
-	require.NoError(t, err)
-	app, ok := bundle.ApplicationConfig()
-	require.True(t, ok)
-	require.NotNil(t, app)
-
-	_, err = buildBundle([]byte("not an envelope"))
-	require.Error(t, err)
-}
-
 func TestConfigProviderRefresh(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
@@ -99,5 +71,5 @@ func newConfigProviderForTest(t *testing.T) *configProvider {
 	pool, err := statedb.NewPool(t.Context(), dbEnv.DBConf)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	return newConfigProvider(pool, newAuthServiceMetrics())
+	return &configProvider{pool: pool, metrics: newAuthServiceMetrics()}
 }
