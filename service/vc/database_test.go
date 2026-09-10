@@ -30,6 +30,8 @@ func TestTablesAndMethods(t *testing.T) {
 
 	expectedTables := []string{
 		"metadata", "tx_status",
+		// The auth service's tables are part of the same system schema; they carry no methods.
+		"auth_tokens", "auth_nonces",
 		"ns__meta", "ns__config", "ns__snapshot", "ns__checkpoint",
 		"ns_a", "ns_b",
 	}
