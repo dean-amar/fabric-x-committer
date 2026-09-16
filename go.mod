@@ -191,4 +191,4 @@ require (
 
 // TEMPORARY: local fabric-x-common with the `auth` test peer (branch acl-preparation), needed for the
 // AuthService's own TLS certificate. Drop this once that change is released upstream.
-replace github.com/hyperledger/fabric-x-common => /Users/deanamar/ClonedForkedFabricXCommon/fabric-x-common
+replace github.com/hyperledger/fabric-x-common => github.com/dean-amar/fabric-x-common v0.0.0-20260916174738-4f66b6721a2e
