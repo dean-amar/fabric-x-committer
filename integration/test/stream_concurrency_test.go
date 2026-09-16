@@ -28,7 +28,7 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	// The runtime's Start opens 2 long-lived streams:
 	//   1. Deliver stream (startBlockDelivery)
 	//   2. Notification stream (OpenNotificationStream)
-	//   3. Notification block stream (StreamAllTransactions)
+	//   3. Notification block stream (StreamBlocks)
 	// With MaxConcurrentStreams=4, exactly 1 slot remain for the test.
 	const maxStreams = 4
 	c := runner.NewRuntime(t, &runner.Config{
@@ -54,7 +54,7 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	// This proves both stream types share the same concurrency pool.
 	// The Deliver stream uses a cancellable context so we can release it later.
 	deliverClient := peer.NewDeliverClient(conn)
-	notifyClient := committerpb.NewNotifierClient(conn)
+	notifyClient := committerpb.NewSidecarServiceClient(conn)
 
 	deliverCtx, deliverCancel := context.WithCancel(t.Context())
 	_, err = deliverClient.Deliver(deliverCtx)
@@ -86,7 +86,7 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	}
 	requireResourceExhausted(t, err)
 
-	rejectedStreamAll, err := notifyClient.StreamAllTransactions(t.Context(), nil)
+	rejectedStreamAll, err := notifyClient.StreamBlocks(t.Context(), nil)
 	if err == nil {
 		_, err = rejectedStreamAll.Recv()
 	}

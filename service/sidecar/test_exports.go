@@ -15,6 +15,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
@@ -27,7 +28,7 @@ import (
 // RequireNotifications verifies that the expected notification were received.
 func RequireNotifications( //nolint:revive // argument-limit.
 	t *testing.T,
-	notifyStream committerpb.Notifier_OpenNotificationStreamClient,
+	notifyStream grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse],
 	expectedBlockNumber uint64,
 	txIDs []string,
 	status []committerpb.Status,
@@ -56,11 +57,11 @@ func RequireNotifications( //nolint:revive // argument-limit.
 	}, 15*time.Second, 50*time.Millisecond)
 }
 
-// RequireStreamAllTransactions verifies that the expected transactions were received
-// from the StreamAllTransactions stream.
-func RequireStreamAllTransactions( //nolint:revive // argument-limit.
+// RequireStreamBlocks verifies that the expected transactions were received
+// from the StreamBlocks stream.
+func RequireStreamBlocks( //nolint:revive // argument-limit.
 	t *testing.T,
-	stream committerpb.Notifier_StreamAllTransactionsClient,
+	stream grpc.ServerStreamingClient[committerpb.BlockEvent],
 	expectedBlockNumber uint64,
 	txIDs []string,
 	status []committerpb.Status,

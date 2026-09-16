@@ -51,10 +51,10 @@ var logger = flogging.MustGetLogger("sidecar")
 // it aggregates the transaction status and forwards the validated block to clients who have
 // registered on the ledger server.
 //   - Implements peer.DeliverServer by streaming blocks from a blockStore.
-//   - Implements committerpb.BlockQueryServiceServer by delegating
-//     read-only queries directly to the underlying block store.
+//   - Implements committerpb.SidecarServiceServer: read-only block queries are answered directly
+//     from the block store, and the notification streams are delegated to the notifier.
 type Service struct {
-	committerpb.UnimplementedBlockQueryServiceServer
+	committerpb.UnimplementedSidecarServiceServer
 	deliveryParams deliverorderer.Parameters
 	relay          *relay
 	notifier       *notifier
@@ -226,8 +226,7 @@ func (s *Service) Run(ctx context.Context) error {
 // RegisterService registers the sidecar's gRPC services and monitoring server.
 func (s *Service) RegisterService(srv serve.Servers) {
 	peer.RegisterDeliverServer(srv.GRPC, s)
-	committerpb.RegisterBlockQueryServiceServer(srv.GRPC, s)
-	committerpb.RegisterNotifierServer(srv.GRPC, s.notifier)
+	committerpb.RegisterSidecarServiceServer(srv.GRPC, s)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
 	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
@@ -793,4 +792,20 @@ func logAndWrapCoordinatorError(err error, contextMsg string) error {
 	}
 
 	return errors.Wrap(err, contextMsg)
+}
+
+// OpenNotificationStream and StreamBlocks satisfy the notification half of SidecarServiceServer by
+// delegating to the notifier. Upstream consolidated the former Notifier and SidecarService into one
+// SidecarService, so a single type must answer both halves; the notifier still owns the subscription
+// state and this only forwards to it.
+func (s *Service) OpenNotificationStream(
+	stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse],
+) error {
+	return s.notifier.OpenNotificationStream(stream)
+}
+
+func (s *Service) StreamBlocks(
+	req *committerpb.StreamBlocksRequest, stream grpc.ServerStreamingServer[committerpb.BlockEvent],
+) error {
+	return s.notifier.StreamBlocks(req, stream)
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -51,7 +52,7 @@ type sidecarTestEnv struct {
 
 	sidecar        *Service
 	committedBlock chan *common.Block
-	notifyStream   committerpb.Notifier_OpenNotificationStreamClient
+	notifyStream   grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse]
 }
 
 type sidecarTestConfig struct {
@@ -159,7 +160,7 @@ func (env *sidecarTestEnv) startNotificationStream(
 	t.Helper()
 	conn := test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, sidecarClientCreds)
 	var err error
-	env.notifyStream, err = committerpb.NewNotifierClient(conn).OpenNotificationStream(ctx)
+	env.notifyStream, err = committerpb.NewSidecarServiceClient(conn).OpenNotificationStream(ctx)
 	require.NoError(t, err)
 }
 

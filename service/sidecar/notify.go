@@ -17,6 +17,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -33,7 +34,7 @@ type (
 	// writing to each stream's notificationQueue.
 	// Deadlock is prevented by buffered channels and single-threaded processing in run().
 	notifier struct {
-		committerpb.UnimplementedNotifierServer
+		committerpb.UnimplementedSidecarServiceServer
 		bufferSize         int
 		maxTimeout         time.Duration
 		maxActiveTxIDs     int
@@ -45,7 +46,7 @@ type (
 		// timeoutQueue receives requests whose deadline has passed.
 		timeoutQueue chan *notificationRequest
 
-		// StreamAllTransactions support
+		// StreamBlocks support
 		allTxStreams   []*allTxStream
 		allTxStreamsMu sync.RWMutex
 	}
@@ -69,7 +70,7 @@ type (
 	}
 
 	// committedBlockWithTxs contains the essential data from a committed block
-	// for streaming to StreamAllTransactions clients. This is a clean interface
+	// for streaming to StreamBlocks clients. This is a clean interface
 	// that separates the notifier from relay's internal blockWithStatus structure.
 	committedBlockWithTxs struct {
 		blockNumber uint64
@@ -77,7 +78,7 @@ type (
 		statuses    []committerpb.Status
 	}
 
-	// allTxStream represents a single StreamAllTransactions client subscription.
+	// allTxStream represents a single StreamBlocks client subscription.
 	// Each stream has its own filters and receives committed blocks via a channel.
 	allTxStream struct {
 		// Filters (empty = no filter)
@@ -187,7 +188,7 @@ func (n *notifier) recordRemovals(pendingTxIDsRemoved, uniquePendingTxIDsRemoved
 }
 
 // OpenNotificationStream implements the [protonotify.NotifierServer] API.
-func (n *notifier) OpenNotificationStream(stream committerpb.Notifier_OpenNotificationStreamServer) error {
+func (n *notifier) OpenNotificationStream(stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse]) error {
 	g, gCtx := errgroup.WithContext(stream.Context())
 	requestQueue := channel.NewWriter(gCtx, n.requestQueue)
 	streamEventQueue := channel.Make[*committerpb.NotificationResponse](gCtx, n.bufferSize)
@@ -221,12 +222,12 @@ func (n *notifier) OpenNotificationStream(stream committerpb.Notifier_OpenNotifi
 	return wrapNotifierError(g.Wait())
 }
 
-// StreamAllTransactions implements the [committerpb.NotifierServer] API.
+// StreamBlocks implements the [committerpb.SidecarServiceServer] API.
 // It streams all committed transactions to the client, with optional filtering
 // by namespace and transaction status.
-func (n *notifier) StreamAllTransactions(
-	req *committerpb.StreamAllRequest,
-	stream committerpb.Notifier_StreamAllTransactionsServer,
+func (n *notifier) StreamBlocks(
+	req *committerpb.StreamBlocksRequest,
+	stream grpc.ServerStreamingServer[committerpb.BlockEvent],
 ) error {
 	// Create stream context with cancellation
 	ctx, cancel := context.WithCancel(stream.Context())
@@ -372,7 +373,7 @@ func (m *subscriptions) removeAndEnqueueTimeoutEvents(
 }
 
 // dispatchBlockToAllTxStreams dispatches a committed block to all registered
-// StreamAllTransactions clients. It handles slow clients by using a timeout
+// StreamBlocks clients. It handles slow clients by using a timeout
 // and canceling streams that cannot keep up.
 func (n *notifier) dispatchBlockToAllTxStreams(ctx context.Context, block *committedBlockWithTxs) {
 	// Get snapshot of streams with minimal lock time
@@ -397,7 +398,7 @@ func (n *notifier) dispatchBlockToAllTxStreams(ctx context.Context, block *commi
 	}
 }
 
-// registerAllTxStream adds a new StreamAllTransactions client to the notifier.
+// registerAllTxStream adds a new StreamBlocks client to the notifier.
 // The stream will receive all committed blocks until it is unregistered or cancelled.
 func (n *notifier) registerAllTxStream(stream *allTxStream) {
 	n.allTxStreamsMu.Lock()
@@ -411,7 +412,7 @@ func (n *notifier) registerAllTxStream(stream *allTxStream) {
 	n.allTxStreams = streams
 }
 
-// unregisterAllTxStream removes a StreamAllTransactions client from the notifier.
+// unregisterAllTxStream removes a StreamBlocks client from the notifier.
 func (n *notifier) unregisterAllTxStream(stream *allTxStream) {
 	n.allTxStreamsMu.Lock()
 	defer n.allTxStreamsMu.Unlock()
@@ -429,10 +430,10 @@ func (n *notifier) unregisterAllTxStream(stream *allTxStream) {
 	n.allTxStreams = streams
 }
 
-// streamWorker runs in its own goroutine for each StreamAllTransactions client.
+// streamWorker runs in its own goroutine for each StreamBlocks client.
 // It receives committed blocks from the blockQueue, filters and enriches them
 // according to the stream's configuration, and sends the results to the client.
-func (s *allTxStream) streamWorker(stream committerpb.Notifier_StreamAllTransactionsServer) error {
+func (s *allTxStream) streamWorker(stream grpc.ServerStreamingServer[committerpb.BlockEvent]) error {
 	q := channel.NewReader(s.ctx, s.blockQueue)
 	for {
 		block, ok := q.Read()
@@ -447,7 +448,7 @@ func (s *allTxStream) streamWorker(stream committerpb.Notifier_StreamAllTransact
 			continue
 		}
 
-		batch := &committerpb.TxEventBatch{
+		batch := &committerpb.BlockEvent{
 			BlockNumber: block.blockNumber,
 			Events:      filteredEvents,
 		}

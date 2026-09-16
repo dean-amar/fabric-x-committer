@@ -21,6 +21,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -66,13 +67,13 @@ type (
 		CoordinatorClient   servicepb.CoordinatorClient
 		QueryServiceClient  committerpb.QueryServiceClient
 		SidecarClientConfig *connection.ClientConfig
-		NotifyClient        committerpb.NotifierClient
+		NotifyClient        committerpb.SidecarServiceClient
 		// ClientCredentials authenticates this runtime's own clients against the query service and the
 		// sidecar. It is non-nil only when the topology runs an AuthService, in which case those
 		// services enforce ACL and an unauthenticated client is answered PermissionDenied.
 		ClientCredentials credentials.PerRPCCredentials
-		NotifyStream      committerpb.Notifier_OpenNotificationStreamClient
-		StreamAllTxStream committerpb.Notifier_StreamAllTransactionsClient
+		NotifyStream      grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse]
+		StreamAllTxStream grpc.ServerStreamingClient[committerpb.BlockEvent]
 
 		CommittedBlock          chan *common.Block
 		TxBuilder               *workload.TxBuilder
@@ -434,7 +435,7 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 			t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS, queryCredentials,
 		),
 	)
-	c.NotifyClient = committerpb.NewNotifierClient(
+	c.NotifyClient = committerpb.NewSidecarServiceClient(
 		test.NewSecuredConnectionWithCredentials(
 			t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS, notifyCredentials,
 		),
@@ -455,7 +456,7 @@ func (c *CommitterRuntime) OpenNotificationStream(ctx context.Context, t *testin
 	var err error
 	c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
 	require.NoError(t, err)
-	c.StreamAllTxStream, err = c.NotifyClient.StreamAllTransactions(ctx, nil)
+	c.StreamAllTxStream, err = c.NotifyClient.StreamBlocks(ctx, nil)
 	require.NoError(t, err)
 }
 
@@ -747,7 +748,7 @@ func (c *CommitterRuntime) ValidateExpectedResultsInCommittedBlock(t *testing.T,
 	}
 
 	sidecar.RequireNotifications(t, c.NotifyStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
-	sidecar.RequireStreamAllTransactions(t, c.StreamAllTxStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
+	sidecar.RequireStreamBlocks(t, c.StreamAllTxStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
 }
 
 // CountStatus returns the number of transactions with a given tx status.

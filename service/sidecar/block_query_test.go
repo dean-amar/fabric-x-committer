@@ -24,7 +24,7 @@ type blockQueryWrapper struct {
 }
 
 func (w *blockQueryWrapper) RegisterService(s serve.Servers) {
-	committerpb.RegisterBlockQueryServiceServer(s.GRPC, w.Service)
+	committerpb.RegisterSidecarServiceServer(s.GRPC, w.Service)
 }
 
 func TestBlockQuery(t *testing.T) {
@@ -39,7 +39,7 @@ func TestBlockQuery(t *testing.T) {
 	test.ServeForTest(t.Context(), t, serverConfig, queryService)
 
 	conn := test.NewInsecureConnection(t, &serverConfig.GRPC.Endpoint)
-	client := committerpb.NewBlockQueryServiceClient(conn)
+	client := committerpb.NewSidecarServiceClient(conn)
 
 	t.Run("GetBlockchainInfo", func(t *testing.T) {
 		t.Parallel()
