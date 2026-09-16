@@ -22,6 +22,6 @@ tls-refresh-interval: {{ .QueryTLSRefreshInterval }}
 
 # ACL enforcement: every RPC is authorized against the AuthService.
 auth:
-  server:
+  client:
 {{ include "endpointWithTLS" (dict "Endpoint" .Services.Auth.GrpcEndpoint "TLS" .ClientTLS) | indent 4 }}
 {{- end }}

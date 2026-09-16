@@ -72,6 +72,12 @@ type (
 		// sidecar. It is non-nil only when the topology runs an AuthService, in which case those
 		// services enforce ACL and an unauthenticated client is answered PermissionDenied.
 		ClientCredentials credentials.PerRPCCredentials
+		// authMintParams and authCredentials defer token minting to Start. CreateRuntimeClients runs
+		// before any service process is launched, so the AuthService cannot answer a nonce request yet;
+		// the clients are handed empty credentials and the tokens are filled once it is running. gRPC
+		// reads the token per RPC, so a connection may be dialled before its token exists.
+		authMintParams    *acl.MintParams
+		authCredentials   []*acl.Credentials
 		NotifyStream      grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse]
 		StreamAllTxStream grpc.ServerStreamingClient[committerpb.BlockEvent]
 
@@ -410,25 +416,25 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 			require.NoError(t, err)
 		}
 
-		// Every client mints its own token, rather than sharing one: a shared token carries a single
-		// scope, so clients could never hold different ones, and minting up front surfaces an
-		// authentication failure here at setup instead of inside an unrelated RPC.
-		mintToken := func() *acl.Credentials {
-			creds, mintErr := acl.MintToken(ctx, &acl.MintParams{
-				Client: servicepb.NewAuthServiceClient(
-					test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
-				),
-				Signer:              signer,
-				ChannelID:           c.SystemConfig.Policy.ChannelID,
-				TLSCertHash:         certHash,
-				SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
-			})
-			require.NoError(t, mintErr)
+		// Every client gets its own token rather than sharing one: a shared token carries a single
+		// scope, so clients could never hold different ones. Start mints them; see authMintParams.
+		c.authMintParams = &acl.MintParams{
+			Client: servicepb.NewAuthServiceClient(
+				test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
+			),
+			Signer:              signer,
+			ChannelID:           c.SystemConfig.Policy.ChannelID,
+			TLSCertHash:         certHash,
+			SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
+		}
+		newCredentials := func() *acl.Credentials {
+			creds := &acl.Credentials{SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode}
+			c.authCredentials = append(c.authCredentials, creds)
 			return creds
 		}
-		queryCredentials = mintToken()
-		notifyCredentials = mintToken()
-		c.ClientCredentials = mintToken()
+		queryCredentials = newCredentials()
+		notifyCredentials = newCredentials()
+		c.ClientCredentials = newCredentials()
 	}
 	c.QueryServiceClient = committerpb.NewQueryServiceClient(
 		test.NewSecuredConnectionWithCredentials(
@@ -500,6 +506,7 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 		// Started before the query service so the query service's first authorization attempt has
 		// somewhere to go; it still fails closed until the AuthService has loaded a config bundle.
 		c.AuthService.Restart(t)
+		c.mintAuthTokens(t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
@@ -773,6 +780,18 @@ func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum u
 	require.NoError(t, err)
 	require.NotNil(t, nextBlock)
 	require.Equal(t, blkNum+1, nextBlock.Number)
+}
+
+// mintAuthTokens fills every client's credentials with a freshly minted token. It runs from Start,
+// after the AuthService process is up: CreateRuntimeClients builds the clients before any service is
+// launched, so a nonce request there would reach a reserved-but-unserved port and fail.
+func (c *CommitterRuntime) mintAuthTokens(t *testing.T) {
+	t.Helper()
+	for _, creds := range c.authCredentials {
+		minted, err := acl.MintToken(t.Context(), c.authMintParams)
+		require.NoError(t, err)
+		creds.Token = minted.Token
+	}
 }
 
 func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, blkNum uint64) {
