@@ -306,7 +306,7 @@ type AuthorizeResponse struct {
 	// token_expires_at is the bound token's expiry in unix seconds. A resource server caches an
 	// authorization decision for a stream no longer than this, so an expired token cannot keep an
 	// established stream alive.
-	TokenExpiresAt int64 `protobuf:"varint,4,opt,name=token_expires_at,json=tokenExpiresAt,proto3" json:"token_expires_at,omitempty"`
+	TokenExpiresAt int64 `protobuf:"varint,2,opt,name=token_expires_at,json=tokenExpiresAt,proto3" json:"token_expires_at,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -469,23 +469,23 @@ const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\x12IssueNonceResponse\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"\x7f\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"y\n" +
 	"\x13AuthenticateRequest\x129\n" +
 	"\x0fsigned_envelope\x18\x01 \x01(\v2\x10.common.EnvelopeR\x0esignedEnvelope\x12'\n" +
-	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScopeJ\x04\b\x03\x10\x04\"K\n" +
+	"\x0frequested_scope\x18\x02 \x03(\tR\x0erequestedScope\"K\n" +
 	"\x14AuthenticateResponse\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"t\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"h\n" +
 	"\x10AuthorizeRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bresource\x18\x02 \x01(\tR\bresource\x12\"\n" +
-	"\rtls_cert_hash\x18\x03 \x01(\fR\vtlsCertHashJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"i\n" +
+	"\rtls_cert_hash\x18\x03 \x01(\fR\vtlsCertHash\"]\n" +
 	"\x11AuthorizeResponse\x12\x1e\n" +
 	"\n" +
 	"authorized\x18\x01 \x01(\bR\n" +
 	"authorized\x12(\n" +
-	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAtJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\xf1\x01\n" +
+	"\x10token_expires_at\x18\x02 \x01(\x03R\x0etokenExpiresAt\"\xeb\x01\n" +
 	"\vTokenRecord\x12\x10\n" +
 	"\x03jti\x18\x01 \x01(\tR\x03jti\x12+\n" +
 	"\bidentity\x18\x02 \x01(\v2\x0f.msppb.IdentityR\bidentity\x12\x15\n" +
@@ -494,7 +494,7 @@ const file_api_servicepb_auth_proto_rawDesc = "" +
 	"\x05scope\x18\x05 \x03(\tR\x05scope\x12'\n" +
 	"\x0fissued_sequence\x18\x06 \x01(\x04R\x0eissuedSequence\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\a \x01(\x03R\texpiresAtJ\x04\b\b\x10\t2\xf1\x01\n" +
+	"expires_at\x18\a \x01(\x03R\texpiresAt2\xf1\x01\n" +
 	"\vAuthService\x12I\n" +
 	"\n" +
 	"IssueNonce\x12\x1c.servicepb.IssueNonceRequest\x1a\x1d.servicepb.IssueNonceResponse\x12O\n" +

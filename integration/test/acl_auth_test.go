@@ -83,18 +83,18 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	}}, rows.GetNamespaces())
 }
 
-// TestACLQueryWithTokenSource is the client-side counterpart: a caller that attaches acl.TokenSource as
+// TestACLQueryWithMintedToken is the client-side counterpart: a caller that attaches a minted token as
 // per-RPC credentials performs no authentication steps of its own. The credential fetches the nonce,
 // signs the envelope, exchanges it for a token, and attaches that token to every call - so the query
 // below is an ordinary GetRows against an ACL-protected service.
-func TestACLQueryWithTokenSource(t *testing.T) {
+func TestACLQueryWithMintedToken(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
 	env.commitRow(t, []byte("k1"), []byte("v1"))
 	// The credential authenticates on its first RPC, which needs the bundle already loaded.
 	env.waitForEnforcement(t)
 
-	client := committerpb.NewQueryServiceClient(env.connectionWithTokenSource(t))
+	client := committerpb.NewQueryServiceClient(env.connectionWithMintedToken(t))
 	rows, err := client.GetRows(t.Context(), &committerpb.Query{
 		Namespaces: []*committerpb.QueryNamespace{
 			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
@@ -201,15 +201,16 @@ func newACLEnv(t *testing.T) *aclEnv {
 	}
 }
 
-// connectionWithTokenSource dials the query service with acl.TokenSource attached as per-RPC
+// connectionWithMintedToken dials the query service with a minted token attached as per-RPC
 // credentials, which is how a production client authenticates.
-func (e *aclEnv) connectionWithTokenSource(t *testing.T) *grpc.ClientConn {
+func (e *aclEnv) connectionWithMintedToken(t *testing.T) *grpc.ClientConn {
 	t.Helper()
-	source := &acl.TokenSource{
+	source, err := acl.MintToken(t.Context(), &acl.MintParams{
 		Client:    e.authClient,
 		Signer:    e.signer,
 		ChannelID: runner.TestChannelName,
-	}
+	})
+	require.NoError(t, err)
 
 	creds, err := e.c.SystemConfig.ClientTLS.ClientCredentials()
 	require.NoError(t, err)

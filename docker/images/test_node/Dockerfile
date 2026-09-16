@@ -38,6 +38,9 @@ ENV SC_AUTH_DATABASE_ENDPOINTS=localhost:5433
 # after start, and until the auth service observes it every Authenticate answers Unavailable - long
 # enough for a waiting client's nonce to expire.
 ENV SC_AUTH_CONFIG_REFRESH_INTERVAL=1s
+# Tokens are minted once and never renewed, so they must outlast the whole test run.
+ENV SC_AUTH_TOKEN_TTL=1h
+ENV SC_AUTH_NONCE_TTL=1h
 
 # Override default database credentials (YAML samples default to "yugabyte"
 # which is correct for YugabyteDB but not for the PostgreSQL base image).

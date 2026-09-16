@@ -25,7 +25,8 @@ type Config struct {
 	// a single-instance dev deployment, but tokens then do not survive a restart and separate
 	// instances cannot verify each other's tokens.
 	SigningKeyPath string `mapstructure:"signing-key-path"`
-	// TokenTTL is the lifetime of a minted token. Clients refresh by re-authenticating before it elapses.
+	// TokenTTL is the lifetime of a minted token. A client mints once and does not renew, so this must
+	// cover the client's whole run; past it the resource server rejects the token.
 	TokenTTL time.Duration `mapstructure:"token-ttl" default:"5m" validate:"gt=0"`
 	// EnvelopeFreshnessWindow bounds how far an authentication envelope's timestamp may deviate from
 	// the server's clock. The single-use nonce is what actually prevents replay; this window is
@@ -40,15 +41,14 @@ type Config struct {
 	ConfigRefreshInterval time.Duration `mapstructure:"config-refresh-interval" default:"1m" validate:"gt=0"`
 	// TokenCleanupInterval is how often expired token records are swept from the store.
 	TokenCleanupInterval time.Duration `mapstructure:"token-cleanup-interval" default:"1m" validate:"gt=0"`
-	// ChallengeRequestsPerSecond caps the combined rate of IssueNonce and Authenticate, the two RPCs
-	// reachable without a token. Both are cheap to call and expensive to serve - a nonce costs a database
-	// row, an authentication costs a signature verification and an MSP resolution - so an unthrottled
-	// caller can spam either one into a denial of service. They are limited separately from Authorize,
-	// whose volume legitimately tracks the resource servers' whole RPC load and must not be throttled
-	// alongside them. Set to 0 to disable, which is only sensible in tests.
+	// ChallengeRequestsPerSecond caps the combined rate of IssueNonce and Authenticate: the only RPCs
+	// reachable without a token, and the only ones costing a signature verification and an MSP
+	// resolution. They are limited separately from Authorize, whose rate legitimately tracks the
+	// resource servers' whole RPC load, so a single limit cannot serve both. Set to 0 to disable, which
+	// is only sensible in tests.
 	ChallengeRequestsPerSecond int `mapstructure:"challenge-requests-per-second" default:"200" validate:"gte=0"`
-	// ChallengeBurst is how far the challenge limiter may run ahead of its steady rate, absorbing the
-	// spike of many clients whose tokens expire at the same moment. It must not exceed the rate.
+	// ChallengeBurst is how far the challenge limiter may run ahead of its steady rate, absorbing a
+	// burst of clients authenticating at once. It must not exceed the rate.
 	ChallengeBurst int `mapstructure:"challenge-burst" default:"50" validate:"gte=0"`
 }
 

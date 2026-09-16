@@ -81,12 +81,17 @@ func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) 
 				return errors.Wrap(err, "failed to hash the delivery client certificate")
 			}
 		}
-		creds = &acl.TokenSource{
+		// The token is minted once, here: it must outlive the run, so the AuthService's token-ttl has
+		// to cover it. An expired token is rejected by the sidecar rather than silently renewed.
+		creds, err = acl.MintToken(ctx, &acl.MintParams{
 			Client:              servicepb.NewAuthServiceClient(authConn),
 			Signer:              signer,
 			ChannelID:           params.Res.Profile.Policy.ChannelID,
 			TLSCertHash:         certHash,
 			SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
+		})
+		if err != nil {
+			return err
 		}
 	}
 

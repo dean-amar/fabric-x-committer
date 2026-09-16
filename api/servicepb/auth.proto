@@ -52,11 +52,6 @@ message AuthenticateRequest {
     // requested_scope optionally narrows the token's authority to these gRPC full-method names
     // (least privilege). A requested scope may only narrow, never broaden, the identity's authority.
     repeated string requested_scope = 2;
-
-    // 3 held requested_namespaces. Namespace scoping is deferred: only the two resources whose request
-    // names the namespaces it touches can enforce it, so it is a design of its own rather than a field
-    // on the token. See the RFC's "Future work: namespace scoping".
-    reserved 3;
 }
 
 message AuthenticateResponse {
@@ -74,17 +69,9 @@ message AuthorizeRequest {
     // tls_cert_hash is the SHA-256 of the caller's TLS certificate observed at the resource server.
     // It is empty when the caller connected without a client certificate.
     bytes tls_cert_hash = 3;
-
-    // 4 and 5 held the namespaces the request touches and an all-namespaces flag. With namespace
-    // scoping deferred, a resource server no longer inspects the request body at all.
-    reserved 4, 5;
 }
 
 message AuthorizeResponse {
-    // 2 and 3 held the resolved identity and the token's namespace allowlist. The resource server needs
-    // neither: it re-presents the token, and namespace scoping is deferred.
-    reserved 2, 3;
-
     // authorized is true when the identity satisfies the resource policy. The RPCs return a gRPC
     // status error for every non-authorized outcome (Unauthenticated for an invalid, expired, or
     // unknown token or a certificate mismatch; PermissionDenied for a scope or policy denial;
@@ -94,7 +81,7 @@ message AuthorizeResponse {
     // token_expires_at is the bound token's expiry in unix seconds. A resource server caches an
     // authorization decision for a stream no longer than this, so an expired token cannot keep an
     // established stream alive.
-    int64 token_expires_at = 4;
+    int64 token_expires_at = 2;
 }
 
 // TokenRecord is the persisted token-to-identity binding, keyed by jti and stored proto-serialized
@@ -118,7 +105,4 @@ message TokenRecord {
     uint64 issued_sequence = 6;
     // expires_at is the token expiry in unix seconds, used for TTL cleanup.
     int64 expires_at = 7;
-
-    // 8 held the namespace allowlist granted at issuance; see AuthenticateRequest's reserved 3.
-    reserved 8;
 }

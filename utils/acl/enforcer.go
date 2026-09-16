@@ -4,14 +4,6 @@ Copyright IBM Corp. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package acl provides the two access-control components of the ACL feature, on opposite sides of an
-// RPC:
-//
-//   - Enforcer (server side, this file): gRPC interceptors installed on a resource server (Query,
-//     Sidecar) that authorize each incoming RPC by delegating to the central AuthService. The
-//     Enforcer holds no signing keys and no MSP logic.
-//   - TokenSource (client side, tokensource.go): a credentials.PerRPCCredentials that authenticates
-//     once with the AuthService and attaches the resulting token to outgoing RPCs.
 package acl
 
 import (

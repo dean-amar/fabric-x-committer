@@ -95,7 +95,7 @@ most common review rejection:
 | Retry / keep a loop alive | `retry.Sustain`, `retry.WaitForCondition` | `utils/retry` |
 | Run a service + gRPC/HTTP servers | `serve.StartAndServe` | `utils/serve` |
 | Prometheus metrics | `monitoring.Provider` + `promutil.*` | `utils/monitoring` |
-| Enforce/attach gRPC ACL | `acl.Enforcer` (server interceptors), `acl.TokenSource` (client credentials) | `utils/acl` |
+| Enforce/attach gRPC ACL | `acl.Enforcer` (server interceptors), `acl.MintToken`/`acl.Credentials` (client credentials) | `utils/acl` |
 | Package logger | `flogging.MustGetLogger` | `fabric-lib-go/common/flogging` |
 
 **Test fixtures** — test code has its own reuse discipline: don't hand-roll crypto, TLS, or

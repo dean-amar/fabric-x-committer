@@ -82,11 +82,48 @@ database:
   min-connections: 5
   # Enable load balancing across multiple database endpoints. Set to false for single-node deployments.
   load-balance: false
-  retry:  # The exponential backoff retry strategy for database operations.
+  retry:  # The exponential backoff retry strategy for database operation.
+    # This strategy increases the delay between retry attempts exponentially.
+    # When using YugabyteDB as the backend, it is needed to handle retryable errors.
+    # https://support.yugabyte.com/hc/en-us/articles/
+    # 4409627048461-How-to-Troubleshoot-Database-Transaction-Retryable-Errors
+
+    # initial-interval: Specifies the duration of the first backoff interval.
+    # This is the time to wait before the first retry attempt.
+    # Format: string representing a duration (e.g., "500ms", "1s", "2.5s").
+    # Default: 500ms
     initial-interval: 500ms
+
+    # randomization-factor: Controls the amount of randomness (jitter) applied to each backoff interval.
+    # The actual backoff duration for an attempt will be randomly selected from the range:
+    # [current_interval * (1 - randomization_factor), current_interval * (1 + randomization_factor)]
+    # A factor of 0 means no randomization. A factor of 0.5 means the actual interval
+    # can vary by +/- 50% of the calculated interval.
+    # Must be between 0 and 1.
+    # Default: 0.5
     randomization-factor: 0.5
+
+    # multiplier: The factor by which the backoff interval increases after each failed attempt.
+    # The next interval (before randomization) is calculated as: current_interval * multiplier.
+    # A value of 1.5 means each subsequent interval will be 50% longer than the previous one.
+    # Must be >= 1.
+    # Default: 1.5
     multiplier: 1.5
+
+    # max-interval: Sets the absolute maximum duration for any single backoff interval.
+    # Even if the calculated interval (initial_interval * multiplier^n) exceeds this value,
+    # the interval used (before randomization) will be capped at max-interval.
+    # Format: string representing a duration (e.g., "60s", "1m", "5m").
+    # Default: 10s
     max-interval: 60s
+
+    # max-elapsed-time: The maximum total time allowed for retries since the operation first began.
+    # If the total time spent (including execution time of attempts and backoff waits)
+    # exceeds this duration, the retry mechanism will stop, even if other limits haven't been reached.
+    # Setting this to "0" means there is no time limit, and retries will continue
+    # indefinitely until successful.
+    # Format: string representing a duration (e.g., "15m", "1h").
+    # Default: 10m
     max-elapsed-time: 15m
 
 # Path to a PEM-encoded EC (P-256) private key used to mint and verify ES256 tokens.
@@ -99,7 +136,8 @@ database:
 # signing key for the auth service. Set it for any deployment running more than one instance.
 signing-key-path: ""
 
-# Lifetime of a minted token. Clients refresh by calling Authenticate again before it elapses.
+# Lifetime of a minted token. A client mints once and does not renew, so this must cover the client's
+# whole run; past it the resource server rejects the token and the client must authenticate again.
 # Tokens cannot be revoked, so this is the only bound on how long a stolen token - or an identity that
 # has lost its channel authority - stays usable. Keep it short. It also bounds how long an open stream
 # lives, since a stream cannot outlive the token that established it. Default: 5m
@@ -124,17 +162,13 @@ config-refresh-interval: 1m
 # How often expired token records are swept from the store. Default: 1m
 token-cleanup-interval: 1m
 
-# Combined rate limit for IssueNonce and Authenticate - the two RPCs a caller can reach WITHOUT already
-# holding a token. Both are cheap to call and expensive to serve: a nonce costs a database row, an
-# authentication costs a signature verification and an MSP resolution, so an unthrottled caller can spam
-# either one into a denial of service. This is separate from the server-wide `rate-limit` above on
-# purpose: Authorize is called by the resource servers once per protected RPC, so its rate tracks the
-# whole cluster's traffic and must not be throttled alongside these two.
-# A limit of 200/s serves ~60,000 clients refreshing a 5m token, and caps the nonce table at
-# roughly 200 x nonce-ttl rows. Set to 0 to disable (tests only). Default: 200
+# Throttles IssueNonce and Authenticate - the only RPCs reachable without a token, and the only ones
+# costing a signature verification and an MSP resolution. Separate from the `rate-limit` above because
+# that must stay high enough for Authorize, which fires once per protected RPC across the whole cluster;
+# one number cannot serve both. Set to 0 to disable (tests only). Default: 200
 challenge-requests-per-second: 200
-# How far the challenge limiter may run ahead of its steady rate, to absorb the spike of many clients
-# whose tokens expire at the same moment. Must not exceed challenge-requests-per-second. Default: 50
+# Headroom above the steady rate, absorbing a burst of clients authenticating at once. Must not exceed
+# challenge-requests-per-second. Default: 50
 challenge-burst: 50
 
 # Logging configuration

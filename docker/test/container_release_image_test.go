@@ -310,6 +310,9 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, param
 				// Until the auth service observes the committed config it answers Unavailable, and the
 				// sample's one-minute refresh outlasts a waiting client's nonce.
 				"SC_AUTH_CONFIG_REFRESH_INTERVAL=500ms",
+				// Tokens are minted once and never renewed, so they must outlast the whole test run.
+				"SC_AUTH_TOKEN_TTL=1h",
+				"SC_AUTH_NONCE_TTL=1h",
 			},
 			Healthcheck: &container.HealthConfig{
 				Test: []string{

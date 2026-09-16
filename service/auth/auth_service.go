@@ -60,7 +60,7 @@ type Service struct {
 // NewAuthService creates a new AuthService from a configuration. It performs only in-memory wiring;
 // the database pool, signing key, and background loops are opened in Run.
 func NewAuthService(config *Config) *Service {
-	svc := &Service{
+	return &Service{
 		config:      config,
 		metrics:     newAuthServiceMetrics(),
 		ready:       channel.NewReady(),
@@ -69,7 +69,6 @@ func NewAuthService(config *Config) *Service {
 			rate.Limit(config.ChallengeRequestsPerSecond), config.ChallengeBurst,
 		),
 	}
-	return svc
 }
 
 // Run opens the signing key and the database pool, builds the collaborators that need them, warms the

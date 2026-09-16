@@ -89,8 +89,10 @@ non-mTLS path exists only for local development and tests and must not be used i
   *token* to its session and renews the decision from it. Health checks (`grpc.health.v1.Health`) are
   exempt. The interceptors never inspect the request body: a decision depends only on the token, the
   certificate on the connection, and the method name.
-- **Client side — `TokenSource`**: a `credentials.PerRPCCredentials` that fetches a nonce, authenticates
-  once, caches the token, refreshes it before expiry, and attaches it to every outgoing RPC.
+- **Client side — `MintToken` / `Credentials`**: `MintToken` fetches a nonce, signs it into an envelope,
+  and exchanges that for a token; the returned `Credentials` is a `credentials.PerRPCCredentials` that
+  attaches that one token to every outgoing RPC. It never renews, so a client requests a `token-ttl`
+  that covers its run and an expired token is rejected by the resource server rather than refreshed.
 
 ## Configuration
 

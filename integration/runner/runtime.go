@@ -409,31 +409,21 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 			require.NoError(t, err)
 		}
 
-		authClient := servicepb.NewAuthServiceClient(
-			test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
-		)
-		// Every client mints its own token here, rather than sharing one lazily-refreshing
-		// TokenSource: a shared source keeps a single cached token and scope, so concurrent clients
-		// overwrite each other's state and the exchange happens inside an arbitrary RPC. Minting up
-		// front makes each client's token independent and every failure surface at setup.
-		mintToken := func() *acl.Token {
-			nonce, nErr := authClient.IssueNonce(ctx, &servicepb.IssueNonceRequest{})
-			require.NoError(t, nErr)
-			envelope, eErr := acl.BuildAuthEnvelope(&acl.AuthEnvelopeParams{
-				Signer:      signer,
-				ChannelID:   c.SystemConfig.Policy.ChannelID,
-				TLSCertHash: certHash,
-				Nonce:       nonce.GetNonce(),
-			})
-			require.NoError(t, eErr)
-			resp, aErr := authClient.Authenticate(ctx, &servicepb.AuthenticateRequest{
-				SignedEnvelope: envelope,
-			})
-			require.NoError(t, aErr)
-			return &acl.Token{
-				Token:               resp.GetToken(),
+		// Every client mints its own token, rather than sharing one: a shared token carries a single
+		// scope, so clients could never hold different ones, and minting up front surfaces an
+		// authentication failure here at setup instead of inside an unrelated RPC.
+		mintToken := func() *acl.Credentials {
+			creds, mintErr := acl.MintToken(ctx, &acl.MintParams{
+				Client: servicepb.NewAuthServiceClient(
+					test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
+				),
+				Signer:              signer,
+				ChannelID:           c.SystemConfig.Policy.ChannelID,
+				TLSCertHash:         certHash,
 				SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
-			}
+			})
+			require.NoError(t, mintErr)
+			return creds
 		}
 		queryCredentials = mintToken()
 		notifyCredentials = mintToken()

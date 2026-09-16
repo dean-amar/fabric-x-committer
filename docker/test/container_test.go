@@ -237,15 +237,17 @@ func TestStartTestNode(t *testing.T) {
 	identities, err := testcrypto.GetPeersIdentities(copyArtifactsFromContainer(ctx, t, containerName))
 	require.NoError(t, err)
 	require.NotEmpty(t, identities)
+	creds, err := acl.MintToken(ctx, &acl.MintParams{
+		Client: servicepb.NewAuthServiceClient(test.NewInsecureConnection(
+			t, mustGetEndpoint(ctx, t, containerName, authServicePort),
+		)),
+		Signer:    identities[0],
+		ChannelID: dockerChannelID,
+	})
+	require.NoError(t, err)
 	committedBlock := delivercommitter.Start(ctx, t, delivercommitter.Parameters{
 		ClientConfig: committerClient,
-		Credentials: &acl.TokenSource{
-			Client: servicepb.NewAuthServiceClient(test.NewInsecureConnection(
-				t, mustGetEndpoint(ctx, t, containerName, authServicePort),
-			)),
-			Signer:    identities[0],
-			ChannelID: dockerChannelID,
-		},
+		Credentials:  creds,
 	})
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
@@ -387,6 +389,7 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE=" + params.tlsMode,
+				"SC_LOADGEN_LIMIT_TRANSACTIONS=200_000",
 			}, params.additionalEnvs...),
 			Healthcheck: &container.HealthConfig{
 				Test:        []string{"CMD", "healthcheck"},
