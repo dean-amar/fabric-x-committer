@@ -35,13 +35,13 @@ var (
 		committerpb.QueryService_GetConfigTransaction_FullMethodName: policyReaders,
 		committerpb.QueryService_GetTransactionStatus_FullMethodName: policyReaders,
 
-		committerpb.BlockQueryService_GetBlockchainInfo_FullMethodName: policyReaders,
-		committerpb.BlockQueryService_GetBlockByNumber_FullMethodName:  policyReaders,
-		committerpb.BlockQueryService_GetBlockByTxID_FullMethodName:    policyReaders,
-		committerpb.BlockQueryService_GetTxByID_FullMethodName:         policyReaders,
+		committerpb.SidecarService_GetBlockchainInfo_FullMethodName: policyReaders,
+		committerpb.SidecarService_GetBlockByNumber_FullMethodName:  policyReaders,
+		committerpb.SidecarService_GetBlockByTxID_FullMethodName:    policyReaders,
+		committerpb.SidecarService_GetTxByID_FullMethodName:         policyReaders,
 
-		committerpb.Notifier_OpenNotificationStream_FullMethodName: policyReaders,
-		committerpb.Notifier_StreamAllTransactions_FullMethodName:  policyReaders,
+		committerpb.SidecarService_OpenNotificationStream_FullMethodName: policyReaders,
+		committerpb.SidecarService_StreamBlocks_FullMethodName:           policyReaders,
 
 		peer.Deliver_Deliver_FullMethodName:                policyReaders,
 		peer.Deliver_DeliverFiltered_FullMethodName:        policyReaders,
