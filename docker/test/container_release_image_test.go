@@ -366,6 +366,9 @@ func startLoadgenNodeWithReleaseImage(
 			},
 			Tty: true,
 			Env: []string{
+				// The metrics assertion waits for a further 1000 committed TXs after sampling a baseline,
+				// so the workload must still be running by then; the default 50k budget can be spent first.
+				"SC_LOADGEN_LIMIT_TRANSACTIONS=100_000",
 				"SC_LOADGEN_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,

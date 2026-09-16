@@ -60,14 +60,21 @@ type Service struct {
 // NewAuthService creates a new AuthService from a configuration. It performs only in-memory wiring;
 // the database pool, signing key, and background loops are opened in Run.
 func NewAuthService(config *Config) *Service {
+	// A zero rate means "no throttling", so the limiter is left nil rather than built: a
+	// rate.NewLimiter(0, 0) permits nothing, which would reject every IssueNonce and Authenticate and
+	// lock out the only two RPCs a caller can reach before it holds a token.
+	var challenges *rate.Limiter
+	if config.ChallengeRequestsPerSecond > 0 {
+		challenges = rate.NewLimiter(
+			rate.Limit(config.ChallengeRequestsPerSecond), config.ChallengeBurst,
+		)
+	}
 	return &Service{
 		config:      config,
 		metrics:     newAuthServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
-		challenges: rate.NewLimiter(
-			rate.Limit(config.ChallengeRequestsPerSecond), config.ChallengeBurst,
-		),
+		challenges:  challenges,
 	}
 }
 

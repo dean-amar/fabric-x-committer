@@ -41,6 +41,9 @@ ENV SC_AUTH_CONFIG_REFRESH_INTERVAL=1s
 # Tokens are minted once and never renewed, so they must outlast the whole test run.
 ENV SC_AUTH_TOKEN_TTL=1h
 ENV SC_AUTH_NONCE_TTL=1h
+# The metrics assertion waits for a further 1000 committed TXs after it samples a baseline, so the
+# workload must still be running by then. The default 50k budget can be spent before that.
+ENV SC_LOADGEN_LIMIT_TRANSACTIONS=100_000
 
 # Override default database credentials (YAML samples default to "yugabyte"
 # which is correct for YugabyteDB but not for the PostgreSQL base image).
