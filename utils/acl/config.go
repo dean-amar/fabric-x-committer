@@ -21,8 +21,8 @@ import (
 // separate toggle: it follows from the resource server's own TLS mode (mutual TLS makes the
 // certificate present on the connection), so the interceptor simply forwards whatever is presented.
 type ClientConfig struct {
-	// Server is the AuthService endpoint and the TLS the resource server uses to reach it.
-	Server *connection.ClientConfig `mapstructure:"server" validate:"required"`
+	// Config is the AuthService endpoint and the TLS the resource server uses to reach it.
+	Config *connection.ClientConfig `mapstructure:"client" validate:"required"`
 	// StreamRevalidateInterval is how often an open stream re-authorizes its bound token against the
 	// latest policy. Zero uses the enforcer's default interval.
 	StreamRevalidateInterval time.Duration `mapstructure:"stream-revalidate-interval"`

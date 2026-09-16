@@ -84,11 +84,11 @@ func NewEnforcer(config *ClientConfig) (*Enforcer, error) {
 		return nil, nil //nolint:nilnil // no ACL section configured is a result, not a failure.
 	}
 
-	conn, err := connection.NewSingleConnection(config.Server)
+	conn, err := connection.NewSingleConnection(config.Config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to connect to the auth service")
 	}
-	logger.Infof("ACL enforcement enabled via auth service at %s", config.Server.Endpoint.Address())
+	logger.Infof("ACL enforcement enabled via auth service at %s", config.Config.Endpoint.Address())
 	return &Enforcer{
 		Client:             servicepb.NewAuthServiceClient(conn),
 		RevalidateInterval: config.StreamRevalidateInterval,

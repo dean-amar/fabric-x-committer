@@ -14,10 +14,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/credentials"
 
+	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -29,6 +33,14 @@ import (
 type sidecarReceiverParameters struct {
 	Res          *ClientResources
 	ClientConfig *connection.ClientConfig
+	// Auth is the auth service the delivery stream authenticates against. It is required when the
+	// sidecar enforces ACL, and nil otherwise: block delivery is a protected resource, so without a
+	// token an enforcing sidecar answers PermissionDenied.
+	Auth *connection.ClientConfig
+	// Identity signs the authentication envelope. It is passed in rather than taken from the load
+	// profile because each adapter holds a different one, and the profile's own policy identity is
+	// optional - the shipped sample leaves it unset and configures the orderer client's instead.
+	Identity *ordererdial.IdentityConfig
 }
 
 const (
@@ -36,12 +48,53 @@ const (
 	statusIdx                = int(common.BlockMetadataIndex_TRANSACTIONS_FILTER)
 )
 
-// runSidecarReceiver start receiving blocks from the sidecar.
+// runSidecarReceiver start receiving blocks from the sidecar. When an auth service is configured the
+// stream authenticates against it: block delivery is an ACL-protected resource, so an enforcing sidecar
+// answers PermissionDenied without a token.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
+	var creds credentials.PerRPCCredentials
+	if params.Auth != nil {
+		// The auth connection outlives every RPC on the stream: the token source re-authenticates on it
+		// whenever the cached token nears expiry.
+		authConn, err := connection.NewSingleConnection(params.Auth)
+		if err != nil {
+			return errors.Wrap(err, "failed to connect to the auth service")
+		}
+		defer connection.CloseConnectionsLog(authConn)
+
+		signer, err := ordererdial.NewIdentitySigner(params.Identity)
+		if err != nil {
+			return errors.Wrap(err, "failed to create the signing identity")
+		}
+		if signer == nil {
+			return errors.New("an auth service is configured but no signing identity is available")
+		}
+		tlsCreds, err := connection.NewClientTLSCredentials(params.ClientConfig.TLS)
+		if err != nil {
+			return errors.Wrap(err, "failed to load the delivery client TLS credentials")
+		}
+		// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
+		var certHash []byte
+		if tlsCreds.Mode == connection.MutualTLSMode {
+			certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
+			if err != nil {
+				return errors.Wrap(err, "failed to hash the delivery client certificate")
+			}
+		}
+		creds = &acl.TokenSource{
+			Client:              servicepb.NewAuthServiceClient(authConn),
+			Signer:              signer,
+			ChannelID:           params.Res.Profile.Policy.ChannelID,
+			TLSCertHash:         certHash,
+			SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
+		}
+	}
+
 	return runDeliveryReceiver(ctx, params.Res, func(gCtx context.Context, committedBlock chan *common.Block) error {
 		return delivercommitter.ToQueue(gCtx, delivercommitter.Parameters{
 			ClientConfig: params.ClientConfig,
 			OutputBlock:  committedBlock,
+			Credentials:  creds,
 		})
 	})
 }

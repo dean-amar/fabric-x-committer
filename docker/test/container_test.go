@@ -20,15 +20,18 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -44,6 +47,10 @@ var (
 	queryServicePort       = network.MustParsePort("7001/tcp")
 	coordinatorServicePort = network.MustParsePort("9001/tcp")
 	databasePort           = network.MustParsePort("5433/tcp")
+	authServicePort        = network.MustParsePort("10001/tcp")
+
+	// dockerChannelID is the channel the baked-in samples configure.
+	dockerChannelID = "mychannel"
 
 	// The 'db' op initializes the database on its own, so 'init-db' is not passed here.
 	commonTestNodeCMD = []string{runCMD, dbName, committerName, ordererName}
@@ -105,6 +112,9 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 						Sidecar:     getServerConfig(sidecarPort),
 						Query:       getServerConfig(queryServicePort),
 						Coordinator: getServerConfig(coordinatorServicePort),
+						// The query service and sidecar enforce ACL, so the runtime clients
+						// authenticate against the container auth service.
+						Auth: getServerConfig(authServicePort),
 					},
 					Policy:    &c.LoadProfile.Policy,
 					ClientTLS: clientTLS,
@@ -129,7 +139,9 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			// Adding namespace policy and creating transaction builder
 			runtime.AddOrUpdateNamespaces(t, "1")
 
-			runtime.CommittedBlock = delivercommitter.Start(ctx, t, runtime.SidecarClientConfig, 0)
+			runtime.CommittedBlock = delivercommitter.Start(ctx, t, delivercommitter.Parameters{
+				ClientConfig: runtime.SidecarClientConfig, Credentials: runtime.ClientCredentials,
+			})
 
 			t.Log("Try to fetch the first block")
 			b, ok := channel.NewReader(ctx, runtime.CommittedBlock).Read()
@@ -218,7 +230,23 @@ func TestStartTestNode(t *testing.T) {
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint := mustGetEndpoint(ctx, t, containerName, sidecarPort)
 	committerClient := test.NewInsecureClientConfig(sidecarEndpoint)
-	committedBlock := delivercommitter.Start(ctx, t, committerClient, 0)
+
+	// The sidecar authorizes block delivery, so the stream needs a token. The identity comes from the
+	// container's own crypto, which the channel's Readers policy accepts. The node runs without TLS
+	// here, so the token is not certificate-bound and no certificate hash is sent.
+	identities, err := testcrypto.GetPeersIdentities(copyArtifactsFromContainer(ctx, t, containerName))
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+	committedBlock := delivercommitter.Start(ctx, t, delivercommitter.Parameters{
+		ClientConfig: committerClient,
+		Credentials: &acl.TokenSource{
+			Client: servicepb.NewAuthServiceClient(test.NewInsecureConnection(
+				t, mustGetEndpoint(ctx, t, containerName, authServicePort),
+			)),
+			Signer:    identities[0],
+			ChannelID: dockerChannelID,
+		},
+	})
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
@@ -289,6 +317,12 @@ func TestYugabyteDriverDiscoveryWithSingleNodeConnection(t *testing.T) {
 			"SC_QUERY_DATABASE_LOAD_BALANCE=true",
 			"SC_QUERY_DATABASE_TLS_MODE=" + connection.NoneTLSMode,
 
+			"SC_AUTH_DATABASE_ENDPOINTS=" + singleTabletAddress,
+			"SC_AUTH_DATABASE_USERNAME=" + testdb.YugaDBType,
+			"SC_AUTH_DATABASE_DATABASE=" + testdb.YugaDBType,
+			"SC_AUTH_DATABASE_LOAD_BALANCE=true",
+			"SC_AUTH_DATABASE_TLS_MODE=" + connection.NoneTLSMode,
+
 			// We are limiting the number of transactions to ensure transactions are not processed from the VC queue.
 			"SC_LOADGEN_STREAM_RATE_LIMIT=1000",
 		},
@@ -325,6 +359,7 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				queryServicePort:       struct{}{},
 				coordinatorServicePort: struct{}{},
 				databasePort:           struct{}{},
+				authServicePort:        struct{}{},
 			},
 			Env: append([]string{
 				"SC_COORDINATOR_SERVER_TLS_MODE=" + params.tlsMode,
@@ -333,9 +368,13 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_COORDINATOR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_MONITORING_TLS_MODE=" + params.tlsMode,
+				"SC_QUERY_AUTH_CLIENT_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_SERVER_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_COMMITTER_TLS_MODE=" + params.tlsMode,
+				"SC_SIDECAR_AUTH_CLIENT_TLS_MODE=" + params.tlsMode,
 				"SC_VC_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_VC_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_VERIFIER_SERVER_TLS_MODE=" + params.tlsMode,
@@ -346,6 +385,7 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_LOADGEN_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
+				"SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE=" + params.tlsMode,
 			}, params.additionalEnvs...),
 			Healthcheck: &container.HealthConfig{
@@ -366,6 +406,7 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				queryServicePort:       localHostBind,
 				coordinatorServicePort: localHostBind,
 				databasePort:           localHostBind,
+				authServicePort:        localHostBind,
 			},
 		},
 		name: params.node,

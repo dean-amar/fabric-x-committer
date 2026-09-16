@@ -16,7 +16,7 @@ authoritative state lives in one place (the state database), not on a socket or 
 
 The service is composed of focused collaborators, each with one responsibility:
 
-- **`configProvider`** (`bundle.go`) — *reads* the latest committed channel configuration from the
+- **`configProvider`** (`bundle_provider.go`) — *reads* the latest committed channel configuration from the
   `ns__config` namespace and exposes it as a `channelconfig.Bundle`, refreshing on an interval. It
   mirrors how the query service reads the config transaction to refresh its TLS roots; the auth
   service never owns or mutates configuration, it only reads what the sidecar and coordinator commit.

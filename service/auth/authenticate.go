@@ -85,31 +85,30 @@ type (
 // binding, and returns a freshly minted cert-bound token. It returns gRPC status errors:
 // Unauthenticated when the envelope is invalid, Internal when persistence or signing fails.
 func (a *authenticator) authenticate(
-	ctx context.Context, req *servicepb.AuthenticateRequest, bundle *channelconfig.Bundle,
+	ctx context.Context, authRequest *servicepb.AuthenticateRequest, bundle *channelconfig.Bundle,
 ) (*servicepb.AuthenticateResponse, error) {
-	env := req.GetSignedEnvelope()
-	if env == nil {
+	signedEnvelope := authRequest.GetSignedEnvelope()
+	if signedEnvelope == nil {
 		return nil, grpcerror.WrapInvalidArgument(errors.New("signed envelope is required"))
 	}
 
 	now := time.Now()
-	parsed, err := parseSignedEnvelope(env)
+	parsedSignedEnvelope, err := parseSignedEnvelope(signedEnvelope)
 	if err != nil {
-		logger.Warnf("Authentication failed: %v", err)
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
 	}
 
 	// Redeem the nonce before verifying the signature: an envelope whose nonce is spent is a replay
 	// however well it is signed, and redeeming first denies a replayer the ability to make the service
 	// repeat the expensive signature check.
-	if err = a.nonces.consume(ctx, parsed.nonce, now); err != nil {
-		logger.Warnf("Authentication failed: %v", err)
-		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+	if err = a.nonces.consume(ctx, parsedSignedEnvelope.nonce, now); err != nil {
+		return nil, grpcerror.WrapUnauthenticated(
+			fmt.Errorf("authentication failed: %w", err),
+		)
 	}
 
-	identity, err := a.verifyEnvelope(ctx, parsed, bundle, now)
+	identity, err := a.verifyEnvelope(ctx, parsedSignedEnvelope, bundle, now)
 	if err != nil {
-		logger.Warnf("Authentication failed: %v", err)
 		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
 	}
 
@@ -123,7 +122,7 @@ func (a *authenticator) authenticate(
 		Identity:       identity.identity,
 		MspId:          identity.mspID,
 		CertHashSha256: identity.certHash,
-		Scope:          normalizeScope(req.GetRequestedScope()),
+		Scope:          normalizeScope(authRequest.GetRequestedScope()),
 		IssuedSequence: bundle.ConfigtxValidator().Sequence(),
 		ExpiresAt:      now.Add(a.tokenTTL).Unix(),
 	}
@@ -243,13 +242,10 @@ func parseSignedEnvelope(env *common.Envelope) (*parsedEnvelope, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal signature header")
 	}
-
+	// if protoutil.EnvelopeAsSignedData didn't fail, the signedData is a slice of length 1.
 	signedData, err := protoutil.EnvelopeAsSignedData(env)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to extract signed data from envelope")
-	}
-	if len(signedData) != 1 {
-		return nil, errors.Newf("expected exactly one signed-data unit, got %d", len(signedData))
 	}
 	return &parsedEnvelope{
 		chdr:        chdr,

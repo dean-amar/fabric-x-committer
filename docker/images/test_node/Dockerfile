@@ -30,6 +30,14 @@ ENV SC_LOADGEN_ORDERER_CLIENT_ORDERER_ORGANIZATIONS_ORG0_ENDPOINTS="id=0,broadca
 # This variable defines the Orderer endpoints in the generated genesis block.
 ENV SC_LOADGEN_LOAD_PROFILE_POLICY_ORDERER_ENDPOINTS="id=0,msp-id=org,broadcast,deliver,localhost:7050"
 ENV SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_ENDPOINT=localhost:4001
+ENV SC_QUERY_AUTH_CLIENT_ENDPOINT=localhost:10001
+ENV SC_SIDECAR_AUTH_CLIENT_ENDPOINT=localhost:10001
+ENV SC_LOADGEN_ORDERER_CLIENT_AUTH_ENDPOINT=localhost:10001
+ENV SC_AUTH_DATABASE_ENDPOINTS=localhost:5433
+# The sample's one-minute refresh is far too slow here: the node commits its config block seconds
+# after start, and until the auth service observes it every Authenticate answers Unavailable - long
+# enough for a waiting client's nonce to expire.
+ENV SC_AUTH_CONFIG_REFRESH_INTERVAL=1s
 
 # Override default database credentials (YAML samples default to "yugabyte"
 # which is correct for YugabyteDB but not for the PostgreSQL base image).
@@ -39,10 +47,14 @@ ENV SC_VC_DATABASE_DATABASE="postgres"
 ENV SC_QUERY_DATABASE_USERNAME="postgres"
 ENV SC_QUERY_DATABASE_PASSWORD="postgres"
 ENV SC_QUERY_DATABASE_DATABASE="postgres"
+ENV SC_AUTH_DATABASE_USERNAME="postgres"
+ENV SC_AUTH_DATABASE_PASSWORD="postgres"
+ENV SC_AUTH_DATABASE_DATABASE="postgres"
 
 # Disable TLS usage for db.
 ENV SC_VC_DATABASE_TLS_MODE="none"
 ENV SC_QUERY_DATABASE_TLS_MODE="none"
+ENV SC_AUTH_DATABASE_TLS_MODE="none"
 
 COPY ${SRC_BIN_PATH}/${TARGETOS}-${TARGETARCH}/* ${BINS_PATH}/
 COPY ./docker/images/test_node/run ./docker/images/test_node/healthcheck ${BINS_PATH}/
@@ -54,7 +66,7 @@ RUN chmod a+x ${BINS_PATH}/*
 RUN ${BINS_PATH}/loadgen make-artifacts -c "${CONFIGS_PATH}/loadgen.yaml"
 
 # Expose ports
-EXPOSE 7050 4001 2114 7001 2117 2110
+EXPOSE 7050 4001 2114 7001 2117 2110 10001 2121
 
 # OCI metadata labels
 LABEL org.opencontainers.image.created="${CREATED}" \

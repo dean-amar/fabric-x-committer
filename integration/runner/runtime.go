@@ -17,8 +17,11 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/protoutil"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -28,8 +31,10 @@ import (
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
+	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
@@ -62,8 +67,12 @@ type (
 		QueryServiceClient  committerpb.QueryServiceClient
 		SidecarClientConfig *connection.ClientConfig
 		NotifyClient        committerpb.NotifierClient
-		NotifyStream        committerpb.Notifier_OpenNotificationStreamClient
-		StreamAllTxStream   committerpb.Notifier_StreamAllTransactionsClient
+		// ClientCredentials authenticates this runtime's own clients against the query service and the
+		// sidecar. It is non-nil only when the topology runs an AuthService, in which case those
+		// services enforce ACL and an unauthenticated client is answered PermissionDenied.
+		ClientCredentials credentials.PerRPCCredentials
+		NotifyStream      committerpb.Notifier_OpenNotificationStreamClient
+		StreamAllTxStream committerpb.Notifier_StreamAllTransactionsClient
 
 		CommittedBlock          chan *common.Block
 		TxBuilder               *workload.TxBuilder
@@ -173,6 +182,14 @@ const (
 	TestChannelName = "channel1"
 )
 
+const (
+	// authTestTokenTTL and authTestNonceTTL outlast any integration test, so a minted token never
+	// lapses mid-test and no client re-authenticates behind an RPC. The service defaults (5m/1m) are
+	// production lifetimes; a test that wants to exercise expiry sets them explicitly.
+	authTestTokenTTL = time.Hour
+	authTestNonceTTL = time.Hour
+)
+
 // NewRuntime creates a new test runtime.
 func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	t.Helper()
@@ -260,6 +277,8 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			VerifierBatchSizeCutoff:             conf.VerifierBatchSizeCutoff,
 			QueryTLSRefreshInterval:             conf.QueryTLSRefreshInterval,
 			AuthConfigRefreshInterval:           conf.AuthConfigRefreshInterval,
+			AuthTokenTTL:                        authTestTokenTTL,
+			AuthNonceTTL:                        authTestNonceTTL,
 
 			// Keep-alive configuration for services which exposes their API.
 			KeepAliveTime:                conf.KeepAliveTime,
@@ -364,11 +383,71 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	c.CoordinatorClient = servicepb.NewCoordinatorClient(
 		test.NewSecuredConnection(t, services.Coordinator.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
+	// The query service and the sidecar authorize every RPC when the topology runs an AuthService, so
+	// this runtime's own clients have to authenticate. The token source signs with the policy's identity
+	// when one is configured, and otherwise with a peer identity from the generated crypto - the shipped
+	// loadgen sample leaves policy.identity unset, and both satisfy the channel's Readers policy.
+	// Nil unless an AuthService is configured, in which case each carries its own minted token.
+	var queryCredentials, notifyCredentials credentials.PerRPCCredentials
+	if authEndpoint := services.Auth.GrpcEndpoint; authEndpoint != nil && !authEndpoint.Empty() {
+		signer, err := ordererdial.NewIdentitySigner(c.SystemConfig.Policy.Identity)
+		require.NoError(t, err)
+		if signer == nil {
+			identities, idErr := testcrypto.GetPeersIdentities(c.SystemConfig.Policy.ArtifactsPath)
+			require.NoError(t, idErr)
+			require.NotEmpty(t, identities, "an AuthService is configured but no signing identity is "+
+				"available: set policy.identity or point policy.artifacts-path at generated crypto")
+			signer = identities[0]
+		}
+
+		tlsCreds, err := connection.NewClientTLSCredentials(c.SystemConfig.ClientTLS)
+		require.NoError(t, err)
+		// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
+		var certHash []byte
+		if tlsCreds.Mode == connection.MutualTLSMode {
+			certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
+			require.NoError(t, err)
+		}
+
+		authClient := servicepb.NewAuthServiceClient(
+			test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
+		)
+		// Every client mints its own token here, rather than sharing one lazily-refreshing
+		// TokenSource: a shared source keeps a single cached token and scope, so concurrent clients
+		// overwrite each other's state and the exchange happens inside an arbitrary RPC. Minting up
+		// front makes each client's token independent and every failure surface at setup.
+		mintToken := func() *acl.Token {
+			nonce, nErr := authClient.IssueNonce(ctx, &servicepb.IssueNonceRequest{})
+			require.NoError(t, nErr)
+			envelope, eErr := acl.BuildAuthEnvelope(&acl.AuthEnvelopeParams{
+				Signer:      signer,
+				ChannelID:   c.SystemConfig.Policy.ChannelID,
+				TLSCertHash: certHash,
+				Nonce:       nonce.GetNonce(),
+			})
+			require.NoError(t, eErr)
+			resp, aErr := authClient.Authenticate(ctx, &servicepb.AuthenticateRequest{
+				SignedEnvelope: envelope,
+			})
+			require.NoError(t, aErr)
+			return &acl.Token{
+				Token:               resp.GetToken(),
+				SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
+			}
+		}
+		queryCredentials = mintToken()
+		notifyCredentials = mintToken()
+		c.ClientCredentials = mintToken()
+	}
 	c.QueryServiceClient = committerpb.NewQueryServiceClient(
-		test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnectionWithCredentials(
+			t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS, queryCredentials,
+		),
 	)
 	c.NotifyClient = committerpb.NewNotifierClient(
-		test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS),
+		test.NewSecuredConnectionWithCredentials(
+			t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS, notifyCredentials,
+		),
 	)
 	var err error
 	c.OrdererStream, err = adapters.NewBroadcastStream(ctx, &c.OrdererEnv.OrdererConnConfig)
@@ -496,6 +575,7 @@ func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
 		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx, delivercommitter.Parameters{
 			ClientConfig: c.SidecarClientConfig,
+			Credentials:  c.ClientCredentials,
 			OutputBlock:  c.CommittedBlock,
 		}))
 	}, func(ctx context.Context) bool {

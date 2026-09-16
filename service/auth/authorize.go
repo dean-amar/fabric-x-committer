@@ -48,11 +48,6 @@ func (a *authorizer) authorize(
 	case errors.Is(err, ErrTokenNotFound):
 		return nil, grpcerror.WrapUnauthenticated(errors.New("token is not recognized"))
 	case err != nil:
-		// A store failure is not a denial, and must not be reported as one: a resource server treats
-		// Unauthenticated as definitive and tears the stream down, so a database blip here would kill
-		// every established stream at once. Unavailable is the code its transient tolerance recognizes.
-		// The cause is logged rather than returned, so no database detail crosses the wire.
-		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapUnavailable(errors.New("the token store is unavailable"))
 	}
 

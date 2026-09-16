@@ -58,6 +58,11 @@ type (
 		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed channel
 		// configuration. Tests set it low so enforcement becomes active promptly after bootstrap.
 		AuthConfigRefreshInterval time.Duration // auth
+		// AuthTokenTTL and AuthNonceTTL are the AuthService token and nonce lifetimes. Tests set them
+		// far longer than any test runs, so a token never lapses mid-test and clients never
+		// re-authenticate behind an RPC.
+		AuthTokenTTL time.Duration // auth
+		AuthNonceTTL time.Duration // auth
 
 		// Keep-alive configuration for exposing API services (sidecar, query) for testing.
 		//

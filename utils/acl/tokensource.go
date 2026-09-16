@@ -57,6 +57,18 @@ type (
 		expiresAt time.Time
 	}
 
+	// Token is a single already-issued token, attached unchanged to every RPC. A caller that mints its
+	// own token - exchanging a nonce and a signed envelope for one explicitly - uses this instead of
+	// TokenSource, so each client carries exactly the token it minted, with no shared refresh state and
+	// no re-authentication hidden behind an ordinary RPC. It never refreshes: the caller is responsible
+	// for requesting a lifetime that outlasts the client.
+	Token struct {
+		// Token is the encoded JWT sent as authorization metadata.
+		Token string
+		// SecureTransportOnly reports whether the token may travel only over a secure transport.
+		SecureTransportOnly bool
+	}
+
 	// AuthEnvelopeParams describes the authentication envelope to build.
 	AuthEnvelopeParams struct {
 		// Signer is the client's MSP signing identity; it signs the envelope.
@@ -70,7 +82,21 @@ type (
 	}
 )
 
-var _ credentials.PerRPCCredentials = (*TokenSource)(nil)
+var (
+	_ credentials.PerRPCCredentials = (*TokenSource)(nil)
+	_ credentials.PerRPCCredentials = (*Token)(nil)
+)
+
+// GetRequestMetadata returns the fixed token as authorization metadata. It satisfies
+// credentials.PerRPCCredentials.
+func (t *Token) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
+	return map[string]string{TokenMetadataKey: t.Token}, nil
+}
+
+// RequireTransportSecurity satisfies credentials.PerRPCCredentials.
+func (t *Token) RequireTransportSecurity() bool {
+	return t.SecureTransportOnly
+}
 
 // GetRequestMetadata returns the authorization metadata for an RPC, authenticating or refreshing the
 // token as needed. It satisfies credentials.PerRPCCredentials.

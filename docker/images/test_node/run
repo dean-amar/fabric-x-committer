@@ -22,9 +22,14 @@ if has_op --insecure; then
 
   export SC_QUERY_SERVER_TLS_MODE="none"
   export SC_QUERY_MONITORING_TLS_MODE="none"
+  export SC_QUERY_AUTH_CLIENT_TLS_MODE="none"
+
+  export SC_AUTH_SERVER_TLS_MODE="none"
+  export SC_AUTH_MONITORING_TLS_MODE="none"
 
   export SC_SIDECAR_SERVER_TLS_MODE="none"
   export SC_SIDECAR_MONITORING_TLS_MODE="none"
+  export SC_SIDECAR_AUTH_CLIENT_TLS_MODE="none"
   export SC_SIDECAR_COMMITTER_TLS_MODE="none"
   export SC_SIDECAR_ORDERER_TLS_MODE="none"
 
@@ -39,6 +44,7 @@ if has_op --insecure; then
   export SC_LOADGEN_SERVER_TLS_MODE="none"
   export SC_LOADGEN_MONITORING_TLS_MODE="none"
   export SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE="none"
+  export SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE="none"
   export SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE="none"
 fi
 
@@ -58,6 +64,7 @@ if has_op orderer; then
 fi
 
 if has_op committer; then
+  "$BINS_PATH/committer" start auth        --config "$CONFIGS_PATH/auth.yaml" &
   "$BINS_PATH/committer" start verifier    --config "$CONFIGS_PATH/verifier.yaml" &
   "$BINS_PATH/committer" start vc          --config "$CONFIGS_PATH/vc.yaml" &
   "$BINS_PATH/committer" start query       --config "$CONFIGS_PATH/query.yaml" &

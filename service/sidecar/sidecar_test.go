@@ -146,7 +146,9 @@ func (env *sidecarTestEnv) startSidecarClient(
 ) {
 	t.Helper()
 	committerClient := test.NewTLSClientConfig(sidecarClientCreds, &env.serverConfig.GRPC.Endpoint)
-	env.committedBlock = delivercommitter.Start(ctx, t, committerClient, startBlkNum)
+	env.committedBlock = delivercommitter.Start(ctx, t, delivercommitter.Parameters{
+		ClientConfig: committerClient, NextBlockNum: startBlkNum,
+	})
 }
 
 func (env *sidecarTestEnv) startNotificationStream(

@@ -42,6 +42,7 @@ const (
 	vcName          = "vc"
 	queryName       = "query"
 	coordinatorName = "coordinator"
+	authName        = "auth"
 	dbName          = "db"
 
 	runCMD        = "run"

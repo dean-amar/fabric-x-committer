@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
@@ -105,6 +106,33 @@ func NewSecuredConnection(
 ) *grpc.ClientConn {
 	t.Helper()
 	return NewSecuredConnectionWithRetry(t, endpoint, tlsConfig, defaultGrpcRetryProfile)
+}
+
+// NewSecuredConnectionWithCredentials creates a connection that also attaches per-RPC credentials, as a
+// client of an ACL-enforcing server must. A nil creds yields the same connection as
+// NewSecuredConnection, so a caller may pass whatever its topology produced without branching.
+func NewSecuredConnectionWithCredentials(
+	t *testing.T,
+	endpoint connection.WithAddress,
+	tlsConfig connection.TLSConfig,
+	creds credentials.PerRPCCredentials,
+) *grpc.ClientConn {
+	t.Helper()
+	if creds == nil {
+		return NewSecuredConnection(t, endpoint, tlsConfig)
+	}
+
+	clientCreds, err := tlsConfig.ClientCredentials()
+	require.NoError(t, err)
+	conn, err := connection.NewConnection(connection.ClientParameters{
+		Address:        endpoint.Address(),
+		Creds:          clientCreds,
+		Retry:          &defaultGrpcRetryProfile,
+		AdditionalOpts: []grpc.DialOption{grpc.WithPerRPCCredentials(creds)},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { connection.CloseConnectionsLog(conn) })
+	return conn
 }
 
 // NewSecuredConnectionWithRetry creates the default connection with given transport credentials.

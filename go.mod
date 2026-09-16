@@ -188,3 +188,7 @@ require (
 	moul.io/http2curl/v2 v2.3.0 // indirect
 	mvdan.cc/gofumpt v0.10.0 // indirect
 )
+
+// TEMPORARY: local fabric-x-common with the `auth` test peer (branch acl-preparation), needed for the
+// AuthService's own TLS certificate. Drop this once that change is released upstream.
+replace github.com/hyperledger/fabric-x-common => /Users/deanamar/ClonedForkedFabricXCommon/fabric-x-common

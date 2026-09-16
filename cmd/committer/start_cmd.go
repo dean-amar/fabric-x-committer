@@ -29,8 +29,8 @@ func startCMD() *cobra.Command {
 		Short: "Start a service.",
 	}
 	for _, name := range []string{
-		sidecarService, coordinatorService, vcService, verifierService, queryService, snapshotHasherService,
-		authService,
+		sidecarService, coordinatorService, vcService,
+		verifierService, queryService, snapshotHasherService, authService,
 	} {
 		cmd.AddCommand(startServiceCommand(name))
 	}

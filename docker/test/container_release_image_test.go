@@ -70,7 +70,7 @@ func TestCommitterReleaseImagesWithTLS(t *testing.T) {
 	t.Log("creating config-block")
 	artifactsPath := generateArtifacts(t)
 
-	committerNodes := []string{verifierName, vcName, queryName, coordinatorName, sidecarName}
+	committerNodes := []string{authName, verifierName, vcName, queryName, coordinatorName, sidecarName}
 
 	for _, dbType := range []string{testdb.YugaDBType, testdb.PostgresDBType} {
 		t.Run(fmt.Sprintf("database:%s", dbType), func(t *testing.T) {
@@ -285,9 +285,13 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, param
 				"SC_COORDINATOR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_MONITORING_TLS_MODE=" + params.tlsMode,
+				"SC_QUERY_AUTH_CLIENT_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_SERVER_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_COMMITTER_TLS_MODE=" + params.tlsMode,
+				"SC_SIDECAR_AUTH_CLIENT_TLS_MODE=" + params.tlsMode,
 				"SC_VC_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_VC_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_VERIFIER_SERVER_TLS_MODE=" + params.tlsMode,
@@ -300,6 +304,12 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, param
 				"SC_QUERY_DATABASE_USERNAME=" + params.dbUsername(),
 				"SC_VC_DATABASE_DATABASE=" + params.dbDefaultDatabase(),
 				"SC_QUERY_DATABASE_DATABASE=" + params.dbDefaultDatabase(),
+				"SC_AUTH_DATABASE_PASSWORD=" + params.dbPassword,
+				"SC_AUTH_DATABASE_USERNAME=" + params.dbUsername(),
+				"SC_AUTH_DATABASE_DATABASE=" + params.dbDefaultDatabase(),
+				// Until the auth service observes the committed config it answers Unavailable, and the
+				// sample's one-minute refresh outlasts a waiting client's nonce.
+				"SC_AUTH_CONFIG_REFRESH_INTERVAL=500ms",
 			},
 			Healthcheck: &container.HealthConfig{
 				Test: []string{
@@ -356,6 +366,7 @@ func startLoadgenNodeWithReleaseImage(
 				"SC_LOADGEN_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
+				"SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE=" + params.tlsMode,
 			},
 		},

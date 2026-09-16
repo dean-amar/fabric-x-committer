@@ -62,6 +62,8 @@ func (c *SidecarAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 		return runSidecarReceiver(gCtx, &sidecarReceiverParameters{
 			ClientConfig: c.config.SidecarClient,
 			Res:          c.res,
+			Auth:         c.config.Auth,
+			Identity:     c.res.Profile.Policy.Identity,
 		})
 	})
 	g.Go(func() error {

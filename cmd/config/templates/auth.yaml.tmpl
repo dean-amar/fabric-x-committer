@@ -18,3 +18,13 @@
 # How often the committed channel configuration is re-read to rebuild the evaluation bundle.
 config-refresh-interval: {{ .AuthConfigRefreshInterval }}
 {{- end }}
+
+{{- if .AuthTokenTTL }}
+# Lifetime of a minted token.
+token-ttl: {{ .AuthTokenTTL }}
+{{- end }}
+
+{{- if .AuthNonceTTL }}
+# How long an issued authentication nonce remains redeemable.
+nonce-ttl: {{ .AuthNonceTTL }}
+{{- end }}

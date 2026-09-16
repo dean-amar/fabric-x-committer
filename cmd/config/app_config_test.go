@@ -31,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
@@ -134,6 +135,10 @@ func TestReadConfigSidecar(t *testing.T) {
 			LastCommittedBlockSetInterval: 5 * time.Second,
 			WaitingTxsLimit:               20_000_000,
 			ChannelBufferSize:             100,
+			Auth: &acl.ClientConfig{
+				Config:                   newClientConfigWithDefaultTLS("auth", "sidecar", 10001),
+				StreamRevalidateInterval: time.Minute,
+			},
 		},
 	}}
 	for _, tc := range tests {
@@ -361,6 +366,9 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
+			Auth: &acl.ClientConfig{
+				Config: newClientConfigWithDefaultTLS("auth", "query", 10001),
+			},
 		},
 	}}
 
@@ -488,9 +496,7 @@ func TestReadConfigAuth(t *testing.T) {
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
 		}),
 		expectedServiceConfig: &auth.Config{
-			Database: defaultSampleDBConfig(),
-			SigningKeyPath: filepath.Join(artifactsPath,
-				"peerOrganizations/peer-org-0.com/peers/auth/auth-signing-key.pem"),
+			Database:                defaultSampleDBConfig(),
 			TokenTTL:                5 * time.Minute,
 			EnvelopeFreshnessWindow: 5 * time.Minute,
 			NonceTTL:                time.Minute,
@@ -549,6 +555,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", "loadgen", 4001),
+					Auth:          newClientConfigWithDefaultTLS("auth", "loadgen", 10001),
 					Orderer: ordererdial.Config{
 						FaultToleranceLevel:        ordererdial.BFT,
 						LatestKnownConfigBlockPath: "/root/artifacts/config-block.pb.bin",

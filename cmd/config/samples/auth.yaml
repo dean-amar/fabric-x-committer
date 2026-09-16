@@ -94,7 +94,10 @@ database:
 # by one instance verifies at another. When empty, an ephemeral key is generated at startup:
 # convenient for a single-instance dev deployment, but tokens then do not survive a restart and
 # separate instances cannot verify each other's tokens.
-signing-key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/auth-signing-key.pem
+#
+# Left empty here because this sample describes a single instance and the crypto generator produces no
+# signing key for the auth service. Set it for any deployment running more than one instance.
+signing-key-path: ""
 
 # Lifetime of a minted token. Clients refresh by calling Authenticate again before it elapses.
 # Tokens cannot be revoked, so this is the only bound on how long a stolen token - or an identity that

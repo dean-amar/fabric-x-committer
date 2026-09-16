@@ -65,16 +65,9 @@ func NewAuthService(config *Config) *Service {
 		metrics:     newAuthServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
-	}
-	if config.ChallengeRequestsPerSecond > 0 {
-		svc.challenges = rate.NewLimiter(
+		challenges: rate.NewLimiter(
 			rate.Limit(config.ChallengeRequestsPerSecond), config.ChallengeBurst,
-		)
-		logger.Infof("Challenge rate limit: %d/s (burst %d) across IssueNonce and Authenticate",
-			config.ChallengeRequestsPerSecond, config.ChallengeBurst)
-	} else {
-		logger.Warn("Challenge rate limiting is disabled: IssueNonce and Authenticate are reachable " +
-			"without a token, so an unthrottled caller can spam them.")
+		),
 	}
 	return svc
 }
