@@ -109,12 +109,16 @@ func TestACLQueryWithMintedToken(t *testing.T) {
 }
 
 // TestACLQueryRejectedWithoutToken verifies enforcement is actually on: the same query without a token
-// is refused before the handler runs.
+// is refused before the handler runs. It dials its own connection instead of using the runtime's query
+// client, which attaches minted credentials to every RPC and so cannot express the no-token case.
 func TestACLQueryRejectedWithoutToken(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
 
-	_, err := env.c.QueryServiceClient.GetRows(t.Context(), &committerpb.Query{
+	client := committerpb.NewQueryServiceClient(test.NewSecuredConnection(
+		t, env.c.SystemConfig.Services.Query.GrpcEndpoint, env.c.SystemConfig.ClientTLS,
+	))
+	_, err := client.GetRows(t.Context(), &committerpb.Query{
 		Namespaces: []*committerpb.QueryNamespace{
 			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
 		},
