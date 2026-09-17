@@ -134,6 +134,10 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			}
 
 			runtime.CreateRuntimeClients(ctx, t)
+			// The container's sidecar and query service enforce ACL, and Start - which mints for a
+			// topology the runtime launches itself - never runs here: the committer is already up in the
+			// container. Without this every client below carries an empty token.
+			runtime.MintAuthTokens(t)
 			runtime.OpenNotificationStream(ctx, t)
 
 			// Adding namespace policy and creating transaction builder

@@ -474,6 +474,13 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 		"cannot use load generator for committer with an orderer")
 
 	t.Log("Running services")
+	if AuthService&serviceFlags != 0 {
+		require.NotNil(t, c.AuthService, "the AuthService requires Config.EnableACL")
+		// Started before the query service so the query service's first authorization attempt has
+		// somewhere to go; it still fails closed until the AuthService has loaded a config bundle.
+		c.AuthService.Restart(t)
+		c.MintAuthTokens(t)
+	}
 	if loadGenMatcher&serviceFlags != 0 {
 		c.startLoadGen(t, serviceFlags)
 	}
@@ -500,13 +507,6 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
 		c.OpenNotificationStream(t.Context(), t)
-	}
-	if AuthService&serviceFlags != 0 {
-		require.NotNil(t, c.AuthService, "the AuthService requires Config.EnableACL")
-		// Started before the query service so the query service's first authorization attempt has
-		// somewhere to go; it still fails closed until the AuthService has loaded a config bundle.
-		c.AuthService.Restart(t)
-		c.mintAuthTokens(t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
@@ -782,10 +782,15 @@ func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum u
 	require.Equal(t, blkNum+1, nextBlock.Number)
 }
 
-// mintAuthTokens fills every client's credentials with a freshly minted token. It runs from Start,
-// after the AuthService process is up: CreateRuntimeClients builds the clients before any service is
-// launched, so a nonce request there would reach a reserved-but-unserved port and fail.
-func (c *CommitterRuntime) mintAuthTokens(t *testing.T) {
+// MintAuthTokens fills every client's credentials with a freshly minted token. It cannot run from
+// CreateRuntimeClients, which builds the clients before any service is launched, so a nonce request
+// there would reach a reserved-but-unserved port and fail.
+//
+// Start calls it for a topology it launches itself. A test that drives an already-running committer -
+// the container tests, which build a CommitterRuntime literal and never call Start - must call it
+// itself, before using any client, or every RPC carries an empty token and the ACL-enforcing services
+// reject it with Unauthenticated. It is a no-op when the topology runs no AuthService.
+func (c *CommitterRuntime) MintAuthTokens(t *testing.T) {
 	t.Helper()
 	for _, creds := range c.authCredentials {
 		minted, err := acl.MintToken(t.Context(), c.authMintParams)
