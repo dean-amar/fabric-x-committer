@@ -476,10 +476,10 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	t.Log("Running services")
 	if AuthService&serviceFlags != 0 {
 		require.NotNil(t, c.AuthService, "the AuthService requires Config.EnableACL")
-		// Started before the query service so the query service's first authorization attempt has
-		// somewhere to go; it still fails closed until the AuthService has loaded a config bundle.
+		// Started before every service that enforces ACL, so their first authorization attempt has
+		// somewhere to go. It answers nothing on its merits until it has loaded a channel configuration,
+		// which is why minting cannot happen here; see the mint below.
 		c.AuthService.Restart(t)
-		c.MintAuthTokens(t)
 	}
 	if loadGenMatcher&serviceFlags != 0 {
 		c.startLoadGen(t, serviceFlags)
@@ -506,10 +506,24 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	}
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
-		c.OpenNotificationStream(t.Context(), t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
+	}
+
+	// Minting comes after the transaction path is up and cannot move earlier. A token is issued only
+	// against a channel configuration; the AuthService loads that from a committed config block; and the
+	// block is committed by the path started above - the sidecar pulls it from the orderer and the VC
+	// writes it. MintToken retries while the AuthService still reports no configuration.
+	if AuthService&serviceFlags != 0 {
+		c.MintAuthTokens(t)
+	}
+
+	// The notification stream is an ACL-enforced sidecar RPC, so it is opened only once its client holds
+	// a token. gRPC creates a stream lazily, so an untokened one would fail on its first Recv instead -
+	// far from this line.
+	if Sidecar&serviceFlags != 0 {
+		c.OpenNotificationStream(t.Context(), t)
 	}
 
 	if Coordinator&serviceFlags != 0 && Sidecar&serviceFlags != 0 {
