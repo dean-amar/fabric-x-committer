@@ -27,13 +27,8 @@ type ConfigQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// ReadConfigTransaction reads the latest committed channel-configuration transaction from the config
-// system namespace. It returns a transaction with a nil envelope - not an error - when no
-// configuration has been committed yet, which is the expected state during bootstrap.
-//
-// Every service that needs the committed configuration reads it through here: the query service to
-// refresh its TLS roots, the auth service to rebuild its policy-evaluation bundle. Keeping one
-// implementation means the two cannot disagree about which row is authoritative.
+// ReadConfigTransaction reads the latest committed channel-configuration transaction, returning a nil
+// envelope - not an error - during bootstrap. Shared, so no two readers disagree on the authoritative row.
 func ReadConfigTransaction(ctx context.Context, q ConfigQuerier) (*applicationpb.ConfigTransaction, error) {
 	rows, err := q.Query(ctx, selectConfigTransaction, []byte(committerpb.ConfigKey))
 	if err != nil {

@@ -29,14 +29,12 @@ const (
 	// TokenMetadataKey is the gRPC metadata key carrying the client's cert-bound JWT.
 	TokenMetadataKey = "authorization"
 
-	// healthServicePrefix is the gRPC health service. Its methods are exempt from ACL enforcement:
-	// health probes are infrastructure calls that carry no token and must succeed for liveness and
-	// readiness checks and load-balancer health monitoring to work once ACL is enabled.
+	// healthServicePrefix is exempt from enforcement: probes carry no token, and liveness, readiness and
+	// load-balancer checks must keep working once ACL is on.
 	healthServicePrefix = "/grpc.health.v1.Health/"
 
-	// authorizeTimeout bounds an Authorize call to the AuthService. Both stream establishment and
-	// re-checks use a stream context that carries no request deadline, so without this a hung
-	// AuthService could block indefinitely.
+	// authorizeTimeout bounds an Authorize call: a stream context carries no request deadline, so a hung
+	// AuthService would otherwise block indefinitely.
 	authorizeTimeout = 10 * time.Second
 
 	// defaultRevalidateInterval is how often an open stream re-authorizes when the caller does not
@@ -51,9 +49,8 @@ const (
 // ErrMissingToken is returned when a request carries no authorization token.
 var ErrMissingToken = errors.New("missing authorization token")
 
-// Enforcer authorizes a resource server's incoming RPCs against the AuthService. It forwards the
-// caller's token and the TLS certificate hash observed on the connection, and never inspects the
-// request body; a stream binds the token so its decision can be renewed for as long as it lives.
+// Enforcer authorizes a resource server's RPCs against the AuthService, forwarding the caller's token and
+// the certificate hash seen on the connection. It never inspects the request body.
 type Enforcer struct {
 	// Client is the AuthService every decision is delegated to.
 	Client servicepb.AuthServiceClient
@@ -66,11 +63,8 @@ type Enforcer struct {
 	conn *grpc.ClientConn
 }
 
-// NewEnforcer connects to the AuthService and returns an Enforcer that owns the connection, so a
-// service can build one in its constructor - before the gRPC server exists - and release it with Close.
-//
-// A nil config means ACL is not configured, and yields a nil Enforcer and no error. Close is nil-safe to
-// match, so a service needs no conditional on either side.
+// NewEnforcer dials the AuthService and owns the connection, so a service can build one in its
+// constructor. A nil config means ACL is unconfigured: nil Enforcer, no error, and Close is nil-safe.
 func NewEnforcer(config *Client) (*Enforcer, error) {
 	if config == nil {
 		return nil, nil //nolint:nilnil // no ACL section configured is a result, not a failure.
@@ -115,9 +109,8 @@ func (e *Enforcer) UnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-// StreamInterceptor authorizes a stream at establishment and binds the caller's token to the session,
-// so the decision can be renewed from the token alone for as long as the stream lives. Exempt methods
-// run without authorization and are not wrapped.
+// StreamInterceptor authorizes a stream at establishment and binds its token, so the decision can be
+// renewed for as long as the stream lives. Exempt methods are not wrapped.
 func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if isExempt(info.FullMethod) {
@@ -152,9 +145,8 @@ func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 	}
 }
 
-// authorize authorizes a call against the AuthService. It fails closed: a policy denial, an invalid
-// token, and an unreachable AuthService all surface as a gRPC status error. The call is bounded by
-// authorizeTimeout, since neither a unary RPC without a deadline nor a stream context carries one.
+// authorize fails closed: a policy denial, an invalid token and an unreachable AuthService all surface as
+// a gRPC status error. Bounded by authorizeTimeout, since neither a unary nor a stream context carries one.
 func (e *Enforcer) authorize(
 	ctx context.Context, token, resource string,
 ) (*servicepb.AuthorizeResponse, error) {
@@ -171,9 +163,8 @@ func (e *Enforcer) authorize(
 	return resp, nil
 }
 
-// decisionValidUntil returns how long a stream may reuse an authorization decision: the revalidation
-// interval, but never past the bound token's own expiry, so an expired token cannot keep a stream
-// alive even if the AuthService becomes unreachable in the meantime.
+// decisionValidUntil caps decision reuse at the revalidation interval and never past the bound token's
+// expiry, so an AuthService outage cannot keep a stream alive on an expired token.
 func (e *Enforcer) decisionValidUntil(resp *servicepb.AuthorizeResponse, now time.Time) time.Time {
 	interval := e.RevalidateInterval
 	if interval <= 0 {
@@ -187,9 +178,8 @@ func (e *Enforcer) decisionValidUntil(resp *servicepb.AuthorizeResponse, now tim
 	return validUntil
 }
 
-// tokenExpiry reads the bound token's expiry from an authorization response, returning the zero time
-// when the AuthService did not report one. A zero expiry means "no locally known bound", not "expired
-// at the epoch": the revalidation interval still bounds how long such a decision is reused.
+// tokenExpiry reads the bound token's expiry, or the zero time when none was reported. Zero means "no
+// locally known bound", not "expired at the epoch": the revalidation interval still bounds reuse.
 func tokenExpiry(resp *servicepb.AuthorizeResponse) time.Time {
 	if expiry := resp.GetTokenExpiresAt(); expiry > 0 {
 		return time.Unix(expiry, 0)

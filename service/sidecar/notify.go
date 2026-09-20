@@ -69,9 +69,8 @@ type (
 		streamWriteTimeout time.Duration
 	}
 
-	// committedBlockWithTxs contains the essential data from a committed block
-	// for streaming to StreamBlocks clients. This is a clean interface
-	// that separates the notifier from relay's internal blockWithStatus structure.
+	// committedBlockWithTxs is what a committed block reduces to for StreamBlocks clients, keeping the
+	// notifier independent of the relay's internal blockWithStatus.
 	committedBlockWithTxs struct {
 		blockNumber uint64
 		txs         []*servicepb.TxWithRef
@@ -224,9 +223,8 @@ func (n *notifier) OpenNotificationStream(
 	return wrapNotifierError(g.Wait())
 }
 
-// StreamBlocks implements the [committerpb.SidecarServiceServer] API.
-// It streams all committed transactions to the client, with optional filtering
-// by namespace and transaction status.
+// StreamBlocks streams all committed transactions to the client, optionally filtered by namespace and
+// transaction status.
 func (n *notifier) StreamBlocks(
 	req *committerpb.StreamBlocksRequest,
 	stream grpc.ServerStreamingServer[committerpb.BlockEvent],
@@ -374,9 +372,8 @@ func (m *subscriptions) removeAndEnqueueTimeoutEvents(
 	return pendingTxIDsRemoved, uniquePendingTxIDsRemoved
 }
 
-// dispatchBlockToAllTxStreams dispatches a committed block to all registered
-// StreamBlocks clients. It handles slow clients by using a timeout
-// and canceling streams that cannot keep up.
+// dispatchBlockToAllTxStreams sends a committed block to every registered StreamBlocks client, cancelling
+// a stream that cannot keep up within the timeout.
 func (n *notifier) dispatchBlockToAllTxStreams(ctx context.Context, block *committedBlockWithTxs) {
 	// Get snapshot of streams with minimal lock time
 	n.allTxStreamsMu.RLock()
@@ -432,9 +429,8 @@ func (n *notifier) unregisterAllTxStream(stream *allTxStream) {
 	n.allTxStreams = streams
 }
 
-// streamWorker runs in its own goroutine for each StreamBlocks client.
-// It receives committed blocks from the blockQueue, filters and enriches them
-// according to the stream's configuration, and sends the results to the client.
+// streamWorker runs per StreamBlocks client, filtering and enriching blocks off the queue according to
+// the stream's configuration before sending them.
 func (s *allTxStream) streamWorker(stream grpc.ServerStreamingServer[committerpb.BlockEvent]) error {
 	q := channel.NewReader(s.ctx, s.blockQueue)
 	for {

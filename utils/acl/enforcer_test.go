@@ -188,9 +188,8 @@ func TestStreamReusesDecisionWithinInterval(t *testing.T) {
 	require.Equal(t, 1, fake.authorizeCallCount())
 }
 
-// TestStreamReauthorizesWhenDecisionLapses verifies that once the cached decision lapses, the next
-// message re-authorizes with the bound token - which is what lets the AuthService re-resolve the
-// token to its record and catch expiry and a policy change.
+// TestStreamReauthorizesWhenDecisionLapses verifies a lapsed decision makes the next message
+// re-authorize, which is what catches token expiry and policy changes.
 func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
@@ -207,9 +206,8 @@ func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
 	require.Equal(t, testToken, fake.lastAuthorizeRequest().GetToken(), "the re-check must carry the token")
 }
 
-// TestStreamDeniesOnceBoundTokenExpires verifies the local hard bound: past the bound token's expiry
-// the stream is denied without consulting the AuthService, so an outage cannot extend a stream beyond
-// the lifetime of the token that established it.
+// TestStreamDeniesOnceBoundTokenExpires verifies the local hard bound: past the token's expiry the stream
+// is denied without consulting the AuthService, so an outage cannot extend it.
 func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(-time.Second).Unix()}
@@ -227,9 +225,8 @@ func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
 	require.Equal(t, 1, fake.authorizeCallCount())
 }
 
-// TestStreamDeniesMessageWhenTokenExpiresDuringReceive verifies the post-receive bound. A receive on an
-// idle stream can block past the bound token's expiry, so the message it eventually returns must not
-// reach the handler on the strength of the check that admitted the receive.
+// TestStreamDeniesMessageWhenTokenExpiresDuringReceive verifies the post-receive bound: a receive can
+// block past the token's expiry, so its message must not reach the handler on the earlier check.
 func TestStreamDeniesMessageWhenTokenExpiresDuringReceive(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{}
@@ -282,9 +279,8 @@ func TestStreamTolerantOfTransientReauthErrors(t *testing.T) {
 	require.GreaterOrEqual(t, fake.authorizeCallCount(), 2)
 }
 
-// TestStreamTerminatesWhenReauthorizationDenied verifies a definitive denial on a re-check terminates
-// the stream: the receive returns the denial and the stream context is cancelled, so a handler parked
-// on its context also wakes.
+// TestStreamTerminatesWhenReauthorizationDenied verifies a definitive denial terminates the stream: the
+// receive returns it and the stream context is cancelled, so a parked handler also wakes.
 func TestStreamTerminatesWhenReauthorizationDenied(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{
@@ -315,9 +311,8 @@ func ctxWithToken(token string) context.Context {
 	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenMetadataKey, token))
 }
 
-// fakeAuthClient is a test double for servicepb.AuthServiceClient, recording every Authorize call.
-// authorizeErr fails all of them; laterErr fails only those after the first, which is how a test
-// simulates a change - a policy denial or a brief outage - that only a re-check sees.
+// fakeAuthClient records every Authorize call. authorizeErr fails all of them; laterErr fails only those
+// after the first, simulating a change that only a re-check sees.
 type fakeAuthClient struct {
 	mu             sync.Mutex
 	tokenExpiresAt int64

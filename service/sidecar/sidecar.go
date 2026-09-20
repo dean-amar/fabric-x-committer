@@ -47,12 +47,8 @@ import (
 
 var logger = flogging.MustGetLogger("sidecar")
 
-// Service is a relay service which relays the block from orderer to committer. Further,
-// it aggregates the transaction status and forwards the validated block to clients who have
-// registered on the ledger server.
-//   - Implements peer.DeliverServer by streaming blocks from a blockStore.
-//   - Implements committerpb.SidecarServiceServer: read-only block queries are answered directly
-//     from the block store, and the notification streams are delegated to the notifier.
+// Service relays blocks from the orderer to the committer, aggregates transaction status, and serves the
+// result: peer.DeliverServer and block queries from the block store, notification streams via the notifier.
 type Service struct {
 	committerpb.UnimplementedSidecarServiceServer
 	deliveryParams deliverorderer.Parameters
@@ -235,9 +231,8 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
-// ACLEnforcer exposes the enforcer built by the constructor, so serve installs its interceptors when it builds the
-// gRPC server: the unary one guards block query, the streaming one guards block delivery and the
-// notification streams. Nil when no auth service is configured, which serves without ACL enforcement.
+// ACLEnforcer exposes the constructor's enforcer so serve installs its interceptors when building the gRPC
+// server: unary guards block query, streaming guards delivery and the notification streams.
 func (s *Service) ACLEnforcer() *acl.Enforcer {
 	return s.aclEnforcer
 }
@@ -733,16 +728,15 @@ func (s *Service) GetTxByID(_ context.Context, req *committerpb.TxID) (*common.E
 	return envelope, nil
 }
 
-// OpenNotificationStream and StreamBlocks satisfy the notification half of SidecarServiceServer by
-// delegating to the notifier. Upstream consolidated the former Notifier and SidecarService into one
-// SidecarService, so a single type must answer both halves; the notifier still owns the subscription
-// state and this only forwards to it.
+// OpenNotificationStream delegates to the notifier, which owns the subscription state. Upstream merged the
+// former Notifier and SidecarService, so one type must answer both halves of SidecarServiceServer.
 func (s *Service) OpenNotificationStream(
 	stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse],
 ) error {
 	return s.notifier.OpenNotificationStream(stream)
 }
 
+// StreamBlocks streams block events to the client, starting from the request's position.
 func (s *Service) StreamBlocks(
 	req *committerpb.StreamBlocksRequest, stream grpc.ServerStreamingServer[committerpb.BlockEvent],
 ) error {

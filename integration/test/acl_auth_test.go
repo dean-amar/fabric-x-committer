@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
@@ -33,18 +31,16 @@ const (
 	aclOtherNamespace = "2"
 )
 
-// aclEnv is a running committer with ACL enforcement on the query service, plus everything a client
-// needs to authenticate against it: a client to the AuthService and an MSP signing identity that
-// belongs to the channel the system was bootstrapped with.
+// aclEnv is a running committer plus what a client needs to authenticate against it: an AuthService client
+// and an MSP signing identity belonging to the bootstrapped channel.
 type aclEnv struct {
 	c          *runner.CommitterRuntime
 	authClient servicepb.AuthServiceClient
 	signer     msp.SigningIdentity
 }
 
-// TestACLQueryWithAuthenticatedClient walks the whole mechanism end to end against a live system: a
-// client obtains a nonce, signs it into an authentication envelope, exchanges that for a token, and
-// uses the token to read back a row committed through the ordinary transaction path.
+// TestACLQueryWithAuthenticatedClient walks the mechanism end to end against a live system: nonce ->
+// signed envelope -> token -> a query for a row committed through the ordinary transaction path.
 func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
@@ -81,10 +77,8 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	}}, rows.GetNamespaces())
 }
 
-// TestACLQueryRejectedWithoutToken verifies enforcement is actually on: the same query without a token
-// is refused before the handler runs. It dials its own connection because the runtime's query client is
-// authenticated - every other test relies on that - so only a deliberately bare client can express the
-// unauthenticated case.
+// TestACLQueryRejectedWithoutToken verifies enforcement is on: the same query without a token is refused
+// before the handler. It dials its own bare client, since the runtime's carries a token by design.
 func TestACLQueryRejectedWithoutToken(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
@@ -129,8 +123,7 @@ func TestACLAuthenticateRejectsForgedNonce(t *testing.T) {
 }
 
 // TestACLAuthenticateRejectsReplayedEnvelope is the property the nonce exists for: a captured envelope
-// cannot be redeemed a second time, even though it is byte-identical, correctly signed, and still well
-// inside the freshness window.
+// cannot be redeemed twice, though it is byte-identical, correctly signed and still fresh.
 func TestACLAuthenticateRejectsReplayedEnvelope(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
@@ -199,9 +192,8 @@ func (e *aclEnv) envelope(t *testing.T, nonce []byte) *common.Envelope {
 	return envelope
 }
 
-// authenticate exchanges an envelope for a token. It makes exactly one attempt: waitForEnforcement owns
-// the bootstrap wait, and the envelope's nonce is short-lived, so retrying here would only replay a
-// challenge the service has already rejected.
+// authenticate exchanges an envelope for a token in exactly one attempt: waitForEnforcement owns the
+// bootstrap wait, and retrying would only replay a challenge the service has already rejected.
 func (e *aclEnv) authenticate(t *testing.T, envelope *common.Envelope) string {
 	t.Helper()
 	resp, err := e.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
@@ -211,9 +203,8 @@ func (e *aclEnv) authenticate(t *testing.T, envelope *common.Envelope) string {
 	return resp.GetToken()
 }
 
-// waitForEnforcement blocks until the AuthService has loaded a configuration bundle and is answering
-// authentication attempts on their merits. A test that asserts on a specific rejection needs this
-// first, so it cannot mistake the bootstrap window's Unavailable for the denial it is checking.
+// waitForEnforcement blocks until the AuthService has a bundle and answers on the merits, so a test
+// asserting a specific rejection cannot mistake the bootstrap window's Unavailable for it.
 func (e *aclEnv) waitForEnforcement(t *testing.T) {
 	t.Helper()
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -245,10 +236,4 @@ func (e *aclEnv) commitRow(t *testing.T, key, value []byte) {
 		[]committerpb.Status{committerpb.Status_COMMITTED, committerpb.Status_COMMITTED},
 	)
 	require.Len(t, txIDs, 2)
-}
-
-// tokenContext returns a context carrying the token in the metadata key the enforcer reads.
-func (*aclEnv) tokenContext(t *testing.T, token string) context.Context {
-	t.Helper()
-	return metadata.AppendToOutgoingContext(t.Context(), acl.TokenMetadataKey, token)
 }

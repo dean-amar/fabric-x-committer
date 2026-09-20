@@ -25,12 +25,8 @@ const (
 // deliberately indistinguishable to the caller, so a client cannot probe which nonces exist.
 var ErrNonceNotFound = errors.New("authentication nonce is unknown, already used, or expired")
 
-// nonceStore issues and redeems the single-use nonces that make an authentication envelope
-// non-replayable. The server chooses the nonce, so a captured envelope carries a nonce that has
-// already been consumed and is worthless to a replayer; the freshness window and certificate binding
-// remain as defence in depth. Nonces live in the shared state database rather than in memory, so a
-// nonce issued by one instance can be redeemed at another - a client behind a load balancer has no
-// guarantee that its IssueNonce and Authenticate calls reach the same instance.
+// nonceStore issues and redeems the single-use nonces that make an envelope non-replayable. They live in
+// the shared database, not memory: a client behind a load balancer may hit two different instances.
 type nonceStore struct {
 	pool *pgxpool.Pool
 	ttl  time.Duration
@@ -50,10 +46,8 @@ func (s *nonceStore) issue(ctx context.Context, now time.Time) ([]byte, time.Tim
 	return nonce, expiresAt, nil
 }
 
-// consume redeems a nonce, returning ErrNonceNotFound unless it was present and unexpired. The
-// delete is the single-use gate: exactly one row is removed for a valid nonce, and a second attempt
-// removes none, so two concurrent redemptions of the same nonce cannot both succeed even across
-// instances.
+// consume redeems a nonce, returning ErrNonceNotFound unless it was present and unexpired. The delete is
+// the single-use gate: one row for a valid nonce, none on a second attempt, even across instances.
 func (s *nonceStore) consume(ctx context.Context, nonce []byte, now time.Time) error {
 	if len(nonce) == 0 {
 		return errors.Wrap(ErrNonceNotFound, "envelope carries no nonce")

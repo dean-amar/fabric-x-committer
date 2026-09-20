@@ -44,13 +44,8 @@ type (
 		RegisterService(Servers)
 	}
 
-	// ACLEnforcerProvider is an optional interface a Registerer implements to have its RPCs authorized.
-	// NewServers consults it before building the gRPC server, so the interceptors are installed on the
-	// server from the start rather than added to a running one.
-	//
-	// Services build their enforcer in their constructor, so it exists whenever configuration asks for
-	// ACL - nil therefore means "not configured", never "not ready yet". A service that does not
-	// implement this interface is served without enforcement.
+	// ACLEnforcerProvider lets a Registerer have its RPCs authorized. Consulted before the gRPC server is
+	// built, and nil means "not configured", never "not ready yet", since the constructor builds it.
 	ACLEnforcerProvider interface {
 		ACLEnforcer() *acl.Enforcer
 	}

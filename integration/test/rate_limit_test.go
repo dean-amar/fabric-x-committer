@@ -27,6 +27,9 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
+// numParallelRequests must exceed the configured burst, or nothing is rate limited.
+const numParallelRequests = 5
+
 func TestRateLimit(t *testing.T) {
 	t.Parallel()
 
@@ -39,8 +42,6 @@ func TestRateLimit(t *testing.T) {
 	})
 
 	c.Start(t, runner.FullTxPathWithQuery)
-
-	numParallelRequests := 5
 
 	tests := []struct {
 		name             string
@@ -112,11 +113,14 @@ func TestRateLimit(t *testing.T) {
 				t.Cleanup(func() { _ = conn.Close() })
 			}
 
-			// The query service and the sidecar authorize every RPC, so the requests carry a token;
-			// without one they would be rejected before the rate limiter this test is measuring.
+			// Authorized: without a token the requests would be rejected before reaching the rate
+			// limiter this test measures.
+			reqCtx, cancel := context.WithTimeout(
+				acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token), tt.timeout,
+			)
+			t.Cleanup(cancel)
 			successCount, rateLimitedCount, otherErrorCount := makeParallelRequests(
-				t, acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token),
-				numParallelRequests, conn, tt.requestFn, tt.timeout,
+				reqCtx, t, conn, tt.requestFn,
 			)
 
 			if tt.expectAllSucceed {
@@ -129,26 +133,21 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
-func makeParallelRequests( //nolint:revive // argument-limit 6 but limit is 4
+func makeParallelRequests(
+	ctx context.Context,
 	t *testing.T,
-	baseCtx context.Context,
-	numParallelRequests int,
 	conn *grpc.ClientConn,
 	requestFn func(ctx context.Context, conn *grpc.ClientConn) error,
-	timeout time.Duration,
 ) (success, rateLimited, otherErrors int32) {
 	t.Helper()
 
 	var successCount, rateLimitedCount, otherErrorCount atomic.Int32
 	var wg sync.WaitGroup
 
-	reqCtx, cancel := context.WithTimeout(baseCtx, timeout)
-	defer cancel()
-
 	for range numParallelRequests {
 		wg.Go(
 			func() {
-				err := requestFn(reqCtx, conn)
+				err := requestFn(ctx, conn)
 				if err == nil {
 					successCount.Add(1)
 					return

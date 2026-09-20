@@ -25,12 +25,8 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
-// authEnvelopeType is the channel-header type an authentication envelope carries. It is the general
-// application-message type, which ordinary transactions also use, so the type alone does NOT
-// distinguish an authentication request from a replayed transaction. Replay is stopped by the
-// single-use nonce, backed by the freshness window and - under mutual TLS - the certificate binding,
-// which makes a captured envelope useless to anyone but the original signer. The type, channel-id and
-// empty-payload checks in verifyEnvelope are domain separation, not replay protection.
+// authEnvelopeType is the header type an authentication envelope carries. Ordinary transactions use it
+// too, so it is domain separation, not replay protection - the single-use nonce is what stops replay.
 const authEnvelopeType = int32(common.HeaderType_MESSAGE)
 
 var (
@@ -43,14 +39,13 @@ var (
 	// ErrEnvelopeScope is returned when an envelope is not scoped to authentication for this channel
 	// (wrong header type or channel id).
 	ErrEnvelopeScope = errors.New("envelope is not an authentication request for this channel")
-	ErrNoEnvelope    = errors.New("signed envelope is required")
+	// ErrNoEnvelope is returned when the request carries no signed envelope at all.
+	ErrNoEnvelope = errors.New("signed envelope is required")
 )
 
 type (
-	// authenticator verifies signed envelopes and issues cert-bound tokens, persisting the resulting
-	// token-to-identity binding in the token store. It has no constructor: every field is supplied by
-	// its single caller, so a keyed struct literal says the same thing without a second type to keep in
-	// step with this one.
+	// authenticator verifies signed envelopes and issues cert-bound tokens. No constructor: its single
+	// caller supplies every field, so a keyed literal says the same without a second type to maintain.
 	authenticator struct {
 		signer                  *tokenSigner
 		tokens                  *tokenStore
@@ -59,10 +54,8 @@ type (
 		tokenTTL                time.Duration
 	}
 
-	// parsedEnvelope holds the pieces of a signed envelope that verifyEnvelope inspects: the channel
-	// header, the application payload bytes (empty for a genuine authentication envelope), the nonce the
-	// client claims from the SignatureHeader, and the single signed-data unit (serialized identity,
-	// signed payload bytes, and signature).
+	// parsedEnvelope holds the pieces verifyEnvelope inspects. payloadData is empty for a genuine
+	// authentication envelope; nonce is what the client claims from the SignatureHeader.
 	parsedEnvelope struct {
 		chdr        *common.ChannelHeader
 		payloadData []byte
@@ -70,9 +63,8 @@ type (
 		signedData  *protoutil.SignedData
 	}
 
-	// verifiedIdentity is the outcome of authenticating an envelope: the client's MSP identity
-	// (re-resolved against the latest configuration at authorization time), its MSP id, and the SHA-256
-	// of its TLS certificate (nil when the client connected without a certificate).
+	// verifiedIdentity is the outcome of authenticating an envelope. certHash is nil when the client
+	// connected without a certificate.
 	verifiedIdentity struct {
 		identity *msppb.Identity
 		mspID    string
@@ -80,9 +72,8 @@ type (
 	}
 )
 
-// authenticate verifies the signed envelope against the bundle, persists the token-to-identity
-// binding, and returns a freshly minted cert-bound token. It returns gRPC status errors:
-// Unauthenticated when the envelope is invalid, Internal when persistence or signing fails.
+// authenticate verifies the envelope, persists the token-to-identity binding and returns a fresh
+// cert-bound token. Unauthenticated when the envelope is invalid, Internal when signing or storing fails.
 func (a *authenticator) authenticate(
 	ctx context.Context, authRequest *servicepb.AuthenticateRequest, bundle *channelconfig.Bundle,
 ) (*servicepb.AuthenticateResponse, error) {
@@ -99,9 +90,8 @@ func (a *authenticator) authenticate(
 		)
 	}
 
-	// Redeem the nonce before verifying the signature: an envelope whose nonce is spent is a replay
-	// however well it is signed, and redeeming first denies a replayer the ability to make the service
-	// repeat the expensive signature check.
+	// Redeem before verifying the signature: a spent nonce is a replay however well signed, and redeeming
+	// first stops a replayer from making the service repeat the expensive signature check.
 	if err = a.nonces.consume(ctx, parsedSignedEnvelope.nonce, now); err != nil {
 		return nil, grpcerror.WrapUnauthenticated(
 			errors.Newf("authentication failed: %v", err),
@@ -146,14 +136,8 @@ func (a *authenticator) authenticate(
 	}, nil
 }
 
-// verifyEnvelope verifies an already-parsed authentication envelope against the given bundle and
-// returns the authenticated identity. It performs, in order: envelope scoping, timestamp freshness,
-// TLS certificate binding, MSP identity resolution and validation, and signature verification -
-// mirroring the envelope-processing steps the committer already uses for config envelopes.
-//
-// Redeeming the nonce is deliberately not part of this: that is the one stateful step, and keeping it
-// in authenticate leaves this a pure check over an already-parsed envelope and the bundle. The envelope
-// is parsed once, by the caller, because the caller needs the nonce out of it first.
+// verifyEnvelope checks scoping, freshness, certificate binding, MSP resolution and the signature, then
+// returns the identity. Redeeming the nonce stays in authenticate: it is the one stateful step.
 func (a *authenticator) verifyEnvelope(
 	ctx context.Context, parsed *parsedEnvelope, bundle *channelconfig.Bundle, now time.Time,
 ) (*verifiedIdentity, error) {
@@ -200,13 +184,8 @@ func (a *authenticator) verifyEnvelope(
 	}, nil
 }
 
-// parseSignedEnvelope unpacks an envelope into the pieces verifyEnvelope inspects. The nonce comes from
-// the SignatureHeader, which the payload signature covers (the signature is over the whole marshaled
-// payload), so a replayer cannot swap in a fresh nonce without invalidating the signature.
-//
-// The envelope arrives already parsed by gRPC, so only its inner payload is unmarshaled here. The
-// signature still covers the exact bytes the client signed: Envelope.payload is itself a bytes field,
-// so transporting the envelope as a typed message cannot alter them.
+// parseSignedEnvelope unpacks the envelope into the pieces verifyEnvelope inspects. The nonce comes from
+// the SignatureHeader, which the signature covers, so a replayer cannot swap in a fresh one.
 func parseSignedEnvelope(env *common.Envelope) (*parsedEnvelope, error) {
 	payload, err := protoutil.UnmarshalPayload(env.Payload)
 	if err != nil {
@@ -236,10 +215,8 @@ func parseSignedEnvelope(env *common.Envelope) (*parsedEnvelope, error) {
 	}, nil
 }
 
-// verifyCertBinding checks the envelope's claimed TLS certificate hash against the certificate
-// presented on the connection, returning the hash the token is bound to. When the client presented a
-// certificate (mutual TLS), the claimed hash must match it. When none is present, the transport TLS
-// mode is the security boundary and the token is not certificate-bound.
+// verifyCertBinding checks the claimed hash against the certificate on the connection and returns the hash
+// the token binds to. Without a client certificate the transport's TLS mode is the boundary.
 func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) {
 	actualHash := util.ExtractCertificateHashFromContext(ctx)
 	if len(actualHash) == 0 {
@@ -251,10 +228,8 @@ func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) 
 	return actualHash, nil
 }
 
-// validateTimestamp rejects a timestamp that is missing, not representable, or further from now than
-// the freshness window in either direction. It compares signed time bounds directly rather than an
-// absolute duration difference, so a far-future timestamp cannot overflow the arithmetic and be
-// accepted forever.
+// validateTimestamp rejects a missing, unrepresentable or out-of-window timestamp. It compares signed
+// bounds directly, so a far-future timestamp cannot overflow the arithmetic and be accepted forever.
 func validateTimestamp(ts *timestamppb.Timestamp, window time.Duration, now time.Time) error {
 	if ts == nil {
 		return errors.Wrap(ErrStaleEnvelope, "missing timestamp")

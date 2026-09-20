@@ -19,10 +19,8 @@ import (
 )
 
 type (
-	// Credentials attaches one already-minted token to every RPC, as gRPC per-RPC credentials. It holds
-	// no auth-service client and never re-authenticates: the token is minted once by MintToken and used
-	// unchanged until it expires, at which point the resource server rejects it and the caller mints a
-	// new one. A client that must outlive its token therefore requests a lifetime that covers its run.
+	// Credentials attaches one already-minted token to every RPC and never re-authenticates, so a client
+	// that must outlive its token requests a lifetime covering its whole run.
 	Credentials struct {
 		// Token is the encoded JWT sent as authorization metadata.
 		Token string
@@ -44,6 +42,8 @@ type (
 		Scope []string
 	}
 
+	// CommonParams is the identity material shared by minting a token and building the envelope it is
+	// minted from, so the two cannot drift apart.
 	CommonParams struct {
 		// Signer is the client's MSP signing identity; it signs the envelope.
 		Signer identity.SignerSerializer
@@ -54,10 +54,8 @@ type (
 	}
 )
 
-// MintToken performs the whole client side of authentication: it fetches a single-use nonce, signs it
-// into an envelope, and exchanges that for a token bound to the client's certificate. It is the only
-// way to obtain Credentials, so every caller pays the signature-verification cost exactly once,
-// up front, where the failure is reported - rather than inside an unrelated RPC.
+// MintToken runs the whole client side of authentication: fetch a nonce, sign it into an envelope, exchange
+// it for a cert-bound token. Failure surfaces here rather than inside an unrelated RPC.
 func MintToken(ctx context.Context, params *MintParams) (*Credentials, error) {
 	// A nonce is fetched per attempt rather than cached: it is valid for exactly one Authenticate call,
 	// so there is nothing to reuse.
@@ -85,18 +83,8 @@ func MintToken(ctx context.Context, params *MintParams) (*Credentials, error) {
 	}, nil
 }
 
-// BuildAuthEnvelope creates the signed envelope a client presents to Authenticate: an empty-payload
-// application message scoped to the channel, carrying the client's TLS certificate hash for the token's
-// binding and the server-issued nonce in its SignatureHeader.
-//
-// It is exported because it is the whole client side of the envelope contract: MintToken calls it for
-// the normal path, and a caller that must present a deliberately malformed challenge - a missing or
-// replayed nonce - needs exactly this and cannot go through MintToken.
-//
-// It builds the envelope directly rather than calling protoutil.CreateSignedEnvelopeWithTLSBinding
-// because that helper generates its own random nonce, and the whole point of the challenge is that the
-// *server* chooses it. The signature covers the entire marshaled payload - which includes the
-// SignatureHeader - so the nonce cannot be substituted without invalidating the signature.
+// BuildAuthEnvelope builds the envelope Authenticate expects: empty payload, channel-scoped, cert hash,
+// server-issued nonce. protoutil's helper picks its own nonce, which would defeat the challenge.
 func BuildAuthEnvelope(params *AuthEnvelopeParams) (*common.Envelope, error) {
 	creator, err := params.Signer.Serialize()
 	if err != nil {
@@ -107,8 +95,8 @@ func BuildAuthEnvelope(params *AuthEnvelopeParams) (*common.Envelope, error) {
 	channelHeader.TlsCertHash = params.TLSCertHash
 	signatureHeader := protoutil.MakeSignatureHeader(creator, params.Nonce)
 
-	// Data is deliberately left empty: an authentication envelope carries no application data, and
-	// that emptiness is what distinguishes it from a replayed transaction sharing this header type.
+	// Data is deliberately empty: a transaction-shaped signer cannot produce that shape, which is the
+	// domain separation the AuthService checks. Replay itself is stopped by the nonce.
 	payloadBytes, err := proto.Marshal(&common.Payload{
 		Header: protoutil.MakePayloadHeader(channelHeader, signatureHeader),
 	})

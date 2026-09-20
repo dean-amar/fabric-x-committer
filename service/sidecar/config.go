@@ -30,9 +30,8 @@ type (
 		// ChannelBufferSize is the buffer size that will be used to queue blocks, requests, and statuses.
 		ChannelBufferSize int                       `mapstructure:"channel-buffer-size" default:"100" validate:"gt=0"`
 		Notification      NotificationServiceConfig `mapstructure:"notification"`
-		// Auth optionally enables ACL enforcement: when set, block delivery, block query, and the
-		// notification streams are authorized against the AuthService. When absent (nil), the sidecar
-		// serves without ACL checks, preserving existing behavior.
+		// Auth optionally enables ACL enforcement: when set, block delivery, block query and the
+		// notification streams are authorized against the AuthService. Nil serves without ACL checks.
 		Auth *acl.Client `mapstructure:"auth"`
 	}
 

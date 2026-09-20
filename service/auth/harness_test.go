@@ -48,9 +48,8 @@ const (
 	testNS3 = "ns3"
 )
 
-// authTestEnv is a shared test fixture: a real channel-configuration bundle built from a config block
-// with crypto, the marshaled configuration envelope it was built from (for exercising the DB refresh
-// path), and a peer signing identity that belongs to that bundle's MSP.
+// authTestEnv is a real channel-configuration bundle, the envelope it was built from (for the DB refresh
+// path), and a peer signing identity belonging to that bundle's MSP.
 type authTestEnv struct {
 	bundle         *channelconfig.Bundle
 	configEnvelope []byte
@@ -92,9 +91,8 @@ type envelopeParams struct {
 	nonce       []byte
 }
 
-// signedEnvelope builds a client-signed authentication envelope carrying the given TLS certificate
-// hash, marshaled ready to place in an AuthenticateRequest. It carries no nonce, so it is only usable
-// against verifyEnvelope; a test going through Authenticate must use signedEnvelopeWithNonce.
+// signedEnvelope builds a client-signed envelope carrying the given certificate hash. It has no nonce, so
+// only verifyEnvelope accepts it; a test going through Authenticate needs signedEnvelopeWithNonce.
 func (e *authTestEnv) signedEnvelope(t *testing.T, tlsCertHash []byte) *common.Envelope {
 	t.Helper()
 	return e.signedEnvelopeFor(t, common.HeaderType_MESSAGE, testChannelID, tlsCertHash)
@@ -113,9 +111,8 @@ func (e *authTestEnv) signedEnvelopeWithNonce(t *testing.T, nonce, tlsCertHash [
 	})
 }
 
-// signedEnvelopeFor builds a client-signed envelope with an explicit header type and channel id (and
-// an empty payload, as a genuine authentication envelope has), for exercising the envelope-scope
-// checks.
+// signedEnvelopeFor builds a client-signed envelope with an explicit header type and channel id, for
+// exercising the envelope-scope checks.
 func (e *authTestEnv) signedEnvelopeFor(
 	t *testing.T, headerType common.HeaderType, channelID string, tlsCertHash []byte,
 ) *common.Envelope {
@@ -125,9 +122,8 @@ func (e *authTestEnv) signedEnvelopeFor(
 	})
 }
 
-// signedEnvelopeWithPayload builds a client-signed envelope wrapping an explicit application payload,
-// so a test can construct a transaction-shaped envelope (non-empty payload) and assert it cannot be
-// replayed to mint a token.
+// signedEnvelopeWithPayload builds a client-signed envelope carrying an application payload, so a test can
+// assert a transaction-shaped envelope cannot mint a token.
 func (e *authTestEnv) signedEnvelopeWithPayload(
 	t *testing.T, headerType common.HeaderType, channelID string, payload proto.Message,
 ) *common.Envelope {
@@ -135,9 +131,8 @@ func (e *authTestEnv) signedEnvelopeWithPayload(
 	return e.signEnvelope(t, envelopeParams{headerType: headerType, channelID: channelID, payload: payload})
 }
 
-// signEnvelope signs and marshals an envelope from the given parameters. It builds the envelope
-// directly rather than via protoutil.CreateSignedEnvelopeWithTLSBinding so a test can control the
-// SignatureHeader's nonce, which that helper always fills with a value of its own choosing.
+// signEnvelope signs and marshals an envelope directly rather than via protoutil's helper, which always
+// picks its own SignatureHeader nonce - a test needs to control it.
 func (e *authTestEnv) signEnvelope(t *testing.T, p envelopeParams) *common.Envelope {
 	t.Helper()
 	creator, err := e.signer.Serialize()
@@ -201,9 +196,8 @@ func selfSignedCert(t *testing.T) *x509.Certificate {
 	return cert
 }
 
-// newTokenStoreForTest provisions a database and returns a token store over it. The auth tables are
-// part of the system schema NewDatabaseTestEnv already applies, so the tests exercise exactly the
-// tables `init-db` creates for an operator.
+// newTokenStoreForTest returns a token store over a provisioned database. The auth tables come from the
+// system schema NewDatabaseTestEnv applies, so tests exercise exactly what `init-db` creates.
 func newTokenStoreForTest(t *testing.T) *tokenStore {
 	t.Helper()
 	dbEnv := vc.NewDatabaseTestEnv(t)
@@ -213,9 +207,8 @@ func newTokenStoreForTest(t *testing.T) *tokenStore {
 	return &tokenStore{pool: pool}
 }
 
-// newAuthServiceForTest wires a fully operational Service - database-backed store, ephemeral signer,
-// and the given environment's bundle already loaded into the config provider - without opening the
-// gRPC servers. It returns the shared signer so tests can mint tokens the service will accept.
+// newAuthServiceForTest wires an operational Service - database store, ephemeral signer, bundle loaded -
+// without opening the gRPC servers. It returns the signer so tests can mint tokens it will accept.
 func newAuthServiceForTest(t *testing.T, env *authTestEnv) (*Service, *tokenSigner) {
 	t.Helper()
 	store := newTokenStoreForTest(t)

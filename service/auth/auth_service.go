@@ -28,13 +28,8 @@ import (
 
 var logger = flogging.MustGetLogger("auth")
 
-// Service is the central authentication and authorization gRPC service. It composes focused
-// collaborators, each with a single responsibility: a configProvider that reads the latest committed
-// channel configuration from the database, a tokenSigner that mints and verifies ES256 tokens, a
-// tokenStore that persists the token-to-identity binding, a nonceStore that issues and redeems
-// single-use authentication challenges, an authenticator that turns a signed envelope into a token,
-// and an authorizer that answers authorization decisions. The service holds no per-connection state,
-// so any instance can serve any client's request.
+// Service is the authentication and authorization gRPC service. It holds no per-connection state, so any
+// instance can serve any client's request.
 type Service struct {
 	servicepb.UnimplementedAuthServiceServer
 
@@ -55,9 +50,8 @@ type Service struct {
 // NewAuthService creates a new AuthService from a configuration. It performs only in-memory wiring;
 // the database pool, signing key, and background loops are opened in Run.
 func NewAuthService(config *Config) *Service {
-	// A zero rate means "no throttling", so the limiter is left nil rather than built: a
-	// rate.NewLimiter(0, 0) permits nothing, which would reject every IssueNonce and Authenticate and
-	// lock out the only two RPCs a caller can reach before it holds a token.
+	// A zero rate means "no throttling", so the limiter stays nil: rate.NewLimiter(0, 0) permits nothing,
+	// locking out the only two RPCs reachable before a caller holds a token.
 	var challenges *rate.Limiter
 	if config.ChallengeRequestsPerSecond > 0 {
 		challenges = rate.NewLimiter(
@@ -73,13 +67,8 @@ func NewAuthService(config *Config) *Service {
 	}
 }
 
-// Run opens the signing key and the database pool, builds the collaborators that need them, warms the
-// token cache, signals readiness, and blocks on the background loops until the context is done.
-//
-// Everything that can fail lives here rather than in NewAuthService, so constructing a Service is always
-// safe and a failure can be returned. It does not create its tables: they are part of the system schema
-// the `init-db` command applies (statedb.SetupSystemTablesAndNamespaces), so a running service needs no
-// DDL privileges.
+// Run opens the signing key and database pool, builds the collaborators needing them, signals readiness and
+// blocks on the background loops. Everything that can fail lives here, not in the constructor.
 func (s *Service) Run(ctx context.Context) error {
 	logger.Infof("Starting auth service with token TTL: %s, and nonce TTL: %s",
 		s.config.TokenTTL, s.config.NonceTTL)
@@ -183,9 +172,8 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
-// IssueNonce issues a single-use nonce for the client's next Authenticate call. It needs no
-// configuration bundle: a nonce carries no authority on its own, and handing one out before the
-// service can authenticate lets a client have its challenge ready the moment enforcement is active.
+// IssueNonce issues a single-use nonce for the client's next Authenticate. It needs no configuration
+// bundle: a nonce carries no authority on its own.
 func (s *Service) IssueNonce(
 	ctx context.Context, _ *servicepb.IssueNonceRequest,
 ) (*servicepb.IssueNonceResponse, error) {
@@ -217,10 +205,8 @@ func (s *Service) Authenticate(
 	return s.authenticator.authenticate(ctx, req, bundle)
 }
 
-// Authorize evaluates a token against a resource policy for a resource server. A resource server
-// calls it at every RPC and, for a stream, whenever its cached decision lapses, so token expiry and
-// configuration changes both take effect without the stream re-presenting anything other than the
-// token it was established with.
+// Authorize evaluates a token against a resource policy. A resource server calls it per RPC and, for a
+// stream, whenever its cached decision lapses, so expiry and configuration changes both take effect.
 func (s *Service) Authorize(
 	ctx context.Context, req *servicepb.AuthorizeRequest,
 ) (*servicepb.AuthorizeResponse, error) {

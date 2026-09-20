@@ -23,15 +23,8 @@ import (
 // never issued by this deployment or has expired and been swept.
 var ErrTokenNotFound = errors.New("token record not found")
 
-// tokenStore is the token-to-identity binding store: it maps a token id (jti) to the client's
-// resolved MSP identity (plus its certificate binding, scope, and expiry), persisted in the
-// dedicated auth_tokens namespace and fronted by an in-memory read-through cache. Authenticate
-// writes a binding here; Authorize reads it to recover the identity a token stands for. The database
-// is the single source of truth, so any AuthService instance can resolve any token. The cache
-// accelerates repeated lookups and is safe because a cached record can only be honored until the
-// token's own expiry, which the signature check verifies before the store is ever consulted. Tokens
-// are not revocable: deleting a record would not reach another instance's cache before the token
-// expired anyway, so expiry is the only bound on a token's life.
+// tokenStore maps a token id to the identity it stands for, in the database so any instance can resolve
+// any token, behind a read-through cache bounded by the token's own expiry. Tokens are not revocable.
 type tokenStore struct {
 	pool *pgxpool.Pool
 	// cache is held by value: SyncMap is usable at its zero value, so a tokenStore needs no

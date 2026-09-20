@@ -21,16 +21,12 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
-// ErrConfigUnavailable is returned when no channel-configuration bundle has been loaded yet, so the
-// service cannot authenticate or authorize. This is expected during bootstrap, before the first
-// configuration block has been committed and observed.
+// ErrConfigUnavailable is returned before any channel-configuration bundle has loaded, so nothing can be
+// authenticated or authorized yet. Expected during bootstrap, before the first config block commits.
 var ErrConfigUnavailable = errors.New("channel configuration not available")
 
-// configProvider reads the latest committed channel configuration from the state database and
-// exposes it as a channelconfig.Bundle. The auth service does not own or mutate configuration; it
-// only reads what the sidecar and coordinator have committed, mirroring how the query service reads
-// the config transaction to refresh its TLS roots. The current bundle is swapped atomically; the
-// last-seen version and warm-up flag are touched only by the single refresh goroutine.
+// configProvider exposes the latest committed channel configuration as a bundle; it never mutates it. The
+// bundle is swapped atomically, and the version and warm-up flag belong to the single refresh goroutine.
 type configProvider struct {
 	pool    *pgxpool.Pool
 	metrics *perfMetrics
@@ -40,9 +36,8 @@ type configProvider struct {
 	seen        bool
 }
 
-// run reads the latest configuration immediately, then re-reads it every interval until the context
-// is done. It returns no error and only logs a failed refresh, so a transient database error does not
-// stop the service; the service simply keeps serving Unavailable until a bundle is available.
+// run reads the configuration now, then every interval. A failed refresh is logged, not returned, so a
+// transient database error leaves the service serving Unavailable rather than stopping it.
 func (p *configProvider) run(ctx context.Context, interval time.Duration) error {
 	if err := p.refresh(ctx); err != nil {
 		logger.Warnf("Initial channel-configuration load failed (will retry): %v", err)
@@ -62,9 +57,8 @@ func (p *configProvider) run(ctx context.Context, interval time.Duration) error 
 	}
 }
 
-// refresh reads the committed configuration and, only when its version has advanced, rebuilds and
-// atomically installs a new bundle. The version guard uses a strict "not newer" test so a stale read
-// can never roll the configuration - and thus the ACL policy set - backward.
+// refresh installs a new bundle only when the committed configuration's version has advanced. The guard is
+// a strict "not newer" test, so a stale read can never roll the ACL policy set backward.
 func (p *configProvider) refresh(ctx context.Context) error {
 	configTX, err := statedb.ReadConfigTransaction(ctx, p.pool)
 	if err != nil {

@@ -92,10 +92,6 @@ func (r *aclRegisterer) ACLEnforcer() *acl.Enforcer {
 	return r.enforcer
 }
 
-// TestACLEnforcerInstalledAtConstruction is the guarantee the design rests on: the enforcer a service
-// built in its constructor is read when the server is created, so its interceptors are in place before
-// the first RPC. An unauthenticated call must therefore be rejected by the interceptor, never reach the
-// handler - so whether ACL is enforced can never depend on startup ordering.
 func TestStartAndServe(t *testing.T) {
 	t.Parallel()
 
@@ -137,10 +133,8 @@ func TestStartAndServe(t *testing.T) {
 	})
 }
 
-// TestACLEnforcerInstalledAtConstruction is the guarantee the design rests on: the enforcer a service
-// built in its constructor is read when the server is created, so its interceptors are in place before
-// the first RPC. An unauthenticated call must therefore be rejected by the interceptor, never reach the
-// handler - so whether ACL is enforced can never depend on startup ordering.
+// TestACLEnforcerInstalledAtConstruction pins the guarantee the design rests on: the constructor's enforcer
+// is read when the server is built, so enforcement can never depend on startup ordering.
 func TestACLEnforcerInstalledAtConstruction(t *testing.T) {
 	t.Parallel()
 	// The client stays nil: the call is rejected for its missing token before any AuthService lookup.

@@ -94,9 +94,8 @@ type (
 		CrashTest bool
 		// RateLimit configures rate limiting for services that support it (query, sidecar).
 		RateLimit *serve.RateLimitConfig
-		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed channel
-		// configuration. Defaults to a second, so a test does not wait out the service's own one-minute
-		// default before enforcement becomes active.
+		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed configuration.
+		// Defaults to a second, so a test does not wait out the service's own one-minute default.
 		AuthConfigRefreshInterval time.Duration
 		AuthTokenTTL              time.Duration
 		AuthNonceTTL              time.Duration
@@ -429,13 +428,11 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	c.startRPCsAndStreams(t, serviceFlags)
 }
 
-// startRPCsAndStreams starts the RPCs and streams that this runtime needs to operate.
-// It is called by Start after the services are running, and before any test assertions are made.
+// startRPCsAndStreams opens this runtime's own streams, once Start has the services running.
 func (c *CommitterRuntime) startRPCsAndStreams(t *testing.T, serviceFlags int) {
-	// The streams below are this runtime's own, not a test's assertion, and the sidecar authorizes them
-	// when the topology enforces ACL - so they are opened with a token attached. The token is minted here
-	// rather than earlier because the AuthService can only issue one against a channel configuration, and
-	// that configuration reaches it through the transaction path started above.
+	t.Helper()
+	// Minted here rather than earlier: the AuthService issues a token only against a channel
+	// configuration, which reaches it through the transaction path Start has just brought up.
 	streamCtx := t.Context()
 	if AuthService&serviceFlags != 0 {
 		streamCtx = acl.ContextWithToken(streamCtx, c.MintAuthToken(t).Token)
@@ -452,7 +449,7 @@ func (c *CommitterRuntime) startRPCsAndStreams(t *testing.T, serviceFlags int) {
 	}
 
 	if Sidecar&serviceFlags != 0 {
-		c.startBlockDelivery(t)
+		c.startBlockDelivery(streamCtx, t)
 	}
 }
 
@@ -500,12 +497,13 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	}
 }
 
-func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
+// startBlockDelivery streams committed blocks into c.CommittedBlock. ctxWithToken must already carry the
+// token, since an enforcing sidecar authorizes the delivery stream and each of its reconnects.
+func (c *CommitterRuntime) startBlockDelivery(ctxWithToken context.Context, t *testing.T) {
 	t.Helper()
 	t.Log("Running delivery client")
-	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(delivercommitter.ToQueue(
-			acl.ContextWithToken(ctx, c.MintAuthToken(t).Token),
+	test.RunServiceForTest(ctxWithToken, t, func(ctx context.Context) error {
+		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx,
 			delivercommitter.Parameters{
 				ClientConfig: c.SidecarClientConfig,
 				OutputBlock:  c.CommittedBlock,
@@ -716,6 +714,8 @@ func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum u
 	require.Equal(t, blkNum+1, nextBlock.Number)
 }
 
+// MintAuthToken authenticates against the topology's AuthService and returns a fresh token. Mint at the
+// point of use: no token exists before the transaction path has committed a config block to issue against.
 func (c *CommitterRuntime) MintAuthToken(t *testing.T) *acl.Credentials {
 	t.Helper()
 	authEndpoint := c.SystemConfig.Services.Auth.GrpcEndpoint

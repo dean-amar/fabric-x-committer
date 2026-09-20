@@ -37,10 +37,8 @@ type (
 		privateKey *ecdsa.PrivateKey
 	}
 
-	// tokenClaims are the JWT claims carried by a minted token. The persisted TokenRecord - not these
-	// claims - is the authority for authorization; the claims exist to prove issuance (the signature),
-	// to carry the token id ("jti") that keys the record, and to expose the certificate binding and
-	// scope for observability.
+	// tokenClaims are a minted token's JWT claims. The persisted TokenRecord, not these, is the authority
+	// for authorization; the claims prove issuance and carry the "jti" that keys the record.
 	tokenClaims struct {
 		jwt.RegisteredClaims
 		Cnf   confirmation
@@ -54,9 +52,8 @@ type (
 	}
 )
 
-// newTokenSigner loads a PEM-encoded EC (P-256) private key from keyPath, or generates an ephemeral
-// key when keyPath is empty. An ephemeral key does not survive a restart and is not shared across
-// instances, so it suits only single-instance dev deployments.
+// newTokenSigner loads a PEM-encoded EC (P-256) key, or generates an ephemeral one when keyPath is empty.
+// An ephemeral key survives neither a restart nor a second instance: single-instance dev only.
 func newTokenSigner(keyPath string) (*tokenSigner, error) {
 	if keyPath == "" {
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -98,10 +95,8 @@ func (s *tokenSigner) mint(rec *servicepb.TokenRecord, issuedAt time.Time) (stri
 	return signedToken, nil
 }
 
-// verify parses and validates a token, returning its claims. It verifies the ES256 signature, the
-// algorithm, the issuer, and the (required) expiry, wrapping any failure in ErrInvalidToken. Every
-// authorization goes through it, an established stream's renewals included, so an expired or revoked
-// token is rejected wherever it is presented.
+// verify checks the ES256 signature, algorithm, issuer and required expiry, wrapping failures in
+// ErrInvalidToken. Every authorization goes through it, a stream's renewals included.
 func (s *tokenSigner) verify(tokenString string) (*tokenClaims, error) {
 	claims := &tokenClaims{}
 	// The token's algorithm is already constrained to ES256 below, so the key function only has to

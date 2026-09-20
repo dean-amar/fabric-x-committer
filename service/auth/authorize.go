@@ -19,22 +19,15 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
 
-// authorizer answers authorization decisions for resource servers: it verifies a token, resolves the
-// bound identity from the token store, and evaluates the resource policy. A long-lived stream renews
-// its decision by calling authorize again with the same token, so nothing here is stream-specific.
-//
-// Like the authenticator, it has no constructor: both its fields come from its single caller, so a
-// keyed struct literal says the same thing without a second declaration to keep in step.
+// authorizer verifies a token, resolves the bound identity from the store and evaluates the resource
+// policy. Nothing here is stream-specific: a stream renews by calling authorize with the same token.
 type authorizer struct {
 	signer *tokenSigner
 	tokens *tokenStore
 }
 
-// authorize verifies the token, checks its certificate binding and resource scope, resolves and
-// validates the bound identity against the latest bundle, and evaluates the resource policy. On success
-// it returns the decision and the bound token's expiry - never the identity, which the caller has no use
-// for because it re-presents the token. Every other outcome is a gRPC status error: Unauthenticated for
-// a token problem, PermissionDenied for a scope or policy denial, Unavailable for a store failure.
+// authorize verifies the token, binding and scope, re-resolves the identity and evaluates the policy.
+// Unauthenticated for a token problem, PermissionDenied for a denial, Unavailable for a store failure.
 func (a *authorizer) authorize(
 	ctx context.Context, req *servicepb.AuthorizeRequest, bundle *channelconfig.Bundle,
 ) (*servicepb.AuthorizeResponse, error) {
@@ -74,9 +67,8 @@ func (a *authorizer) authorize(
 	}, nil
 }
 
-// scopeAllows reports whether a resource is within a token's granted scope. An empty scope imposes
-// no restriction (the token carries the identity's full authority); a non-empty scope allows only
-// the resources it lists explicitly, matched by exact gRPC full-method name.
+// scopeAllows reports whether a resource is within a token's scope. An empty scope imposes no restriction;
+// a non-empty one allows only the resources it lists, matched by exact gRPC full-method name.
 func scopeAllows(scope []string, resource string) bool {
 	if len(scope) == 0 {
 		return true
@@ -84,14 +76,8 @@ func scopeAllows(scope []string, resource string) bool {
 	return slices.Contains(scope, resource)
 }
 
-// normalizeScope cleans a requested scope: it trims each entry, drops empties, and removes
-// duplicates while preserving order. An empty or all-empty requested scope normalizes to nil,
-// meaning the token is unscoped and carries the identity's full authority.
-//
-// Scope entries are gRPC resource (full-method) names, e.g. "/committerpb.QueryService/GetRows".
-// A scope can only narrow authority: it restricts which resources a token may be used for, and is
-// checked in addition to - never instead of - the channel policy, so it can never grant access the
-// identity's policy would deny.
+// normalizeScope trims, de-duplicates and order-preserves a requested scope of gRPC full-method names;
+// empty normalizes to nil (unscoped). A scope only ever narrows: it is checked as well as the policy.
 func normalizeScope(requested []string) []string {
 	if len(requested) == 0 {
 		return nil

@@ -24,11 +24,8 @@ type Parameters struct {
 	OutputBlock  chan<- *common.Block
 }
 
-// ToQueue connects to a committer delivery server and delivers the stream to a queue (go channel).
-// It returns when an error occurs or when the context is done.
-// It will attempt to reconnect on errors.
-// A delivery server that enforces ACL authorizes every stream, including the ones a reconnect opens.
-// The token rides on ctx, so it covers all of them and this function needs to know nothing about it.
+// ToQueue streams blocks from a committer delivery server into a channel, reconnecting on error, until ctx
+// is done. An enforcing server authorizes every stream, so ctx must already carry the token.
 func ToQueue(ctx context.Context, cdp Parameters) error {
 	conn, err := connection.NewSingleConnection(cdp.ClientConfig)
 	if err != nil {

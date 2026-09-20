@@ -26,11 +26,8 @@ import (
 func TestStreamConcurrencyLimit(t *testing.T) {
 	t.Parallel()
 
-	// The runtime's Start opens 2 long-lived streams:
-	//   1. Deliver stream (startBlockDelivery)
-	//   2. Notification stream (OpenNotificationStream)
-	//   3. Notification block stream (StreamBlocks)
-	// With MaxConcurrentStreams=4, exactly 1 slot remain for the test.
+	// Start opens three long-lived streams (Deliver, OpenNotificationStream, StreamBlocks), so a limit of
+	// 4 leaves exactly one slot for this test to fill before the next stream must be rejected.
 	const maxStreams = 4
 	c := runner.NewRuntime(t, &runner.Config{
 		BlockTimeout:         2 * time.Second,

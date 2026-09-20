@@ -34,13 +34,11 @@ import (
 type sidecarReceiverParameters struct {
 	Res          *ClientResources
 	ClientConfig *connection.ClientConfig
-	// Auth is the auth service the delivery stream authenticates against. It is required when the
-	// sidecar enforces ACL, and nil otherwise: block delivery is a protected resource, so without a
-	// token an enforcing sidecar answers PermissionDenied.
+	// Auth is the auth service the delivery stream authenticates against, required when the sidecar
+	// enforces ACL and nil otherwise: block delivery is a protected resource.
 	Auth *connection.ClientConfig
-	// Identity signs the authentication envelope. It is passed in rather than taken from the load
-	// profile because each adapter holds a different one, and the profile's own policy identity is
-	// optional - the shipped sample leaves it unset and configures the orderer client's instead.
+	// Identity signs the authentication envelope. Passed in rather than read from the load profile because
+	// each adapter holds a different one, and the profile's own policy identity is optional.
 	Identity *ordererdial.IdentityConfig
 }
 
@@ -49,9 +47,8 @@ const (
 	statusIdx                = int(common.BlockMetadataIndex_TRANSACTIONS_FILTER)
 )
 
-// runSidecarReceiver start receiving blocks from the sidecar. When an auth service is configured the
-// stream authenticates against it: block delivery is an ACL-protected resource, so an enforcing sidecar
-// answers PermissionDenied without a token.
+// runSidecarReceiver receives blocks from the sidecar, authenticating first when an auth service is
+// configured: block delivery is ACL-protected, so an enforcing sidecar refuses an untokened stream.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
 	if params.Auth != nil {
 		authConn, err := connection.NewSingleConnection(params.Auth)

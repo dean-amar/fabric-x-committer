@@ -23,10 +23,8 @@ var (
 	// built-in default map defines a policy for a resource.
 	ErrNoPolicyForResource = errors.New("no policy defined for resource")
 
-	// defaultResourcePolicy is the hard-coded fallback resource-to-policy map, consulted when the
-	// channel configuration does not define an ACL for a resource. Every exposed method - the query
-	// service, the sidecar's block query and block delivery, and the notification streams - defaults to
-	// the Application Readers policy.
+	// defaultResourcePolicy is the fallback consulted when the channel configuration defines no ACL for a
+	// resource. Every exposed method defaults to the Application Readers policy.
 	defaultResourcePolicy = map[string]string{
 		committerpb.QueryService_GetRows_FullMethodName:              policyReaders,
 		committerpb.QueryService_BeginView_FullMethodName:            policyReaders,
@@ -49,10 +47,8 @@ var (
 	}
 )
 
-// evaluateResourcePolicy re-resolves a token record's identity against the latest bundle and evaluates
-// it against the resource's policy. Re-resolving on every call is what lets a configuration change (a
-// removed organization, a rotated MSP) take effect immediately. It returns ErrNoPolicyForResource when
-// no policy governs the resource, or the policy evaluation error when the identity is not authorized.
+// evaluateResourcePolicy re-resolves the record's identity against the latest bundle, which is what makes
+// a removed organization or rotated MSP take effect immediately, then evaluates the resource's policy.
 func evaluateResourcePolicy(
 	bundle *channelconfig.Bundle, resource string, clientIdentity *msppb.Identity,
 ) error {
@@ -60,10 +56,8 @@ func evaluateResourcePolicy(
 	if err != nil {
 		return errors.Wrap(err, "identity is no longer valid under the current configuration")
 	}
-	// Deserializing only parses the certificate and locates its MSP; it does not check the chain or the
-	// revocation list. Validity must therefore be asserted here rather than left to the policy: a
-	// signature policy validates the identity only for the MEMBER, CLIENT and PEER principal types, so
-	// under an ADMIN or OU-based rule an expired or revoked certificate would otherwise still authorize.
+	// Deserializing checks neither chain nor CRL, and a signature policy validates the identity only for
+	// MEMBER, CLIENT and PEER - so under an ADMIN or OU rule a revoked certificate would still authorize.
 	if err = identity.Validate(); err != nil {
 		return errors.Wrap(err, "identity is not valid under the current configuration")
 	}
@@ -85,9 +79,8 @@ func evaluateResourcePolicy(
 	return nil
 }
 
-// resolvePolicyRef returns the channel-policy reference governing a resource. The channel
-// configuration's ACLs mapping takes precedence; the built-in default map is the fallback. It
-// returns "" when neither defines the resource.
+// resolvePolicyRef returns the channel-policy reference governing a resource, preferring the channel
+// configuration's ACLs over the built-in defaults. It returns "" when neither defines the resource.
 func resolvePolicyRef(bundle *channelconfig.Bundle, resource string) string {
 	if app, ok := bundle.ApplicationConfig(); ok {
 		if ref := app.APIPolicyMapper().PolicyRefForAPI(resource); ref != "" {

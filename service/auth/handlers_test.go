@@ -85,9 +85,8 @@ func TestAuthenticateScopedTokenLimitsAuthorization(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
 }
 
-// TestAuthorizeIsRepeatableForStreamRecheck covers how an established stream renews its decision: it
-// re-presents the same token, so the service resolves the token to its record every time. That is what
-// makes token expiry observable to a stream, which an identity-only re-check could never see.
+// TestAuthorizeIsRepeatableForStreamRecheck covers a stream renewing its decision by re-presenting the
+// same token, which is what makes expiry observable - an identity-only re-check could never see it.
 func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
@@ -114,9 +113,8 @@ func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 3: A token whose record is gone - swept after expiry, or minted against a store that has
-	// since been reset - must fail even though the JWT itself is still validly signed and unexpired.
-	// Only resolving the token against the store catches that, which is why a stream re-presents it.
+	// Step 3: a token whose record is gone must fail even though the JWT is still validly signed. Only
+	// resolving against the store catches that, which is why a stream re-presents the token.
 	t.Log("Step 3: drop the token record and re-check")
 	claims, err := svc.authorizer.signer.verify(authResp.GetToken())
 	require.NoError(t, err)
@@ -132,9 +130,8 @@ func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 		"a token whose record is absent must fail even though the JWT is still valid")
 }
 
-// TestChallengeRateLimitRejectsSpam verifies the limit on the two RPCs reachable without a token. It is
-// what stops a caller who holds no credential from spamming IssueNonce - a database row per call - or
-// Authenticate - a signature verification per call - into a denial of service.
+// TestChallengeRateLimitRejectsSpam verifies the limit on the two RPCs reachable without a token, which is
+// what stops an uncredentialed caller spamming a database row or a signature check per call.
 func TestChallengeRateLimitRejectsSpam(t *testing.T) {
 	t.Parallel()
 	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 1, ChallengeBurst: 1})
@@ -326,10 +323,8 @@ func TestAuthorizeRejects(t *testing.T) {
 	}
 }
 
-// TestAuthorizeReportsStoreFailureAsUnavailable pins the classification a resource server depends on:
-// a store that cannot answer is Unavailable, never a denial. Answering Unauthenticated here would make
-// a database blip tear down every established stream at once, since a resource server treats that code
-// as definitive - the very outcome the stream enforcer's transient tolerance exists to prevent.
+// TestAuthorizeReportsStoreFailureAsUnavailable pins the classification resource servers depend on: a
+// store that cannot answer is Unavailable, never a denial, or a database blip tears down every stream.
 func TestAuthorizeReportsStoreFailureAsUnavailable(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)

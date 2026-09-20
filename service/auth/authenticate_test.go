@@ -49,10 +49,8 @@ func TestVerifyEnvelopeSuccess(t *testing.T) {
 	})
 }
 
-// TestVerifyEnvelopeRejects covers every way a well-formed envelope can still fail verification. The
-// transaction-shaped case is the notable one: it shares a real transaction's header type and channel and
-// differs only by carrying application payload, which is what stops a committed transaction from being
-// replayed to mint a token in its signer's name.
+// TestVerifyEnvelopeRejects covers every way a well-formed envelope still fails. The transaction-shaped
+// case is the notable one: it differs from a real transaction only by carrying application payload.
 func TestVerifyEnvelopeRejects(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
@@ -111,9 +109,8 @@ func TestVerifyEnvelopeRejects(t *testing.T) {
 	}
 }
 
-// TestVerifyEnvelopeRejectsForeignIdentity needs a second, independent crypto set, so it cannot share
-// the table above: the envelope is perfectly well-formed and signed, and fails only because the identity
-// resolves against no MSP in this channel's configuration.
+// TestVerifyEnvelopeRejectsForeignIdentity needs its own crypto set, so it cannot join the table above:
+// the envelope is well-formed and signed, and fails only because no MSP in this channel resolves it.
 func TestVerifyEnvelopeRejectsForeignIdentity(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
@@ -125,9 +122,8 @@ func TestVerifyEnvelopeRejectsForeignIdentity(t *testing.T) {
 	require.ErrorContains(t, err, "failed to deserialize identity")
 }
 
-// TestParseSignedEnvelopeRejectsMalformed covers the layer below verifyEnvelope. The envelope arrives as
-// a typed message, so malformed framing is the transport's problem; what parsing must still reject is a
-// well-framed envelope whose inner payload is unusable.
+// TestParseSignedEnvelopeRejectsMalformed covers the layer below verifyEnvelope: framing is the
+// transport's problem, but a well-framed envelope with an unusable inner payload must still be rejected.
 func TestParseSignedEnvelopeRejectsMalformed(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
