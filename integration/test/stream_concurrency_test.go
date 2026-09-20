@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 )
 
 func TestStreamConcurrencyLimit(t *testing.T) {
@@ -36,6 +37,10 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 		MaxConcurrentStreams: maxStreams,
 	})
 	c.Start(t, runner.FullTxPath)
+
+	// The sidecar authorizes every stream, so each one below carries a token; an unauthorized stream
+	// would be refused before it could take a concurrency slot, which is what this test measures.
+	authCtx := acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token)
 
 	// Create a raw gRPC connection to the sidecar without retry policy.
 	// The default retry policy includes RESOURCE_EXHAUSTED, which would
@@ -56,7 +61,7 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	deliverClient := peer.NewDeliverClient(conn)
 	notifyClient := committerpb.NewSidecarServiceClient(conn)
 
-	deliverCtx, deliverCancel := context.WithCancel(t.Context())
+	deliverCtx, deliverCancel := context.WithCancel(authCtx)
 	_, err = deliverClient.Deliver(deliverCtx)
 	require.NoError(t, err)
 
@@ -74,19 +79,19 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	// call. gRPC Go's NewStream sends HTTP/2 HEADERS and returns immediately;
 	// the server processes the stream asynchronously. The error only surfaces
 	// via Recv() when the server closes the rejected stream with a status.
-	rejectedDeliver, err := deliverClient.Deliver(t.Context())
+	rejectedDeliver, err := deliverClient.Deliver(authCtx)
 	if err == nil {
 		_, err = rejectedDeliver.Recv()
 	}
 	requireResourceExhausted(t, err)
 
-	rejectedNotify, err := notifyClient.OpenNotificationStream(t.Context())
+	rejectedNotify, err := notifyClient.OpenNotificationStream(authCtx)
 	if err == nil {
 		_, err = rejectedNotify.Recv()
 	}
 	requireResourceExhausted(t, err)
 
-	rejectedStreamAll, err := notifyClient.StreamBlocks(t.Context(), nil)
+	rejectedStreamAll, err := notifyClient.StreamBlocks(authCtx, nil)
 	if err == nil {
 		_, err = rejectedStreamAll.Recv()
 	}
@@ -98,7 +103,7 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 	deliverCancel()
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(authCtx, 500*time.Millisecond)
 		defer cancel()
 		stream, streamErr := notifyClient.OpenNotificationStream(ctx)
 		require.NoError(ct, streamErr)

@@ -17,17 +17,6 @@ import (
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
-)
-
-const (
-	// The token table is created by `init-db` with the rest of the system schema, so these statements
-	// name it through statedb's constant rather than a literal of their own.
-	sqlInsertRecord = "INSERT INTO " + statedb.AuthTokensTableName +
-		" (jti, record, expires_at) VALUES ($1, $2, $3)"
-	sqlSelectRecord        = "SELECT record FROM " + statedb.AuthTokensTableName + " WHERE jti = $1"
-	sqlDeleteExpiredTokens = "DELETE FROM " + statedb.AuthTokensTableName + " WHERE expires_at < $1"
-	sqlSelectUnexpired     = "SELECT record FROM " + statedb.AuthTokensTableName + " WHERE expires_at >= $1"
 )
 
 // ErrTokenNotFound is returned when a token record is absent from the store, meaning the token was

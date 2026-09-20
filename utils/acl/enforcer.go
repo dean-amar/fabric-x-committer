@@ -71,7 +71,7 @@ type Enforcer struct {
 //
 // A nil config means ACL is not configured, and yields a nil Enforcer and no error. Close is nil-safe to
 // match, so a service needs no conditional on either side.
-func NewEnforcer(config *ClientConfig) (*Enforcer, error) {
+func NewEnforcer(config *Client) (*Enforcer, error) {
 	if config == nil {
 		return nil, nil //nolint:nilnil // no ACL section configured is a result, not a failure.
 	}

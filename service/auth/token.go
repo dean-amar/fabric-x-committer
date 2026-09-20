@@ -31,29 +31,26 @@ const tokenIssuer = "committer-x-auth"
 var ErrInvalidToken = errors.New("invalid token")
 
 type (
+	// tokenSigner mints and verifies ES256 JWTs. Only the AuthService holds the key; resource servers
+	// never see it and never verify tokens themselves.
+	tokenSigner struct {
+		privateKey *ecdsa.PrivateKey
+	}
+
 	// tokenClaims are the JWT claims carried by a minted token. The persisted TokenRecord - not these
 	// claims - is the authority for authorization; the claims exist to prove issuance (the signature),
 	// to carry the token id ("jti") that keys the record, and to expose the certificate binding and
 	// scope for observability.
 	tokenClaims struct {
 		jwt.RegisteredClaims
-		// Cnf carries the RFC 8705 certificate confirmation: base64url(sha256(client TLS cert)).
-		Cnf confirmation `json:"cnf"`
-		// Scope is the optional least-privilege scope granted at issuance.
-		Scope []string `json:"scope,omitempty"`
-		// Seq is the channel-configuration sequence the identity was resolved against at issuance.
-		Seq uint64 `json:"seq"`
+		Cnf   confirmation
+		Scope []string
+		Seq   uint64
 	}
 
 	// confirmation is the JWT "cnf" claim holding the certificate thumbprint per RFC 8705.
 	confirmation struct {
-		X5tS256 string `json:"x5t#S256"`
-	}
-
-	// tokenSigner mints and verifies ES256 JWTs. Only the AuthService holds the key; resource servers
-	// never see it and never verify tokens themselves.
-	tokenSigner struct {
-		privateKey *ecdsa.PrivateKey
+		X5tS256 string
 	}
 )
 
@@ -75,26 +72,30 @@ func newTokenSigner(keyPath string) (*tokenSigner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tokenSigner{privateKey: key}, nil
+	return &tokenSigner{
+		privateKey: key,
+	}, nil
 }
 
 // mint builds and signs a JWT for the given token record. issuedAt is the "iat" claim; the record's
 // ExpiresAt is the "exp" claim.
 func (s *tokenSigner) mint(rec *servicepb.TokenRecord, issuedAt time.Time) (string, error) {
-	signed, err := jwt.NewWithClaims(jwt.SigningMethodES256, &tokenClaims{
+	signedToken, err := jwt.NewWithClaims(jwt.SigningMethodES256, &tokenClaims{
 		Issuer:    tokenIssuer,
 		Subject:   rec.GetMspId(),
 		ID:        rec.GetJti(),
 		IssuedAt:  jwt.NewNumericDate(issuedAt),
 		ExpiresAt: jwt.NewNumericDate(time.Unix(rec.GetExpiresAt(), 0)),
-		Cnf:       confirmation{X5tS256: base64.RawURLEncoding.EncodeToString(rec.GetCertHashSha256())},
-		Scope:     rec.GetScope(),
-		Seq:       rec.GetIssuedSequence(),
+		Cnf: confirmation{
+			X5tS256: base64.RawURLEncoding.EncodeToString(rec.GetCertHashSha256()),
+		},
+		Scope: rec.GetScope(),
+		Seq:   rec.GetIssuedSequence(),
 	}).SignedString(s.privateKey)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to sign token")
 	}
-	return signed, nil
+	return signedToken, nil
 }
 
 // verify parses and validates a token, returning its claims. It verifies the ES256 signature, the
@@ -106,7 +107,10 @@ func (s *tokenSigner) verify(tokenString string) (*tokenClaims, error) {
 	// The token's algorithm is already constrained to ES256 below, so the key function only has to
 	// hand back the verification key.
 	_, err := jwt.ParseWithClaims(
-		tokenString, claims, func(*jwt.Token) (any, error) { return &s.privateKey.PublicKey, nil },
+		tokenString, claims,
+		func(*jwt.Token) (any, error) {
+			return &s.privateKey.PublicKey, nil
+		},
 		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
 		jwt.WithIssuer(tokenIssuer),
 		jwt.WithExpirationRequired(),

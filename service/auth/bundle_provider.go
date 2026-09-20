@@ -43,7 +43,7 @@ type configProvider struct {
 // run reads the latest configuration immediately, then re-reads it every interval until the context
 // is done. It returns no error and only logs a failed refresh, so a transient database error does not
 // stop the service; the service simply keeps serving Unavailable until a bundle is available.
-func (p *configProvider) run(ctx context.Context, interval time.Duration) {
+func (p *configProvider) run(ctx context.Context, interval time.Duration) error {
 	if err := p.refresh(ctx); err != nil {
 		logger.Warnf("Initial channel-configuration load failed (will retry): %v", err)
 	}
@@ -53,7 +53,7 @@ func (p *configProvider) run(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			if err := p.refresh(ctx); err != nil {
 				logger.Errorf("Channel-configuration refresh failed: %v", err)

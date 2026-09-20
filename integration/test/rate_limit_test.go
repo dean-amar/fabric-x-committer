@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
@@ -111,8 +112,11 @@ func TestRateLimit(t *testing.T) {
 				t.Cleanup(func() { _ = conn.Close() })
 			}
 
+			// The query service and the sidecar authorize every RPC, so the requests carry a token;
+			// without one they would be rejected before the rate limiter this test is measuring.
 			successCount, rateLimitedCount, otherErrorCount := makeParallelRequests(
-				t, numParallelRequests, conn, tt.requestFn, tt.timeout,
+				t, acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token),
+				numParallelRequests, conn, tt.requestFn, tt.timeout,
 			)
 
 			if tt.expectAllSucceed {
@@ -125,8 +129,9 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
-func makeParallelRequests( //nolint:revive // argument-limit 5 but limit is 4
+func makeParallelRequests( //nolint:revive // argument-limit 6 but limit is 4
 	t *testing.T,
+	baseCtx context.Context,
 	numParallelRequests int,
 	conn *grpc.ClientConn,
 	requestFn func(ctx context.Context, conn *grpc.ClientConn) error,
@@ -137,7 +142,7 @@ func makeParallelRequests( //nolint:revive // argument-limit 5 but limit is 4
 	var successCount, rateLimitedCount, otherErrorCount atomic.Int32
 	var wg sync.WaitGroup
 
-	reqCtx, cancel := context.WithTimeout(t.Context(), timeout)
+	reqCtx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
 
 	for range numParallelRequests {

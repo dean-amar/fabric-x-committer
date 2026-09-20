@@ -20,7 +20,7 @@ import (
 // testVerifier is an authenticator with only the freshness window set - enough to exercise
 // verifyEnvelope without a signer or store.
 func testVerifier() *authenticator {
-	return &authenticator{freshnessWindow: time.Minute}
+	return &authenticator{envelopeFreshnessWindow: time.Minute}
 }
 
 func TestVerifyEnvelopeSuccess(t *testing.T) {

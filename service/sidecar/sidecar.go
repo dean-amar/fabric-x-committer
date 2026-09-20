@@ -140,16 +140,7 @@ func New(c *Config) (*Service, error) {
 	deliveryParams.Metrics = metrics.delivery
 	relayService := newRelay(c.LastCommittedBlockSetInterval, metrics)
 
-	// 3. Dial the auth service, if ACL is configured. Done here rather than in Run so the enforcer
-	// exists before serve builds the gRPC server: whether ACL is enforced then follows from
-	// configuration alone, never from startup ordering.
-	enforcer, err := acl.NewEnforcer(c.Auth)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Service{
-		aclEnforcer:    enforcer,
+	service := &Service{
 		deliveryParams: deliveryParams,
 		relay:          relayService,
 		notifier:       newNotifier(c.ChannelBufferSize, &c.Notification, metrics, q),
@@ -158,7 +149,19 @@ func New(c *Config) (*Service, error) {
 		metrics:        metrics,
 		queues:         q,
 		ready:          channel.NewReady(),
-	}, nil
+	}
+
+	// 3. Dial the auth service, if ACL is configured.
+	// Done here rather than in Run so the enforcer exists before serve builds the gRPC server.
+	if c.Auth != nil {
+		enforcer, err := acl.NewEnforcer(c.Auth)
+		if err != nil {
+			return nil, err
+		}
+		service.aclEnforcer = enforcer
+	}
+
+	return service, nil
 }
 
 // WaitForReady wait for the service to be ready to be exposed as gRPC service.
@@ -179,7 +182,6 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer blockStoreInstance.close()
 	s.blockStore = blockStoreInstance
-
 	s.ready.SignalReady()
 	defer s.ready.Reset()
 
@@ -731,6 +733,22 @@ func (s *Service) GetTxByID(_ context.Context, req *committerpb.TxID) (*common.E
 	return envelope, nil
 }
 
+// OpenNotificationStream and StreamBlocks satisfy the notification half of SidecarServiceServer by
+// delegating to the notifier. Upstream consolidated the former Notifier and SidecarService into one
+// SidecarService, so a single type must answer both halves; the notifier still owns the subscription
+// state and this only forwards to it.
+func (s *Service) OpenNotificationStream(
+	stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse],
+) error {
+	return s.notifier.OpenNotificationStream(stream)
+}
+
+func (s *Service) StreamBlocks(
+	req *committerpb.StreamBlocksRequest, stream grpc.ServerStreamingServer[committerpb.BlockEvent],
+) error {
+	return s.notifier.StreamBlocks(req, stream)
+}
+
 func wrapQueryError(err error) error {
 	if errors.Is(err, blkstorage.ErrNotFound) {
 		return grpcerror.WrapNotFound(err)
@@ -792,20 +810,4 @@ func logAndWrapCoordinatorError(err error, contextMsg string) error {
 	}
 
 	return errors.Wrap(err, contextMsg)
-}
-
-// OpenNotificationStream and StreamBlocks satisfy the notification half of SidecarServiceServer by
-// delegating to the notifier. Upstream consolidated the former Notifier and SidecarService into one
-// SidecarService, so a single type must answer both halves; the notifier still owns the subscription
-// state and this only forwards to it.
-func (s *Service) OpenNotificationStream(
-	stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse],
-) error {
-	return s.notifier.OpenNotificationStream(stream)
-}
-
-func (s *Service) StreamBlocks(
-	req *committerpb.StreamBlocksRequest, stream grpc.ServerStreamingServer[committerpb.BlockEvent],
-) error {
-	return s.notifier.StreamBlocks(req, stream)
 }

@@ -13,20 +13,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/yugabyte/pgx/v5/pgxpool"
-
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
 const (
 	// nonceLength is the size of an issued nonce. 32 bytes of CSPRNG output makes collisions and
 	// guessing infeasible, matching the entropy of the token ids the service already mints.
 	nonceLength = 32
-
-	// The nonce table is created by `init-db` with the rest of the system schema, so these statements
-	// name it through statedb's constant rather than a literal of their own.
-	sqlInsertNonce         = "INSERT INTO " + statedb.AuthNoncesTableName + " (nonce, expires_at) VALUES ($1, $2)"
-	sqlConsumeNonce        = "DELETE FROM " + statedb.AuthNoncesTableName + " WHERE nonce = $1 AND expires_at >= $2"
-	sqlDeleteExpiredNonces = "DELETE FROM " + statedb.AuthNoncesTableName + " WHERE expires_at < $1"
 )
 
 // ErrNonceNotFound is returned when a nonce is unknown, already consumed, or expired. The three are

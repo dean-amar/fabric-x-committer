@@ -15,8 +15,9 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/protoutil"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
@@ -52,10 +53,7 @@ const (
 // stream authenticates against it: block delivery is an ACL-protected resource, so an enforcing sidecar
 // answers PermissionDenied without a token.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
-	var creds credentials.PerRPCCredentials
 	if params.Auth != nil {
-		// The auth connection outlives every RPC on the stream: the token source re-authenticates on it
-		// whenever the cached token nears expiry.
 		authConn, err := connection.NewSingleConnection(params.Auth)
 		if err != nil {
 			return errors.Wrap(err, "failed to connect to the auth service")
@@ -67,7 +65,16 @@ func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) 
 			return errors.Wrap(err, "failed to create the signing identity")
 		}
 		if signer == nil {
-			return errors.New("an auth service is configured but no signing identity is available")
+			// No identity is configured, so sign with a peer identity from the generated crypto the
+			// profile already points at; it satisfies the channel's Readers policy.
+			identities, idErr := testcrypto.GetPeersIdentities(params.Res.Profile.Policy.ArtifactsPath)
+			if idErr != nil {
+				return errors.Wrap(idErr, "failed to load a signing identity from the artifacts path")
+			}
+			if len(identities) == 0 {
+				return errors.New("an auth service is configured but no signing identity is available")
+			}
+			signer = identities[0]
 		}
 		tlsCreds, err := connection.NewClientTLSCredentials(params.ClientConfig.TLS)
 		if err != nil {
@@ -83,23 +90,23 @@ func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) 
 		}
 		// The token is minted once, here: it must outlive the run, so the AuthService's token-ttl has
 		// to cover it. An expired token is rejected by the sidecar rather than silently renewed.
-		creds, err = acl.MintToken(ctx, &acl.MintParams{
-			Client:              servicepb.NewAuthServiceClient(authConn),
-			Signer:              signer,
-			ChannelID:           params.Res.Profile.Policy.ChannelID,
-			TLSCertHash:         certHash,
-			SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
+		creds, err := acl.MintToken(ctx, &acl.MintParams{
+			Client:      servicepb.NewAuthServiceClient(authConn),
+			Signer:      signer,
+			ChannelID:   params.Res.Profile.Policy.ChannelID,
+			TLSCertHash: certHash,
 		})
 		if err != nil {
 			return err
 		}
+		// On the context, so it covers the delivery stream and every stream a reconnect opens.
+		ctx = metadata.AppendToOutgoingContext(ctx, acl.TokenMetadataKey, creds.Token)
 	}
 
 	return runDeliveryReceiver(ctx, params.Res, func(gCtx context.Context, committedBlock chan *common.Block) error {
 		return delivercommitter.ToQueue(gCtx, delivercommitter.Parameters{
 			ClientConfig: params.ClientConfig,
 			OutputBlock:  committedBlock,
-			Credentials:  creds,
 		})
 	})
 }

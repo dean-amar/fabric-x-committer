@@ -10,4 +10,8 @@ sidecar-client:
     - endpoint: {{ .GrpcEndpoint }}
 {{ include "tlsConfig" .GrpcTLS | indent 6 }}
     {{- end }}
+{{- if .Services.Auth.GrpcEndpoint }}
+  auth:
+{{ include "endpointWithTLS" (dict "Endpoint" .Services.Auth.GrpcEndpoint "TLS" .ClientTLS) | indent 4 }}
+{{- end }}
 {{ include "loadgenConfig" . | indent 0 }}

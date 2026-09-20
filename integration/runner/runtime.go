@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -35,7 +34,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
@@ -68,18 +66,8 @@ type (
 		QueryServiceClient  committerpb.QueryServiceClient
 		SidecarClientConfig *connection.ClientConfig
 		NotifyClient        committerpb.SidecarServiceClient
-		// ClientCredentials authenticates this runtime's own clients against the query service and the
-		// sidecar. It is non-nil only when the topology runs an AuthService, in which case those
-		// services enforce ACL and an unauthenticated client is answered PermissionDenied.
-		ClientCredentials credentials.PerRPCCredentials
-		// authMintParams and authCredentials defer token minting to Start. CreateRuntimeClients runs
-		// before any service process is launched, so the AuthService cannot answer a nonce request yet;
-		// the clients are handed empty credentials and the tokens are filled once it is running. gRPC
-		// reads the token per RPC, so a connection may be dialled before its token exists.
-		authMintParams    *acl.MintParams
-		authCredentials   []*acl.Credentials
-		NotifyStream      grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse]
-		StreamAllTxStream grpc.ServerStreamingClient[committerpb.BlockEvent]
+		NotifyStream        grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse]
+		StreamAllTxStream   grpc.ServerStreamingClient[committerpb.BlockEvent]
 
 		CommittedBlock          chan *common.Block
 		TxBuilder               *workload.TxBuilder
@@ -107,14 +95,11 @@ type (
 		// RateLimit configures rate limiting for services that support it (query, sidecar).
 		RateLimit *serve.RateLimitConfig
 		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed channel
-		// configuration. Defaults to a second when EnableACL is set, so a test does not wait out the
-		// service's own one-minute default before enforcement becomes active.
+		// configuration. Defaults to a second, so a test does not wait out the service's own one-minute
+		// default before enforcement becomes active.
 		AuthConfigRefreshInterval time.Duration
-
-		// EnableACL allocates the AuthService and renders the query service's auth section, so the
-		// topology enforces ACL. Left false, no auth process exists and every service behaves as
-		// before, which keeps every other integration test unaffected.
-		EnableACL bool
+		AuthTokenTTL              time.Duration
+		AuthNonceTTL              time.Duration
 
 		// MaxRequestKeys is the maximum number of keys allowed in a single query request.
 		// Set to 0 to disable the limit.
@@ -172,13 +157,10 @@ const (
 	LoadGenForVCService
 	LoadGenForDistributedLoadGen
 
-	CommitterTxPath       = Sidecar | Coordinator | Verifier | VC
+	CommitterTxPath       = Sidecar | Coordinator | Verifier | VC | AuthService
 	FullTxPath            = Orderer | CommitterTxPath
 	FullTxPathWithLoadGen = FullTxPath | LoadGenForOrderer
 	FullTxPathWithQuery   = FullTxPath | QueryService
-	// FullTxPathWithAuth is the full transaction path plus the query service and the AuthService that
-	// guards it. It requires Config.EnableACL, which is what renders the query service's auth section.
-	FullTxPathWithAuth = FullTxPathWithQuery | AuthService
 
 	CommitterTxPathWithLoadGen = CommitterTxPath | LoadGenForCommitter
 
@@ -187,14 +169,6 @@ const (
 		LoadGenForVCService | LoadGenForVerifier
 
 	TestChannelName = "channel1"
-)
-
-const (
-	// authTestTokenTTL and authTestNonceTTL outlast any integration test, so a minted token never
-	// lapses mid-test and no client re-authenticates behind an RPC. The service defaults (5m/1m) are
-	// production lifetimes; a test that wants to exercise expiry sets them explicitly.
-	authTestTokenTTL = time.Hour
-	authTestNonceTTL = time.Hour
 )
 
 // NewRuntime creates a new test runtime.
@@ -210,8 +184,14 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	if conf.NumVCService <= 0 {
 		conf.NumVCService = 1
 	}
-	if conf.EnableACL && conf.AuthConfigRefreshInterval <= 0 {
+	if conf.AuthConfigRefreshInterval <= 0 {
 		conf.AuthConfigRefreshInterval = time.Second
+	}
+	if conf.AuthTokenTTL <= 0 {
+		conf.AuthTokenTTL = time.Hour
+	}
+	if conf.AuthNonceTTL <= 0 {
+		conf.AuthNonceTTL = time.Hour
 	}
 
 	t.Log("create TLS manager and clients certificate")
@@ -265,13 +245,6 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			},
 			Logging: flogging.Config{
 				LogSpec: "info:grpc=error",
-				// flogging's default format carries %{color} verbs, but a service started by the runtime
-				// writes to a pipe, never a terminal - the runner reads that pipe and re-prints each line
-				// with its own prefix. Those escapes could therefore never be rendered by the process that
-				// emitted them, and only end up as literal noise in captured test output, so the format
-				// here is the default with the colour verbs removed.
-				Format: "%{time:2006-01-02 15:04:05.000 MST} %{id:04x} %{level:.4s} " +
-					"[%{module}] %{shortfunc} -> %{message}",
 			},
 			RateLimit:            conf.RateLimit,
 			MaxConcurrentStreams: conf.MaxConcurrentStreams,
@@ -284,8 +257,8 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			VerifierBatchSizeCutoff:             conf.VerifierBatchSizeCutoff,
 			QueryTLSRefreshInterval:             conf.QueryTLSRefreshInterval,
 			AuthConfigRefreshInterval:           conf.AuthConfigRefreshInterval,
-			AuthTokenTTL:                        authTestTokenTTL,
-			AuthNonceTTL:                        authTestNonceTTL,
+			AuthTokenTTL:                        conf.AuthTokenTTL,
+			AuthNonceTTL:                        conf.AuthNonceTTL,
 
 			// Keep-alive configuration for services which exposes their API.
 			KeepAliveTime:                conf.KeepAliveTime,
@@ -351,11 +324,7 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 
 	c.Coordinator, s.Services.Coordinator = newProcess(t, params, cmdCoordinator)
 	c.QueryService, s.Services.Query = newProcess(t, params, cmdQuery)
-	// The AuthService is allocated only when ACL is enabled, so Services.Auth.GrpcEndpoint stays nil
-	// and the query template omits its auth section for every other topology.
-	if conf.EnableACL {
-		c.AuthService, s.Services.Auth = newProcess(t, params, cmdAuth)
-	}
+	c.AuthService, s.Services.Auth = newProcess(t, params, cmdAuth)
 	c.Sidecar, s.Services.Sidecar = newProcess(t, params, cmdSidecar)
 
 	// The load generators are pre-allocated here like every other service, but their config files are
@@ -390,61 +359,11 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	c.CoordinatorClient = servicepb.NewCoordinatorClient(
 		test.NewSecuredConnection(t, services.Coordinator.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
-	// The query service and the sidecar authorize every RPC when the topology runs an AuthService, so
-	// this runtime's own clients have to authenticate. The token source signs with the policy's identity
-	// when one is configured, and otherwise with a peer identity from the generated crypto - the shipped
-	// loadgen sample leaves policy.identity unset, and both satisfy the channel's Readers policy.
-	// Nil unless an AuthService is configured, in which case each carries its own minted token.
-	var queryCredentials, notifyCredentials credentials.PerRPCCredentials
-	if authEndpoint := services.Auth.GrpcEndpoint; authEndpoint != nil && !authEndpoint.Empty() {
-		signer, err := ordererdial.NewIdentitySigner(c.SystemConfig.Policy.Identity)
-		require.NoError(t, err)
-		if signer == nil {
-			identities, idErr := testcrypto.GetPeersIdentities(c.SystemConfig.Policy.ArtifactsPath)
-			require.NoError(t, idErr)
-			require.NotEmpty(t, identities, "an AuthService is configured but no signing identity is "+
-				"available: set policy.identity or point policy.artifacts-path at generated crypto")
-			signer = identities[0]
-		}
-
-		tlsCreds, err := connection.NewClientTLSCredentials(c.SystemConfig.ClientTLS)
-		require.NoError(t, err)
-		// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
-		var certHash []byte
-		if tlsCreds.Mode == connection.MutualTLSMode {
-			certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
-			require.NoError(t, err)
-		}
-
-		// Every client gets its own token rather than sharing one: a shared token carries a single
-		// scope, so clients could never hold different ones. Start mints them; see authMintParams.
-		c.authMintParams = &acl.MintParams{
-			Client: servicepb.NewAuthServiceClient(
-				test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
-			),
-			Signer:              signer,
-			ChannelID:           c.SystemConfig.Policy.ChannelID,
-			TLSCertHash:         certHash,
-			SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode,
-		}
-		newCredentials := func() *acl.Credentials {
-			creds := &acl.Credentials{SecureTransportOnly: tlsCreds.Mode != connection.NoneTLSMode}
-			c.authCredentials = append(c.authCredentials, creds)
-			return creds
-		}
-		queryCredentials = newCredentials()
-		notifyCredentials = newCredentials()
-		c.ClientCredentials = newCredentials()
-	}
 	c.QueryServiceClient = committerpb.NewQueryServiceClient(
-		test.NewSecuredConnectionWithCredentials(
-			t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS, queryCredentials,
-		),
+		test.NewSecuredConnection(t, services.Query.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
 	c.NotifyClient = committerpb.NewSidecarServiceClient(
-		test.NewSecuredConnectionWithCredentials(
-			t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS, notifyCredentials,
-		),
+		test.NewSecuredConnection(t, services.Sidecar.GrpcEndpoint, c.SystemConfig.ClientTLS),
 	)
 	var err error
 	c.OrdererStream, err = adapters.NewBroadcastStream(ctx, &c.OrdererEnv.OrdererConnConfig)
@@ -475,10 +394,6 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 
 	t.Log("Running services")
 	if AuthService&serviceFlags != 0 {
-		require.NotNil(t, c.AuthService, "the AuthService requires Config.EnableACL")
-		// Started before every service that enforces ACL, so their first authorization attempt has
-		// somewhere to go. It answers nothing on its merits until it has loaded a channel configuration,
-		// which is why minting cannot happen here; see the mint below.
 		c.AuthService.Restart(t)
 	}
 	if loadGenMatcher&serviceFlags != 0 {
@@ -511,19 +426,23 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 		c.QueryService.Restart(t)
 	}
 
-	// Minting comes after the transaction path is up and cannot move earlier. A token is issued only
-	// against a channel configuration; the AuthService loads that from a committed config block; and the
-	// block is committed by the path started above - the sidecar pulls it from the orderer and the VC
-	// writes it. MintToken retries while the AuthService still reports no configuration.
+	c.startRPCsAndStreams(t, serviceFlags)
+}
+
+// startRPCsAndStreams starts the RPCs and streams that this runtime needs to operate.
+// It is called by Start after the services are running, and before any test assertions are made.
+func (c *CommitterRuntime) startRPCsAndStreams(t *testing.T, serviceFlags int) {
+	// The streams below are this runtime's own, not a test's assertion, and the sidecar authorizes them
+	// when the topology enforces ACL - so they are opened with a token attached. The token is minted here
+	// rather than earlier because the AuthService can only issue one against a channel configuration, and
+	// that configuration reaches it through the transaction path started above.
+	streamCtx := t.Context()
 	if AuthService&serviceFlags != 0 {
-		c.MintAuthTokens(t)
+		streamCtx = acl.ContextWithToken(streamCtx, c.MintAuthToken(t).Token)
 	}
 
-	// The notification stream is an ACL-enforced sidecar RPC, so it is opened only once its client holds
-	// a token. gRPC creates a stream lazily, so an untokened one would fail on its first Recv instead -
-	// far from this line.
 	if Sidecar&serviceFlags != 0 {
-		c.OpenNotificationStream(t.Context(), t)
+		c.OpenNotificationStream(streamCtx, t)
 	}
 
 	if Coordinator&serviceFlags != 0 && Sidecar&serviceFlags != 0 {
@@ -585,11 +504,12 @@ func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
 	t.Helper()
 	t.Log("Running delivery client")
 	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx, delivercommitter.Parameters{
-			ClientConfig: c.SidecarClientConfig,
-			Credentials:  c.ClientCredentials,
-			OutputBlock:  c.CommittedBlock,
-		}))
+		return connection.FilterStreamRPCError(delivercommitter.ToQueue(
+			acl.ContextWithToken(ctx, c.MintAuthToken(t).Token),
+			delivercommitter.Parameters{
+				ClientConfig: c.SidecarClientConfig,
+				OutputBlock:  c.CommittedBlock,
+			}))
 	}, func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():
@@ -796,21 +716,36 @@ func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum u
 	require.Equal(t, blkNum+1, nextBlock.Number)
 }
 
-// MintAuthTokens fills every client's credentials with a freshly minted token. It cannot run from
-// CreateRuntimeClients, which builds the clients before any service is launched, so a nonce request
-// there would reach a reserved-but-unserved port and fail.
-//
-// Start calls it for a topology it launches itself. A test that drives an already-running committer -
-// the container tests, which build a CommitterRuntime literal and never call Start - must call it
-// itself, before using any client, or every RPC carries an empty token and the ACL-enforcing services
-// reject it with Unauthenticated. It is a no-op when the topology runs no AuthService.
-func (c *CommitterRuntime) MintAuthTokens(t *testing.T) {
+func (c *CommitterRuntime) MintAuthToken(t *testing.T) *acl.Credentials {
 	t.Helper()
-	for _, creds := range c.authCredentials {
-		minted, err := acl.MintToken(t.Context(), c.authMintParams)
+	authEndpoint := c.SystemConfig.Services.Auth.GrpcEndpoint
+	require.False(t, authEndpoint == nil || authEndpoint.Empty(),
+		"cannot mint a token: the topology runs no AuthService")
+
+	identities, idErr := testcrypto.GetPeersIdentities(c.SystemConfig.Policy.ArtifactsPath)
+	require.NoError(t, idErr)
+	require.NotEmpty(t, identities, "an AuthService is configured but no signing identity is "+
+		"available: set policy.identity or point policy.artifacts-path at generated crypto")
+
+	tlsCreds, err := connection.NewClientTLSCredentials(c.SystemConfig.ClientTLS)
+	require.NoError(t, err)
+	// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
+	var certHash []byte
+	if tlsCreds.Mode == connection.MutualTLSMode {
+		certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
 		require.NoError(t, err)
-		creds.Token = minted.Token
 	}
+
+	creds, err := acl.MintToken(t.Context(), &acl.MintParams{
+		Client: servicepb.NewAuthServiceClient(
+			test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
+		),
+		Signer:      identities[0],
+		ChannelID:   c.SystemConfig.Policy.ChannelID,
+		TLSCertHash: certHash,
+	})
+	require.NoError(t, err)
+	return creds
 }
 
 func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, blkNum uint64) {
@@ -841,10 +776,8 @@ func (c *CommitterRuntime) requireAllServicesAreRunning(t test.TestingT) {
 // startLoadGen writes their config and starts them.
 func (c *CommitterRuntime) serverProcesses() []*ProcessWithConfig {
 	procs := make([]*ProcessWithConfig, 0, 5+len(c.Verifier)+len(c.VcService))
+	procs = append(procs, c.AuthService)
 	procs = append(procs, c.MockOrderer, c.Coordinator, c.Sidecar, c.QueryService)
-	if c.AuthService != nil {
-		procs = append(procs, c.AuthService)
-	}
 	procs = append(procs, c.Verifier...)
 	procs = append(procs, c.VcService...)
 	return procs

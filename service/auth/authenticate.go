@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -28,11 +27,10 @@ import (
 
 // authEnvelopeType is the channel-header type an authentication envelope carries. It is the general
 // application-message type, which ordinary transactions also use, so the type alone does NOT
-// distinguish an authentication request from a replayed transaction. The load-bearing anti-replay
-// check is the empty-payload requirement in verifyEnvelope (an auth envelope carries no application
-// data; every transaction does), backed by the freshness window and - under mutual TLS - the
-// certificate binding, which makes a captured envelope useless to anyone but the original signer.
-// The type and channel-id checks are only coarse pre-filters.
+// distinguish an authentication request from a replayed transaction. Replay is stopped by the
+// single-use nonce, backed by the freshness window and - under mutual TLS - the certificate binding,
+// which makes a captured envelope useless to anyone but the original signer. The type, channel-id and
+// empty-payload checks in verifyEnvelope are domain separation, not replay protection.
 const authEnvelopeType = int32(common.HeaderType_MESSAGE)
 
 var (
@@ -45,6 +43,7 @@ var (
 	// ErrEnvelopeScope is returned when an envelope is not scoped to authentication for this channel
 	// (wrong header type or channel id).
 	ErrEnvelopeScope = errors.New("envelope is not an authentication request for this channel")
+	ErrNoEnvelope    = errors.New("signed envelope is required")
 )
 
 type (
@@ -53,11 +52,11 @@ type (
 	// its single caller, so a keyed struct literal says the same thing without a second type to keep in
 	// step with this one.
 	authenticator struct {
-		signer          *tokenSigner
-		tokens          *tokenStore
-		nonces          *nonceStore
-		freshnessWindow time.Duration
-		tokenTTL        time.Duration
+		signer                  *tokenSigner
+		tokens                  *tokenStore
+		nonces                  *nonceStore
+		envelopeFreshnessWindow time.Duration
+		tokenTTL                time.Duration
 	}
 
 	// parsedEnvelope holds the pieces of a signed envelope that verifyEnvelope inspects: the channel
@@ -89,13 +88,15 @@ func (a *authenticator) authenticate(
 ) (*servicepb.AuthenticateResponse, error) {
 	signedEnvelope := authRequest.GetSignedEnvelope()
 	if signedEnvelope == nil {
-		return nil, grpcerror.WrapInvalidArgument(errors.New("signed envelope is required"))
+		return nil, grpcerror.WrapInvalidArgument(ErrNoEnvelope)
 	}
 
 	now := time.Now()
 	parsedSignedEnvelope, err := parseSignedEnvelope(signedEnvelope)
 	if err != nil {
-		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+		return nil, grpcerror.WrapUnauthenticated(
+			errors.Newf("authentication failed: %v", err),
+		)
 	}
 
 	// Redeem the nonce before verifying the signature: an envelope whose nonce is spent is a replay
@@ -103,19 +104,18 @@ func (a *authenticator) authenticate(
 	// repeat the expensive signature check.
 	if err = a.nonces.consume(ctx, parsedSignedEnvelope.nonce, now); err != nil {
 		return nil, grpcerror.WrapUnauthenticated(
-			fmt.Errorf("authentication failed: %w", err),
+			errors.Newf("authentication failed: %v", err),
 		)
 	}
 
 	identity, err := a.verifyEnvelope(ctx, parsedSignedEnvelope, bundle, now)
 	if err != nil {
-		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+		return nil, grpcerror.WrapUnauthenticated(errors.Newf("authentication failed: %v", err))
 	}
 
 	jti, err := newTokenID()
 	if err != nil {
-		logger.Errorf("%+v", err)
-		return nil, grpcerror.WrapInternalError(err)
+		return nil, grpcerror.WrapInternalError(errors.Wrapf(err, "failed to generate token id"))
 	}
 	rec := &servicepb.TokenRecord{
 		Jti:            jti,
@@ -131,17 +131,19 @@ func (a *authenticator) authenticate(
 	// binding is left behind.
 	token, err := a.signer.mint(rec, now)
 	if err != nil {
-		logger.Errorf("%+v", err)
-		return nil, grpcerror.WrapInternalError(err)
+		return nil, grpcerror.WrapInternalError(errors.Wrapf(err, "failed to mint token"))
 	}
 	if err = a.tokens.put(ctx, rec); err != nil {
-		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapInternalError(err)
 	}
 
 	logger.Infof("Issued token jti=%s mspID=%s scope=%v seq=%d",
 		jti, rec.GetMspId(), rec.GetScope(), rec.GetIssuedSequence())
-	return &servicepb.AuthenticateResponse{Token: token, ExpiresAt: rec.GetExpiresAt()}, nil
+
+	return &servicepb.AuthenticateResponse{
+		Token:     token,
+		ExpiresAt: rec.GetExpiresAt(),
+	}, nil
 }
 
 // verifyEnvelope verifies an already-parsed authentication envelope against the given bundle and
@@ -158,12 +160,8 @@ func (a *authenticator) verifyEnvelope(
 	chdr, signedData := parsed.chdr, parsed.signedData
 	var err error
 
-	// Scope the envelope to an authentication request for this channel, so an envelope the client
-	// signed for another purpose cannot be exchanged for a token within the freshness window. The
-	// empty-payload check is the load-bearing one: an authentication envelope carries no application
-	// data, whereas every ordinary transaction - which shares this header type and channel - carries a
-	// marshaled payload, so requiring an empty payload prevents replaying a committed transaction to
-	// mint a token in its signer's name. The type and channel-id checks are coarse pre-filters.
+	// The nonce stops replay; these checks are domain separation, and only the empty payload separates:
+	// a submitter that signs a caller's tx with a caller-chosen nonce always fills Data, so cannot mint.
 	if chdr.GetType() != authEnvelopeType {
 		return nil, errors.Wrapf(ErrEnvelopeScope, "unexpected header type %d", chdr.GetType())
 	}
@@ -175,7 +173,7 @@ func (a *authenticator) verifyEnvelope(
 			"authentication envelope must carry an empty payload, got %d bytes", len(parsed.payloadData))
 	}
 
-	if err = validateTimestamp(chdr.GetTimestamp(), a.freshnessWindow, now); err != nil {
+	if err = validateTimestamp(chdr.GetTimestamp(), a.envelopeFreshnessWindow, now); err != nil {
 		return nil, err
 	}
 
@@ -195,28 +193,11 @@ func (a *authenticator) verifyEnvelope(
 		return nil, errors.Wrap(err, "signature verification failed")
 	}
 
-	// The identity travels on as the message the envelope carried. It is persisted in the token record
-	// as a nested message, so nothing here has to serialize it by hand.
 	return &verifiedIdentity{
 		identity: signedData.Identity,
 		mspID:    identity.GetMSPIdentifier(),
 		certHash: certHash,
 	}, nil
-}
-
-// verifyCertBinding checks the envelope's claimed TLS certificate hash against the certificate
-// presented on the connection, returning the hash the token is bound to. When the client presented a
-// certificate (mutual TLS), the claimed hash must match it. When none is present, the transport TLS
-// mode is the security boundary and the token is not certificate-bound.
-func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) {
-	actualHash := util.ExtractCertificateHashFromContext(ctx)
-	if len(actualHash) == 0 {
-		return nil, nil //nolint:nilnil // an unbound token is the deliberate result without mutual TLS.
-	}
-	if !bytes.Equal(claimedHash, actualHash) {
-		return nil, ErrCertBindingMismatch
-	}
-	return actualHash, nil
 }
 
 // parseSignedEnvelope unpacks an envelope into the pieces verifyEnvelope inspects. The nonce comes from
@@ -253,6 +234,21 @@ func parseSignedEnvelope(env *common.Envelope) (*parsedEnvelope, error) {
 		nonce:       shdr.GetNonce(),
 		signedData:  signedData[0],
 	}, nil
+}
+
+// verifyCertBinding checks the envelope's claimed TLS certificate hash against the certificate
+// presented on the connection, returning the hash the token is bound to. When the client presented a
+// certificate (mutual TLS), the claimed hash must match it. When none is present, the transport TLS
+// mode is the security boundary and the token is not certificate-bound.
+func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) {
+	actualHash := util.ExtractCertificateHashFromContext(ctx)
+	if len(actualHash) == 0 {
+		return nil, nil //nolint:nilnil // an unbound token is the deliberate result without mutual TLS.
+	}
+	if !bytes.Equal(claimedHash, actualHash) {
+		return nil, ErrCertBindingMismatch
+	}
+	return actualHash, nil
 }
 
 // validateTimestamp rejects a timestamp that is missing, not representable, or further from now than

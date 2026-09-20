@@ -13,7 +13,6 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/protoutil/identity"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -27,43 +26,33 @@ type (
 	Credentials struct {
 		// Token is the encoded JWT sent as authorization metadata.
 		Token string
-		// SecureTransportOnly reports whether the token may travel only over a secure transport; it is
-		// what the credentials interface's RequireTransportSecurity returns.
-		SecureTransportOnly bool
 	}
 
 	// AuthEnvelopeParams describes the authentication envelope to build.
 	AuthEnvelopeParams struct {
-		// Signer is the client's MSP signing identity; it signs the envelope.
-		Signer identity.SignerSerializer
-		// ChannelID is the channel the envelope is scoped to.
-		ChannelID string
-		// TLSCertHash is the SHA-256 of the client's TLS certificate, or nil without mutual TLS.
-		TLSCertHash []byte
+		CommonParams
 		// Nonce is the single-use challenge obtained from IssueNonce.
 		Nonce []byte
 	}
 
 	// MintParams describes the token MintToken should obtain.
 	MintParams struct {
+		CommonParams
 		// Client authenticates against the AuthService.
 		Client servicepb.AuthServiceClient
-		// Signer is the client's MSP signing identity; it signs the authentication envelope.
-		Signer identity.SignerSerializer
-		// ChannelID is the channel the authentication envelope is scoped to.
-		ChannelID string
-		// TLSCertHash is the SHA-256 of the client's own TLS certificate, bound into the token, or nil
-		// without mutual TLS. It must equal the hash the AuthService computes from the certificate the
-		// client presents on its connection, or authorization fails the certificate-binding check.
-		TLSCertHash []byte
 		// Scope optionally requests a least-privilege token limited to these resources.
 		Scope []string
-		// SecureTransportOnly is passed through to the returned Credentials.
-		SecureTransportOnly bool
+	}
+
+	CommonParams struct {
+		// Signer is the client's MSP signing identity; it signs the envelope.
+		Signer identity.SignerSerializer
+		// ChannelID is the channel the envelope is scoped to.
+		ChannelID string
+		// TLSCertHash is the SHA-256 of the client's TLS certificate, or nil without mutual TLS.
+		TLSCertHash []byte
 	}
 )
-
-var _ credentials.PerRPCCredentials = (*Credentials)(nil)
 
 // MintToken performs the whole client side of authentication: it fetches a single-use nonce, signs it
 // into an envelope, and exchanges that for a token bound to the client's certificate. It is the only
@@ -77,10 +66,8 @@ func MintToken(ctx context.Context, params *MintParams) (*Credentials, error) {
 		return nil, errors.Wrap(err, "failed to obtain an authentication nonce")
 	}
 	envelope, err := BuildAuthEnvelope(&AuthEnvelopeParams{
-		Signer:      params.Signer,
-		ChannelID:   params.ChannelID,
-		TLSCertHash: params.TLSCertHash,
-		Nonce:       nonce.GetNonce(),
+		CommonParams: params.CommonParams,
+		Nonce:        nonce.GetNonce(),
 	})
 	if err != nil {
 		return nil, err
@@ -94,20 +81,8 @@ func MintToken(ctx context.Context, params *MintParams) (*Credentials, error) {
 		return nil, errors.Wrap(err, "failed to authenticate with the auth service")
 	}
 	return &Credentials{
-		Token:               resp.GetToken(),
-		SecureTransportOnly: params.SecureTransportOnly,
+		Token: resp.GetToken(),
 	}, nil
-}
-
-// GetRequestMetadata returns the token as authorization metadata. It satisfies
-// credentials.PerRPCCredentials.
-func (c *Credentials) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
-	return map[string]string{TokenMetadataKey: c.Token}, nil
-}
-
-// RequireTransportSecurity satisfies credentials.PerRPCCredentials.
-func (c *Credentials) RequireTransportSecurity() bool {
-	return c.SecureTransportOnly
 }
 
 // BuildAuthEnvelope creates the signed envelope a client presents to Authenticate: an empty-payload

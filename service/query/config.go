@@ -52,5 +52,5 @@ type Config struct {
 	// Auth optionally enables ACL enforcement: when set, every RPC is authorized against the
 	// AuthService at the given endpoint. When absent (nil), the query service serves without ACL
 	// checks, preserving existing behavior.
-	Auth *acl.ClientConfig `mapstructure:"auth"`
+	Auth *acl.Client `mapstructure:"auth"`
 }

@@ -26,7 +26,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 )
 
-var logger = flogging.MustGetLogger("authentication-service")
+var logger = flogging.MustGetLogger("auth")
 
 // Service is the central authentication and authorization gRPC service. It composes focused
 // collaborators, each with a single responsibility: a configProvider that reads the latest committed
@@ -38,8 +38,6 @@ var logger = flogging.MustGetLogger("authentication-service")
 type Service struct {
 	servicepb.UnimplementedAuthServiceServer
 
-	// Set by the constructor. These need no I/O, so they exist for the lifetime of the Service and are
-	// safe to touch before Run.
 	config  *Config
 	metrics *perfMetrics
 	// challenges throttles the two RPCs reachable without a token. Nil when the limit is disabled.
@@ -47,14 +45,11 @@ type Service struct {
 	ready       *channel.Ready
 	healthcheck *health.Server
 
-	// Set by Run, once the database pool and signing key are open, since none of them can exist
-	// without those. They are nil until then; the gRPC handlers may rely on them because serve does
-	// not start the server until WaitForReady returns, which Run signals only after wiring them.
-	channelConfig *configProvider
-	tokens        *tokenStore
-	nonces        *nonceStore
-	authenticator *authenticator
-	authorizer    *authorizer
+	configBlockProvider *configProvider
+	tokens              *tokenStore
+	nonces              *nonceStore
+	authenticator       *authenticator
+	authorizer          *authorizer
 }
 
 // NewAuthService creates a new AuthService from a configuration. It performs only in-memory wiring;
@@ -86,7 +81,8 @@ func NewAuthService(config *Config) *Service {
 // the `init-db` command applies (statedb.SetupSystemTablesAndNamespaces), so a running service needs no
 // DDL privileges.
 func (s *Service) Run(ctx context.Context) error {
-	logger.Infof("Starting auth service (token TTL: %s)", s.config.TokenTTL)
+	logger.Infof("Starting auth service with token TTL: %s, and nonce TTL: %s",
+		s.config.TokenTTL, s.config.NonceTTL)
 
 	signer, err := newTokenSigner(s.config.SigningKeyPath)
 	if err != nil {
@@ -99,18 +95,30 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	s.tokens = &tokenStore{pool: pool}
-	s.nonces = &nonceStore{pool: pool, ttl: s.config.NonceTTL}
-	s.channelConfig = &configProvider{pool: pool, metrics: s.metrics}
-	s.authenticator = &authenticator{
-		signer:          signer,
-		tokens:          s.tokens,
-		nonces:          s.nonces,
-		freshnessWindow: s.config.EnvelopeFreshnessWindow,
-		tokenTTL:        s.config.TokenTTL,
+	s.tokens = &tokenStore{
+		pool: pool,
 	}
-	s.authorizer = &authorizer{signer: signer, tokens: s.tokens}
+	s.nonces = &nonceStore{
+		pool: pool,
+		ttl:  s.config.NonceTTL,
+	}
+	s.configBlockProvider = &configProvider{
+		pool:    pool,
+		metrics: s.metrics,
+	}
+	s.authenticator = &authenticator{
+		signer:                  signer,
+		tokens:                  s.tokens,
+		nonces:                  s.nonces,
+		envelopeFreshnessWindow: s.config.EnvelopeFreshnessWindow,
+		tokenTTL:                s.config.TokenTTL,
+	}
+	s.authorizer = &authorizer{
+		signer: signer,
+		tokens: s.tokens,
+	}
 
+	logger.Info("Attempting to warm the token store caching from database")
 	if warmed, warmErr := s.tokens.warmCache(ctx, time.Now()); warmErr != nil {
 		// A warm-up failure is non-fatal: bindings still resolve from the database on demand.
 		logger.Warnf("Token store warm-up failed: %v", warmErr)
@@ -122,42 +130,40 @@ func (s *Service) Run(ctx context.Context) error {
 	s.ready.SignalReady()
 	defer s.ready.Reset()
 
-	// The loops run under an errgroup so Run blocks until both have stopped before its deferred
-	// pool.Close runs - a background query can never hit a closed pool on shutdown. Each loop only
-	// logs transient database errors and returns when the context ends, so the service stays up
-	// (returning Unavailable for auth operations) rather than tearing itself down.
 	g, gCtx := errgroup.WithContext(ctx)
-	g.Go(func() error { s.channelConfig.run(gCtx, s.config.ConfigRefreshInterval); return nil })
-	g.Go(func() error { s.sweepExpiredLoop(gCtx); return nil })
+	g.Go(func() error {
+		return s.configBlockProvider.run(gCtx, s.config.ConfigRefreshInterval)
+	})
+	g.Go(func() error {
+		return s.sweepExpiredLoop(gCtx)
+	})
 	return g.Wait()
 }
 
 // sweepExpiredLoop periodically removes expired token records and updates the store-size metric.
-func (s *Service) sweepExpiredLoop(ctx context.Context) {
+func (s *Service) sweepExpiredLoop(ctx context.Context) error {
 	ticker := time.NewTicker(s.config.TokenCleanupInterval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			now := time.Now()
-			deleted, err := s.tokens.sweep(ctx, now)
-			if err != nil {
+
+			if deletedTokens, err := s.tokens.sweep(ctx, now); err != nil {
 				logger.Errorf("Token sweep failed: %v", err)
-				continue
+			} else if deletedTokens > 0 {
+				logger.Infof("Swept %d expired token records", deletedTokens)
 			}
-			if deleted > 0 {
-				logger.Infof("Swept %d expired token records", deleted)
-			}
+
 			promutil.SetGauge(s.metrics.tokenStoreSize, s.tokens.size())
 
-			// Unredeemed nonces accumulate whenever a client asks for one and never authenticates,
-			// so they are swept on the same tick as tokens.
-			if staleNonces, nonceErr := s.nonces.sweep(ctx, now); nonceErr != nil {
-				logger.Errorf("Nonce sweep failed: %v", nonceErr)
-			} else if staleNonces > 0 {
-				logger.Infof("Swept %d expired nonces", staleNonces)
+			if deletedNonces, err := s.nonces.sweep(ctx, now); err != nil {
+				logger.Errorf("Nonce sweep failed: %v", err)
+			} else if deletedNonces > 0 {
+				logger.Infof("Swept %d expired nonces", deletedNonces)
 			}
 		}
 	}
@@ -183,15 +189,17 @@ func (s *Service) RegisterService(srv serve.Servers) {
 func (s *Service) IssueNonce(
 	ctx context.Context, _ *servicepb.IssueNonceRequest,
 ) (*servicepb.IssueNonceResponse, error) {
-	if err := s.allowChallenge(ctx, "IssueNonce"); err != nil {
-		return nil, err
+	if err := s.allowChallenge(); err != nil {
+		return nil, grpcerror.WrapResourceExhaustedOrCancelled(ctx, err)
 	}
 	nonce, expiresAt, err := s.nonces.issue(ctx, time.Now())
 	if err != nil {
-		logger.Errorf("%+v", err)
 		return nil, grpcerror.WrapInternalError(err)
 	}
-	return &servicepb.IssueNonceResponse{Nonce: nonce, ExpiresAt: expiresAt.Unix()}, nil
+	return &servicepb.IssueNonceResponse{
+		Nonce:     nonce,
+		ExpiresAt: expiresAt.Unix(),
+	}, nil
 }
 
 // Authenticate exchanges a signed envelope for a cert-bound token. The signature is verified once
@@ -199,10 +207,10 @@ func (s *Service) IssueNonce(
 func (s *Service) Authenticate(
 	ctx context.Context, req *servicepb.AuthenticateRequest,
 ) (*servicepb.AuthenticateResponse, error) {
-	if err := s.allowChallenge(ctx, "Authenticate"); err != nil {
-		return nil, err
+	if err := s.allowChallenge(); err != nil {
+		return nil, grpcerror.WrapResourceExhaustedOrCancelled(ctx, err)
 	}
-	bundle, err := s.channelConfig.current()
+	bundle, err := s.configBlockProvider.current()
 	if err != nil {
 		return nil, grpcerror.WrapUnavailable(err)
 	}
@@ -216,22 +224,16 @@ func (s *Service) Authenticate(
 func (s *Service) Authorize(
 	ctx context.Context, req *servicepb.AuthorizeRequest,
 ) (*servicepb.AuthorizeResponse, error) {
-	bundle, err := s.channelConfig.current()
+	bundle, err := s.configBlockProvider.current()
 	if err != nil {
 		return nil, grpcerror.WrapUnavailable(err)
 	}
 	return s.authorizer.authorize(ctx, req, bundle)
 }
 
-// allowChallenge rejects an IssueNonce or Authenticate call that exceeds the challenge rate limit. It
-// covers only those two: they are the RPCs a caller can reach without already holding a token, and each
-// costs the service real work. Authorize is deliberately excluded, since its rate is the resource
-// servers' RPC rate and throttling it would throttle the data path.
-func (s *Service) allowChallenge(ctx context.Context, method string) error {
+func (s *Service) allowChallenge() error {
 	if s.challenges == nil || s.challenges.Allow() {
 		return nil
 	}
-	logger.Warnf("Challenge rate limit exceeded; rejecting %s", method)
-	return grpcerror.WrapResourceExhaustedOrCancelled(ctx,
-		errors.Newf("%s rate limit exceeded", method))
+	return errors.New("rate limit exceeded")
 }

@@ -231,16 +231,16 @@ func newAuthServiceForTest(t *testing.T, env *authTestEnv) (*Service, *tokenSign
 		tokens:  store,
 		nonces:  nonces,
 		authenticator: &authenticator{
-			signer:          signer,
-			tokens:          store,
-			nonces:          nonces,
-			freshnessWindow: cfg.EnvelopeFreshnessWindow,
-			tokenTTL:        cfg.TokenTTL,
+			signer:                  signer,
+			tokens:                  store,
+			nonces:                  nonces,
+			envelopeFreshnessWindow: cfg.EnvelopeFreshnessWindow,
+			tokenTTL:                cfg.TokenTTL,
 		},
 		authorizer: &authorizer{signer: signer, tokens: store},
 	}
-	svc.channelConfig = &configProvider{pool: store.pool, metrics: svc.metrics}
-	svc.channelConfig.bundle.Store(env.bundle)
+	svc.configBlockProvider = &configProvider{pool: store.pool, metrics: svc.metrics}
+	svc.configBlockProvider.bundle.Store(env.bundle)
 	return svc, signer
 }
 

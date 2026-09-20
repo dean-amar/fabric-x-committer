@@ -139,15 +139,10 @@ func TestChallengeRateLimitRejectsSpam(t *testing.T) {
 	t.Parallel()
 	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 1, ChallengeBurst: 1})
 
-	require.NoError(t, svc.allowChallenge(t.Context(), "IssueNonce"),
-		"the first call is within the burst")
-	err := svc.allowChallenge(t.Context(), "IssueNonce")
-	require.Equal(t, codes.ResourceExhausted, grpcerror.GetCode(err),
-		"the second call in the same second exhausts a 1/s limit")
-
+	require.NoError(t, svc.allowChallenge(), "the first call is within the burst")
+	require.Error(t, svc.allowChallenge(), "the second call in the same second exhausts a 1/s limit")
 	// The limit is shared, so Authenticate cannot be used to sidestep a budget IssueNonce has spent.
-	err = svc.allowChallenge(t.Context(), "Authenticate")
-	require.Equal(t, codes.ResourceExhausted, grpcerror.GetCode(err))
+	require.Error(t, svc.allowChallenge())
 }
 
 // TestChallengeRateLimitDisabled verifies a zero limit disables throttling rather than rejecting
@@ -157,7 +152,7 @@ func TestChallengeRateLimitDisabled(t *testing.T) {
 	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 0})
 
 	for range 5 {
-		require.NoError(t, svc.allowChallenge(t.Context(), "IssueNonce"))
+		require.NoError(t, svc.allowChallenge())
 	}
 }
 
@@ -243,9 +238,9 @@ func TestAuthRPCsUnavailableBeforeBundle(t *testing.T) {
 	t.Parallel()
 	metrics := newAuthServiceMetrics()
 	svc := &Service{
-		config:        &Config{},
-		metrics:       metrics,
-		channelConfig: &configProvider{metrics: metrics},
+		config:              &Config{},
+		metrics:             metrics,
+		configBlockProvider: &configProvider{metrics: metrics},
 	}
 
 	_, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{

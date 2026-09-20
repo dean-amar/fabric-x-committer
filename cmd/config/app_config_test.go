@@ -135,7 +135,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			LastCommittedBlockSetInterval: 5 * time.Second,
 			WaitingTxsLimit:               20_000_000,
 			ChannelBufferSize:             100,
-			Auth: &acl.ClientConfig{
+			Auth: &acl.Client{
 				Config:                   newClientConfigWithDefaultTLS("auth", "sidecar", 10001),
 				StreamRevalidateInterval: time.Minute,
 			},
@@ -366,7 +366,7 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
-			Auth: &acl.ClientConfig{
+			Auth: &acl.Client{
 				Config: newClientConfigWithDefaultTLS("auth", "query", 10001),
 			},
 		},

@@ -300,17 +300,16 @@ func startCommitterNodeWithReleaseImage(ctx context.Context, t *testing.T, param
 				"SC_SIDECAR_ORDERER_TLS_MODE=" + params.tlsMode,
 				"SC_VC_DATABASE_PASSWORD=" + params.dbPassword,
 				"SC_QUERY_DATABASE_PASSWORD=" + params.dbPassword,
+				"SC_AUTH_DATABASE_PASSWORD=" + params.dbPassword,
 				"SC_VC_DATABASE_USERNAME=" + params.dbUsername(),
 				"SC_QUERY_DATABASE_USERNAME=" + params.dbUsername(),
 				"SC_VC_DATABASE_DATABASE=" + params.dbDefaultDatabase(),
 				"SC_QUERY_DATABASE_DATABASE=" + params.dbDefaultDatabase(),
-				"SC_AUTH_DATABASE_PASSWORD=" + params.dbPassword,
 				"SC_AUTH_DATABASE_USERNAME=" + params.dbUsername(),
 				"SC_AUTH_DATABASE_DATABASE=" + params.dbDefaultDatabase(),
-				// Until the auth service observes the committed config it answers Unavailable, and the
-				// sample's one-minute refresh outlasts a waiting client's nonce.
+
+				// Auth-service settings to prevent test flakiness.
 				"SC_AUTH_CONFIG_REFRESH_INTERVAL=500ms",
-				// Tokens are minted once and never renewed, so they must outlast the whole test run.
 				"SC_AUTH_TOKEN_TTL=1h",
 				"SC_AUTH_NONCE_TTL=1h",
 			},
@@ -368,7 +367,7 @@ func startLoadgenNodeWithReleaseImage(
 			Env: []string{
 				// The metrics assertion waits for a further 1000 committed TXs after sampling a baseline,
 				// so the workload must still be running by then; the default 50k budget can be spent first.
-				"SC_LOADGEN_LIMIT_TRANSACTIONS=100_000",
+				"SC_LOADGEN_LIMIT_TRANSACTIONS=200_000",
 				"SC_LOADGEN_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,

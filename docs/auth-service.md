@@ -22,7 +22,7 @@ The service is composed of focused collaborators, each with one responsibility:
   service never owns or mutates configuration, it only reads what the sidecar and coordinator commit.
 - **`tokenSigner`** (`token.go`) — mints and verifies ES256 JWTs. The signing key never leaves the
   service; resource servers never verify tokens themselves.
-- **`tokenStore`** (`store.go`) — the token-to-identity binding store: it maps a token id (`jti`) to
+- **`tokenStore`** (`token_store.go`) — the token-to-identity binding store: it maps a token id (`jti`) to
   the client's resolved MSP identity (plus its certificate binding, scope, and expiry), persisted in
   the dedicated `auth_tokens` table and fronted by an in-memory read-through cache.
 - **`authenticator`** (`authenticate.go`) — verifies a signed envelope and issues a token, writing

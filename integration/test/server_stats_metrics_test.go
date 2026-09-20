@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
@@ -44,7 +45,10 @@ func TestServerStatsMetricsFullSystem(t *testing.T) {
 	c := runner.NewRuntime(t, &runner.Config{BlockTimeout: 2 * time.Second})
 	c.Start(t, runner.FullTxPathWithQuery)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	// The query service and the sidecar authorize every RPC, so this context carries a token.
+	ctx, cancel := context.WithTimeout(
+		acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token), 5*time.Minute,
+	)
 	t.Cleanup(cancel)
 
 	queryMetrics := test.NewMetricsConnectionParameters(

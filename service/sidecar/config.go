@@ -33,7 +33,7 @@ type (
 		// Auth optionally enables ACL enforcement: when set, block delivery, block query, and the
 		// notification streams are authorized against the AuthService. When absent (nil), the sidecar
 		// serves without ACL checks, preserving existing behavior.
-		Auth *acl.ClientConfig `mapstructure:"auth"`
+		Auth *acl.Client `mapstructure:"auth"`
 	}
 
 	// LedgerConfig holds the ledger path.

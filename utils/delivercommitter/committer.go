@@ -12,8 +12,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/deliver"
@@ -24,30 +22,15 @@ type Parameters struct {
 	ClientConfig *connection.ClientConfig
 	NextBlockNum uint64
 	OutputBlock  chan<- *common.Block
-	// Credentials authenticates every RPC on the stream. It is required when the delivery server
-	// enforces ACL, and nil otherwise - a server without enforcement ignores the token, so a caller
-	// that does not know whether the far side enforces may set it unconditionally.
-	Credentials credentials.PerRPCCredentials
 }
 
 // ToQueue connects to a committer delivery server and delivers the stream to a queue (go channel).
 // It returns when an error occurs or when the context is done.
 // It will attempt to reconnect on errors.
+// A delivery server that enforces ACL authorizes every stream, including the ones a reconnect opens.
+// The token rides on ctx, so it covers all of them and this function needs to know nothing about it.
 func ToQueue(ctx context.Context, cdp Parameters) error {
-	// Per-RPC credentials need a dial option, which only NewConnection takes.
-	tlsCreds, err := cdp.ClientConfig.TLS.ClientCredentials()
-	if err != nil {
-		return err
-	}
-	p := connection.ClientParameters{
-		Address: cdp.ClientConfig.Endpoint.Address(),
-		Creds:   tlsCreds,
-		Retry:   cdp.ClientConfig.Retry,
-	}
-	if cdp.Credentials != nil {
-		p.AdditionalOpts = []grpc.DialOption{grpc.WithPerRPCCredentials(cdp.Credentials)}
-	}
-	conn, err := connection.NewConnection(p)
+	conn, err := connection.NewSingleConnection(cdp.ClientConfig)
 	if err != nil {
 		return err
 	}

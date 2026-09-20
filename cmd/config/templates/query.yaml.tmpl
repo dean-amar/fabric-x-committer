@@ -18,8 +18,8 @@ max-request-keys: {{ .MaxRequestKeys }}
 {{- if .QueryTLSRefreshInterval }}
 tls-refresh-interval: {{ .QueryTLSRefreshInterval }}
 {{- end }}
-{{- if .Services.Auth.GrpcEndpoint }}
 
+{{- if .Services.Auth.GrpcEndpoint }}
 # ACL enforcement: every RPC is authorized against the AuthService.
 auth:
   client:

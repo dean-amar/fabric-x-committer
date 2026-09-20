@@ -159,12 +159,7 @@ channel-buffer-size: 100
 auth:
   client:
     endpoint: auth:10001
-    tls:
-      mode: mtls
-      cert-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/sidecar/tls/server.crt
-      key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/sidecar/tls/server.key
-      ca-cert-paths:
-        - /root/artifacts/peerOrganizations/peer-org-0.com/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
+    tls: *tlsConfig
   # How often an open stream re-authorizes its bound token against the latest policy.
   # Zero uses the enforcer's default interval (1m).
   stream-revalidate-interval: 1m

@@ -96,7 +96,6 @@ func (r *aclRegisterer) ACLEnforcer() *acl.Enforcer {
 // built in its constructor is read when the server is created, so its interceptors are in place before
 // the first RPC. An unauthenticated call must therefore be rejected by the interceptor, never reach the
 // handler - so whether ACL is enforced can never depend on startup ordering.
-
 func TestStartAndServe(t *testing.T) {
 	t.Parallel()
 

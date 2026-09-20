@@ -188,7 +188,9 @@ func (n *notifier) recordRemovals(pendingTxIDsRemoved, uniquePendingTxIDsRemoved
 }
 
 // OpenNotificationStream implements the [protonotify.NotifierServer] API.
-func (n *notifier) OpenNotificationStream(stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse]) error {
+func (n *notifier) OpenNotificationStream(
+	stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse],
+) error {
 	g, gCtx := errgroup.WithContext(stream.Context())
 	requestQueue := channel.NewWriter(gCtx, n.requestQueue)
 	streamEventQueue := channel.Make[*committerpb.NotificationResponse](gCtx, n.bufferSize)

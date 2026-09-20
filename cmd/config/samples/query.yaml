@@ -187,13 +187,7 @@ auth:
   client:
     # The auth service endpoint.
     endpoint: auth:10001
-    tls:
-      mode: mtls
-      cert-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/query/tls/server.crt
-      key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/query/tls/server.key
-      ca-cert-paths:
-        - /root/artifacts/peerOrganizations/peer-org-0.com/msp/tlscacerts/tlspeer-org-0-CA-cert.pem
-
+    tls: *tlsConfig
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or

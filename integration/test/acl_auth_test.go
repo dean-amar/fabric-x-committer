@@ -18,14 +18,12 @@ import (
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
@@ -70,32 +68,7 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	// Step 4: Query with the token. The query service authorizes every RPC against the AuthService, so
 	// this proves the whole chain: nonce -> envelope -> token -> interceptor -> Authorize -> handler.
 	t.Log("Step 4: query the committed row with the token")
-	rows, err := env.c.QueryServiceClient.GetRows(env.tokenContext(t, token), &committerpb.Query{
-		Namespaces: []*committerpb.QueryNamespace{
-			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
-		},
-	})
-	require.NoError(t, err)
-
-	test.RequireProtoElementsMatch(t, []*committerpb.RowsNamespace{{
-		NsId: aclNamespace,
-		Rows: []*committerpb.Row{{Key: []byte("k1"), Value: []byte("v1"), Version: 0}},
-	}}, rows.GetNamespaces())
-}
-
-// TestACLQueryWithMintedToken is the client-side counterpart: a caller that attaches a minted token as
-// per-RPC credentials performs no authentication steps of its own. The credential fetches the nonce,
-// signs the envelope, exchanges it for a token, and attaches that token to every call - so the query
-// below is an ordinary GetRows against an ACL-protected service.
-func TestACLQueryWithMintedToken(t *testing.T) {
-	t.Parallel()
-	env := newACLEnv(t)
-	env.commitRow(t, []byte("k1"), []byte("v1"))
-	// The credential authenticates on its first RPC, which needs the bundle already loaded.
-	env.waitForEnforcement(t)
-
-	client := committerpb.NewQueryServiceClient(env.connectionWithMintedToken(t))
-	rows, err := client.GetRows(t.Context(), &committerpb.Query{
+	rows, err := env.c.QueryServiceClient.GetRows(acl.ContextWithToken(t.Context(), token), &committerpb.Query{
 		Namespaces: []*committerpb.QueryNamespace{
 			{NsId: aclNamespace, Keys: [][]byte{[]byte("k1")}},
 		},
@@ -109,8 +82,9 @@ func TestACLQueryWithMintedToken(t *testing.T) {
 }
 
 // TestACLQueryRejectedWithoutToken verifies enforcement is actually on: the same query without a token
-// is refused before the handler runs. It dials its own connection instead of using the runtime's query
-// client, which attaches minted credentials to every RPC and so cannot express the no-token case.
+// is refused before the handler runs. It dials its own connection because the runtime's query client is
+// authenticated - every other test relies on that - so only a deliberately bare client can express the
+// unauthenticated case.
 func TestACLQueryRejectedWithoutToken(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
@@ -185,9 +159,8 @@ func newACLEnv(t *testing.T) *aclEnv {
 
 	c := runner.NewRuntime(t, &runner.Config{
 		BlockTimeout: 2 * time.Second,
-		EnableACL:    true,
 	})
-	c.Start(t, runner.FullTxPathWithAuth)
+	c.Start(t, runner.FullTxPathWithQuery)
 	c.CreateNamespacesAndCommit(t, aclNamespace, aclOtherNamespace)
 
 	// The signing identity must belong to the channel the system was bootstrapped with, so it is loaded
@@ -203,29 +176,6 @@ func newACLEnv(t *testing.T) *aclEnv {
 		),
 		signer: identities[0],
 	}
-}
-
-// connectionWithMintedToken dials the query service with a minted token attached as per-RPC
-// credentials, which is how a production client authenticates.
-func (e *aclEnv) connectionWithMintedToken(t *testing.T) *grpc.ClientConn {
-	t.Helper()
-	source, err := acl.MintToken(t.Context(), &acl.MintParams{
-		Client:    e.authClient,
-		Signer:    e.signer,
-		ChannelID: runner.TestChannelName,
-	})
-	require.NoError(t, err)
-
-	creds, err := e.c.SystemConfig.ClientTLS.ClientCredentials()
-	require.NoError(t, err)
-	conn, err := connection.NewConnection(connection.ClientParameters{
-		Address:        e.c.SystemConfig.Services.Query.GrpcEndpoint.Address(),
-		Creds:          creds,
-		AdditionalOpts: []grpc.DialOption{grpc.WithPerRPCCredentials(source)},
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
 }
 
 // nonce obtains a single-use challenge from the AuthService.

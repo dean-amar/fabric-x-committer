@@ -49,7 +49,6 @@ var (
 	databasePort           = network.MustParsePort("5433/tcp")
 	authServicePort        = network.MustParsePort("10001/tcp")
 
-	// dockerChannelID is the channel the baked-in samples configure.
 	dockerChannelID = "mychannel"
 
 	// The 'db' op initializes the database on its own, so 'init-db' is not passed here.
@@ -112,9 +111,7 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 						Sidecar:     getServerConfig(sidecarPort),
 						Query:       getServerConfig(queryServicePort),
 						Coordinator: getServerConfig(coordinatorServicePort),
-						// The query service and sidecar enforce ACL, so the runtime clients
-						// authenticate against the container auth service.
-						Auth: getServerConfig(authServicePort),
+						Auth:        getServerConfig(authServicePort),
 					},
 					Policy:    &c.LoadProfile.Policy,
 					ClientTLS: clientTLS,
@@ -134,17 +131,17 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			}
 
 			runtime.CreateRuntimeClients(ctx, t)
-			// The container's sidecar and query service enforce ACL, and Start - which mints for a
-			// topology the runtime launches itself - never runs here: the committer is already up in the
-			// container. Without this every client below carries an empty token.
-			runtime.MintAuthTokens(t)
-			runtime.OpenNotificationStream(ctx, t)
+
+			// bind the token to the context.
+			authCtx := acl.ContextWithToken(t.Context(), runtime.MintAuthToken(t).Token)
+
+			runtime.OpenNotificationStream(authCtx, t)
 
 			// Adding namespace policy and creating transaction builder
 			runtime.AddOrUpdateNamespaces(t, "1")
 
-			runtime.CommittedBlock = delivercommitter.Start(ctx, t, delivercommitter.Parameters{
-				ClientConfig: runtime.SidecarClientConfig, Credentials: runtime.ClientCredentials,
+			runtime.CommittedBlock = delivercommitter.Start(authCtx, t, delivercommitter.Parameters{
+				ClientConfig: runtime.SidecarClientConfig,
 			})
 
 			t.Log("Try to fetch the first block")
@@ -175,7 +172,7 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			require.Len(t, txIDs, 1)
 
 			t.Log("Query Rows")
-			timeoutContext, cancel := context.WithTimeout(ctx, time.Minute)
+			timeoutContext, cancel := context.WithTimeout(authCtx, time.Minute)
 			t.Cleanup(cancel)
 
 			ret, err := runtime.QueryServiceClient.GetRows(
@@ -235,9 +232,7 @@ func TestStartTestNode(t *testing.T) {
 	sidecarEndpoint := mustGetEndpoint(ctx, t, containerName, sidecarPort)
 	committerClient := test.NewInsecureClientConfig(sidecarEndpoint)
 
-	// The sidecar authorizes block delivery, so the stream needs a token. The identity comes from the
-	// container's own crypto, which the channel's Readers policy accepts. The node runs without TLS
-	// here, so the token is not certificate-bound and no certificate hash is sent.
+	// mint token and attach to the context so the ACL will pass.
 	identities, err := testcrypto.GetPeersIdentities(copyArtifactsFromContainer(ctx, t, containerName))
 	require.NoError(t, err)
 	require.NotEmpty(t, identities)
@@ -249,10 +244,11 @@ func TestStartTestNode(t *testing.T) {
 		ChannelID: dockerChannelID,
 	})
 	require.NoError(t, err)
-	committedBlock := delivercommitter.Start(ctx, t, delivercommitter.Parameters{
-		ClientConfig: committerClient,
-		Credentials:  creds,
-	})
+
+	committedBlock := delivercommitter.Start(
+		acl.ContextWithToken(ctx, creds.Token),
+		t, delivercommitter.Parameters{ClientConfig: committerClient},
+	)
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
@@ -328,7 +324,6 @@ func TestYugabyteDriverDiscoveryWithSingleNodeConnection(t *testing.T) {
 			"SC_AUTH_DATABASE_DATABASE=" + testdb.YugaDBType,
 			"SC_AUTH_DATABASE_LOAD_BALANCE=true",
 			"SC_AUTH_DATABASE_TLS_MODE=" + connection.NoneTLSMode,
-
 			// We are limiting the number of transactions to ensure transactions are not processed from the VC queue.
 			"SC_LOADGEN_STREAM_RATE_LIMIT=1000",
 		},
@@ -394,6 +389,9 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_LIMIT_TRANSACTIONS=200_000",
+				"SC_AUTH_CONFIG_REFRESH_INTERVAL=500ms",
+				"SC_AUTH_TOKEN_TTL=1h",
+				"SC_AUTH_NONCE_TTL=1h",
 			}, params.additionalEnvs...),
 			Healthcheck: &container.HealthConfig{
 				Test:        []string{"CMD", "healthcheck"},

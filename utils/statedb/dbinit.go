@@ -39,8 +39,6 @@ const (
 
 	// AuthTokensTableName is the name of the system table holding the auth service's
 	// token-to-identity bindings.
-	//
-	//nolint:gosec // G101: a table name, not a credential.
 	AuthTokensTableName = "auth_tokens"
 
 	// AuthNoncesTableName is the name of the system table holding the auth service's unredeemed
