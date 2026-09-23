@@ -116,7 +116,7 @@ func TestRateLimit(t *testing.T) {
 			// Authorized: without a token the requests would be rejected before reaching the rate
 			// limiter this test measures.
 			reqCtx, cancel := context.WithTimeout(
-				acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token), tt.timeout,
+				acl.ContextWithToken(t.Context(), c.MintAuthToken(t)), tt.timeout,
 			)
 			t.Cleanup(cancel)
 			successCount, rateLimitedCount, otherErrorCount := makeParallelRequests(

@@ -16,8 +16,12 @@ import (
 // purpose: an operator who omits the section leaves the pointer nil, which disables enforcement.
 type Client struct {
 	// Config is the AuthService endpoint and the TLS the resource server uses to reach it.
-	Config *connection.ClientConfig `mapstructure:"client" validate:"required"`
+	Config *connection.ClientConfig `mapstructure:"client"`
 	// StreamReAuthorizeInterval is how often an open stream re-authorizes its bound token against the
-	// latest policy. Zero uses the enforcer's default interval.
-	StreamReAuthorizeInterval time.Duration `mapstructure:"stream-re-authorize-interval"`
+	// latest policy. A stream is always bounded by its token's expiry as well, so a high value here leaves
+	// the token's lifetime as the only bound. Zero means Authorization on every call.
+	StreamReAuthorizeInterval time.Duration `mapstructure:"stream-re-authorize-interval" default:"1m" validate:"gt=0"`
+	// TransientRetryInterval is how long a stream waits before retrying a re-authorization that failed
+	// transiently, so a brief outage costs one attempt per interval rather than one per message.
+	TransientRetryInterval time.Duration `mapstructure:"transient-retry-interval" default:"5s" validate:"gt=0"`
 }

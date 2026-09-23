@@ -192,7 +192,7 @@ func setupQueryService(
 	c.CreateNamespacesAndCommit(t, "1", "2")
 
 	// The query service authorizes every RPC, so the context every caller below uses carries a token.
-	ctx, cancel := context.WithTimeout(acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token), time.Minute*5)
+	ctx, cancel := context.WithTimeout(acl.ContextWithToken(t.Context(), c.MintAuthToken(t)), time.Minute*5)
 	t.Cleanup(cancel)
 
 	t.Log("Insert TXs")

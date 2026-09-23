@@ -16,17 +16,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 type (
-	// Credentials attaches one already-minted token to every RPC and never re-authenticates, so a client
-	// that must outlive its token requests a lifetime covering its whole run.
-	Credentials struct {
-		// Token is the encoded JWT sent as authorization metadata.
-		Token string
-	}
-
 	// AuthEnvelopeParams describes the authentication envelope to build.
 	AuthEnvelopeParams struct {
 		CommonParams
@@ -55,35 +47,21 @@ type (
 	}
 )
 
-// TLSCertHash returns the SHA-256 of the certificate tlsConfig presents, for MintParams.TLSCertHash. It is
-// nil unless the mode is mutual TLS: only then does the connection carry a certificate to bind a token to.
-func TLSCertHash(tlsConfig connection.TLSConfig) ([]byte, error) {
-	creds, err := connection.NewClientTLSCredentials(tlsConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load the client TLS credentials")
-	}
-	if creds.Mode != connection.MutualTLSMode {
-		return nil, nil
-	}
-	hash, err := protoutil.HashTLSCertificate(creds.Cert)
-	return hash, errors.Wrap(err, "failed to hash the client certificate")
-}
-
 // MintToken runs the whole client side of authentication: fetch a nonce, sign it into an envelope, exchange
-// it for a cert-bound token. Failure surfaces here rather than inside an unrelated RPC.
-func MintToken(ctx context.Context, params *MintParams) (*Credentials, error) {
+// it for a cert-bound token.
+func MintToken(ctx context.Context, params *MintParams) (string, error) {
 	// A nonce is fetched per attempt rather than cached: it is valid for exactly one Authenticate call,
 	// so there is nothing to reuse.
 	nonce, err := params.Client.IssueNonce(ctx, &servicepb.IssueNonceRequest{})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to obtain an authentication nonce")
+		return "", errors.Wrap(err, "failed to obtain an authentication nonce")
 	}
 	envelope, err := BuildAuthEnvelope(&AuthEnvelopeParams{
 		CommonParams: params.CommonParams,
 		Nonce:        nonce.GetNonce(),
 	})
 	if err != nil {
-		return nil, err
+		return "", errors.Wrap(err, "failed to build authentication envelope")
 	}
 
 	resp, err := params.Client.Authenticate(ctx, &servicepb.AuthenticateRequest{
@@ -91,11 +69,9 @@ func MintToken(ctx context.Context, params *MintParams) (*Credentials, error) {
 		RequestedScope: params.Scope,
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to authenticate with the auth service")
+		return "", errors.Wrap(err, "failed to authenticate with the auth service")
 	}
-	return &Credentials{
-		Token: resp.GetToken(),
-	}, nil
+	return resp.GetToken(), nil
 }
 
 // BuildAuthEnvelope builds the envelope Authenticate expects: empty payload, channel-scoped, cert hash,

@@ -79,7 +79,7 @@ func NewQueryService(config *Config) (*Service, error) {
 
 	// Enforce ACL only if the auth section in the configuration has been set.
 	if config.Auth != nil {
-		// Dialled here rather than in Run, so the enforcer exists before serve builds the gRPC server:
+		// Dialed here rather than in Run, so the enforcer exists before serve builds the gRPC server:
 		// whether ACL is enforced then follows from configuration alone, never from startup ordering.
 		enforcer, err := acl.NewEnforcer(config.Auth)
 		if err != nil {

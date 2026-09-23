@@ -133,7 +133,7 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			runtime.CreateRuntimeClients(ctx, t)
 
 			// bind the token to the context.
-			authCtx := acl.ContextWithToken(t.Context(), runtime.MintAuthToken(t).Token)
+			authCtx := acl.ContextWithToken(t.Context(), runtime.MintAuthToken(t))
 
 			runtime.OpenNotificationStream(authCtx, t)
 
@@ -236,7 +236,7 @@ func TestStartTestNode(t *testing.T) {
 	identities, err := testcrypto.GetPeersIdentities(copyArtifactsFromContainer(ctx, t, containerName))
 	require.NoError(t, err)
 	require.NotEmpty(t, identities)
-	creds, err := acl.MintToken(ctx, &acl.MintParams{
+	token, err := acl.MintToken(ctx, &acl.MintParams{
 		Client: servicepb.NewAuthServiceClient(test.NewInsecureConnection(
 			t, mustGetEndpoint(ctx, t, containerName, authServicePort),
 		)),
@@ -246,7 +246,7 @@ func TestStartTestNode(t *testing.T) {
 	require.NoError(t, err)
 
 	committedBlock := delivercommitter.Start(
-		acl.ContextWithToken(ctx, creds.Token),
+		acl.ContextWithToken(ctx, token),
 		t, delivercommitter.Parameters{ClientConfig: committerClient},
 	)
 	b, ok := channel.NewReader(ctx, committedBlock).Read()

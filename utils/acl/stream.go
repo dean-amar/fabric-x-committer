@@ -83,11 +83,9 @@ func (s *authorizedStream) authorizeIfLapsed() error {
 
 	if _, err := s.enforcer.authorize(s.ctx, s.token, s.resource); err != nil {
 		if grpcerror.FilterUnavailableErrorCode(err) == nil {
-			// Transient: keep serving, but back off, or every message re-attempts the call and waits out
-			// its timeout holding mu. Measured after the call, which may have burned the whole timeout.
-			s.nextAuthorizeAt = time.Now().Add(transientRetryInterval)
+			s.nextAuthorizeAt = time.Now().Add(s.enforcer.TransientRetryInterval)
 			logger.Warnf("ACL re-check for [%s] failed transiently; retrying in %s: %v",
-				s.resource, transientRetryInterval, err)
+				s.resource, s.enforcer.TransientRetryInterval, err)
 			return nil
 		}
 		logger.Warnf("ACL re-check for [%s] denied; terminating the stream: %v", s.resource, err)

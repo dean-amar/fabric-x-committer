@@ -124,7 +124,7 @@ func newSidecarTestEnvWithTLS(
 	}
 	var authEnv *auth.TestEnv
 	if conf.UseACL {
-		authEnv = auth.NewServiceTestEnv(t, &auth.ACLTestEnvParams{TokenTTL: aclTestTokenTTL})
+		authEnv = auth.NewAuthTestEnv(t, &auth.ACLTestEnvParams{TokenTTL: aclTestTokenTTL})
 		sidecarConf.Auth = authEnv.ACLClient(aclTestReAuthorizeInterval)
 	}
 

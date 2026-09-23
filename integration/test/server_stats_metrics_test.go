@@ -47,7 +47,7 @@ func TestServerStatsMetricsFullSystem(t *testing.T) {
 
 	// The query service and the sidecar authorize every RPC, so this context carries a token.
 	ctx, cancel := context.WithTimeout(
-		acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token), 5*time.Minute,
+		acl.ContextWithToken(t.Context(), c.MintAuthToken(t)), 5*time.Minute,
 	)
 	t.Cleanup(cancel)
 

@@ -44,7 +44,7 @@ func TestTokenMintVerifyRoundTrip(t *testing.T) {
 				Jti:            "jti-1",
 				MspId:          testMSPID,
 				CertHashSha256: []byte{0x01, 0x02, 0x03, 0x04},
-				Scope:          []string{testNS2, "/committerpb.QueryService/GetRows"},
+				Scope:          []string{"ns2", "/committerpb.QueryService/GetRows"},
 				IssuedSequence: 7,
 				ExpiresAt:      issuedAt.Add(5 * time.Minute).Unix(),
 			},
@@ -92,85 +92,49 @@ func TestTokenVerifyRejects(t *testing.T) {
 	validRec := &servicepb.TokenRecord{
 		Jti: testJTI, MspId: testMSPID, CertHashSha256: []byte{0x01}, ExpiresAt: futureUnix(),
 	}
+	expiredRec := &servicepb.TokenRecord{
+		Jti: "expired", MspId: testMSPID, CertHashSha256: []byte{0x01},
+		ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+	}
+	validClaims := jwt.RegisteredClaims{
+		Issuer: tokenIssuer, ID: testJTI, ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}
+
+	// Flip a character of the signature segment, leaving a structurally valid token.
+	tampered := mustMint(t, signer, validRec, time.Now())
+	tampered = tampered[:len(tampered)-2] +
+		flipChar(tampered[len(tampered)-2:len(tampered)-1]) + tampered[len(tampered)-1:]
 
 	for _, tc := range []struct {
-		name  string
-		token func(t *testing.T) string
+		name string
+		// encoded is the serialized JWT to verify.
+		encoded string
 	}{
-		{
-			name: "expired token",
-			token: func(t *testing.T) string {
-				t.Helper()
-				expired := &servicepb.TokenRecord{
-					Jti: "expired", MspId: testMSPID, CertHashSha256: []byte{0x01},
-					ExpiresAt: time.Now().Add(-time.Minute).Unix(),
-				}
-				token, err := signer.mint(expired, time.Now().Add(-time.Hour))
-				require.NoError(t, err)
-				return token
-			},
-		},
-		{
-			name: "signed by a different key",
-			token: func(t *testing.T) string {
-				t.Helper()
-				token, err := otherSigner.mint(validRec, time.Now())
-				require.NoError(t, err)
-				return token
-			},
-		},
-		{
-			name: "tampered payload",
-			token: func(t *testing.T) string {
-				t.Helper()
-				token, err := signer.mint(validRec, time.Now())
-				require.NoError(t, err)
-				// Flip the last byte of the signature segment.
-				return token[:len(token)-2] + flipChar(token[len(token)-2:len(token)-1]) + token[len(token)-1:]
-			},
-		},
+		{name: "expired token", encoded: mustMint(t, signer, expiredRec, time.Now().Add(-time.Hour))},
+		{name: "signed by a different key", encoded: mustMint(t, otherSigner, validRec, time.Now())},
+		{name: "tampered payload", encoded: tampered},
+		{name: "malformed token", encoded: "not.a.valid.jwt"},
 		{
 			name: "wrong signing algorithm (HS256)",
-			token: func(t *testing.T) string {
-				t.Helper()
-				claims := &tokenClaims{RegisteredClaims: jwt.RegisteredClaims{
-					Issuer: tokenIssuer, ID: testJTI, ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-				}}
-				token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte("shared-secret"))
-				require.NoError(t, err)
-				return token
-			},
+			encoded: mustSignClaims(t, jwt.SigningMethodHS256, []byte("shared-secret"),
+				&tokenClaims{RegisteredClaims: validClaims}),
 		},
 		{
 			name: "wrong issuer",
-			token: func(t *testing.T) string {
-				t.Helper()
-				claims := &tokenClaims{RegisteredClaims: jwt.RegisteredClaims{
-					Issuer: "someone-else", ID: testJTI, ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-				}}
-				token, err := jwt.NewWithClaims(jwt.SigningMethodES256, claims).SignedString(signer.privateKey)
-				require.NoError(t, err)
-				return token
-			},
-		},
-		{
-			name:  "malformed token",
-			token: func(*testing.T) string { return "not.a.valid.jwt" },
+			encoded: mustSignClaims(t, jwt.SigningMethodES256, signer.privateKey, &tokenClaims{
+				Issuer: "someone-else", ID: testJTI, ExpiresAt: validClaims.ExpiresAt,
+			}),
 		},
 		{
 			name: "missing expiry",
-			token: func(t *testing.T) string {
-				t.Helper()
-				claims := &tokenClaims{RegisteredClaims: jwt.RegisteredClaims{Issuer: tokenIssuer, ID: testJTI}}
-				token, err := jwt.NewWithClaims(jwt.SigningMethodES256, claims).SignedString(signer.privateKey)
-				require.NoError(t, err)
-				return token
-			},
+			encoded: mustSignClaims(t, jwt.SigningMethodES256, signer.privateKey, &tokenClaims{
+				Issuer: tokenIssuer, ID: testJTI,
+			}),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := signer.verify(tc.token(t))
+			_, err := signer.verify(tc.encoded)
 			require.ErrorIs(t, err, ErrInvalidToken)
 		})
 	}
@@ -178,25 +142,25 @@ func TestTokenVerifyRejects(t *testing.T) {
 
 func TestNewTokenSignerFromFile(t *testing.T) {
 	t.Parallel()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
 	// Success cases: both PEM encodings load and produce a working signer.
 	for _, tc := range []struct {
-		name  string
-		write func(t *testing.T, key *ecdsa.PrivateKey) string
+		name string
+		path string
 	}{
-		{name: "SEC1 EC PRIVATE KEY", write: writeSEC1Key},
-		{name: "PKCS#8 PRIVATE KEY", write: writePKCS8Key},
+		{name: "SEC1 EC PRIVATE KEY", path: writeSEC1Key(t, key)},
+		{name: "PKCS#8 PRIVATE KEY", path: writePKCS8Key(t, key)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-			require.NoError(t, err)
-			signer, err := newTokenSigner(tc.write(t, key))
-			require.NoError(t, err)
+			signer, signerErr := newTokenSigner(tc.path)
+			require.NoError(t, signerErr)
 			require.True(t, key.Equal(signer.privateKey))
 
-			// The loaded key mints tokens that verify.
-			token, err := signer.mint(&servicepb.TokenRecord{Jti: "j", ExpiresAt: futureUnix()}, time.Now())
-			require.NoError(t, err)
+			token, mintErr := signer.mint(&servicepb.TokenRecord{Jti: "j", ExpiresAt: futureUnix()}, time.Now())
+			require.NoError(t, mintErr)
 			_, err = signer.verify(token)
 			require.NoError(t, err)
 		})
@@ -204,33 +168,22 @@ func TestNewTokenSignerFromFile(t *testing.T) {
 
 	// Failure cases.
 	for _, tc := range []struct {
-		name    string
-		keyPath func(t *testing.T) string
+		name string
+		path string
 	}{
-		{
-			name:    "nonexistent file",
-			keyPath: func(t *testing.T) string { t.Helper(); return filepath.Join(t.TempDir(), "absent.pem") },
-		},
-		{
-			name: "not a PEM file",
-			keyPath: func(t *testing.T) string {
-				t.Helper()
-				return writeFile(t, "signing.pem", []byte("this is not pem"))
-			},
-		},
+		{name: "nonexistent file", path: filepath.Join(t.TempDir(), "absent.pem")},
+		{name: "not a PEM file", path: writeFile(t, "signing.pem", []byte("this is not pem"))},
 		{
 			name: "PEM but not an EC key",
-			keyPath: func(t *testing.T) string {
-				t.Helper()
-				block := &pem.Block{Type: pemPrivateKeyType, Bytes: []byte("garbage")}
-				return writeFile(t, "signing.pem", pem.EncodeToMemory(block))
-			},
+			path: writeFile(t, "signing.pem", pem.EncodeToMemory(
+				&pem.Block{Type: pemPrivateKeyType, Bytes: []byte("garbage")},
+			)),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := newTokenSigner(tc.keyPath(t))
-			require.Error(t, err)
+			_, signerErr := newTokenSigner(tc.path)
+			require.Error(t, signerErr)
 		})
 	}
 }
@@ -242,6 +195,23 @@ func newEphemeralSigner(t *testing.T) *tokenSigner {
 	signer, err := newTokenSigner("")
 	require.NoError(t, err)
 	return signer
+}
+
+// mustMint mints a token from rec as though it were issued at issuedAt.
+func mustMint(t *testing.T, signer *tokenSigner, rec *servicepb.TokenRecord, issuedAt time.Time) string {
+	t.Helper()
+	token, err := signer.mint(rec, issuedAt)
+	require.NoError(t, err)
+	return token
+}
+
+// mustSignClaims signs claims directly, for the cases a mint cannot produce: a foreign algorithm,
+// a foreign issuer, or absent registered claims.
+func mustSignClaims(t *testing.T, method jwt.SigningMethod, key any, claims *tokenClaims) string {
+	t.Helper()
+	token, err := jwt.NewWithClaims(method, claims).SignedString(key)
+	require.NoError(t, err)
+	return token
 }
 
 func futureUnix() int64 {

@@ -181,7 +181,7 @@ Models: `service/vc/validator_committer_service.go:258` (stream + CAS guard),
 Per-service `config.go` defines `Config` with `mapstructure:"kebab-case"` +
 `validate:"..."` tags. **No `yaml` tags.** Durations are plain `time.Duration` (decoded
 from strings like `"5s"` by a decoder hook). Endpoints use `connection.Endpoint`; client
-deps use `connection.MultiClientConfig` / `ClientConfig`. Nested optional sub-configs are
+deps use `connection.MultiClientConfig` / `Config`. Nested optional sub-configs are
 pointers tagged `validate:"required"`. Serving knobs (server/monitoring endpoints, TLS,
 keepalive, rate-limit) live in `serve.Config`, **not** the service config.
 

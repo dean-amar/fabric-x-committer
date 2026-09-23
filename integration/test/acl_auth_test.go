@@ -10,17 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
@@ -31,12 +28,10 @@ const (
 	aclOtherNamespace = "2"
 )
 
-// aclEnv is a running committer plus what a client needs to authenticate against it: an AuthService client
-// and an MSP signing identity belonging to the bootstrapped channel.
+// aclEnv is a running committer plus the client side of its AuthService, which auth.TestEnv already is.
 type aclEnv struct {
-	c          *runner.CommitterRuntime
-	authClient servicepb.AuthServiceClient
-	signer     msp.SigningIdentity
+	*auth.TestEnv
+	c *runner.CommitterRuntime
 }
 
 // TestACLQueryWithAuthenticatedClient walks the mechanism end to end against a live system: nonce ->
@@ -48,17 +43,17 @@ func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	// Step 1: Commit a transaction through the normal path, so the query has something real to find.
 	t.Log("Step 1: commit a transaction through the orderer")
 	env.commitRow(t, []byte("k1"), []byte("v1"))
-	env.waitForEnforcement(t)
+	env.WaitForEnforcement(t)
 
 	// Step 2: Obtain a single-use nonce - the mandatory pre-step of authentication.
 	t.Log("Step 2: obtain a nonce from the auth service")
-	nonce := env.nonce(t)
+	nonce := env.Nonce(t)
 	t.Logf("got nonce %s", nonce)
 	require.NotEmpty(t, nonce)
 
 	// Step 3: Sign the nonce into an envelope and exchange it for a cert-bound token.
 	t.Log("Step 3: authenticate with the signed envelope carrying the nonce")
-	token := env.authenticate(t, env.envelope(t, nonce))
+	token := env.Authenticate(t, env.Envelope(t, nonce))
 	require.NotEmpty(t, token)
 
 	// Step 4: Query with the token. The query service authorizes every RPC against the AuthService, so
@@ -99,10 +94,10 @@ func TestACLQueryRejectedWithoutToken(t *testing.T) {
 func TestACLAuthenticateRejectsMissingNonce(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
-	env.waitForEnforcement(t)
+	env.WaitForEnforcement(t)
 
-	_, err := env.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
-		SignedEnvelope: env.envelope(t, nil),
+	_, err := env.Client.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
+		SignedEnvelope: env.Envelope(t, nil),
 	})
 	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
 	require.ErrorContains(t, err, "envelope carries no nonce")
@@ -113,10 +108,10 @@ func TestACLAuthenticateRejectsMissingNonce(t *testing.T) {
 func TestACLAuthenticateRejectsForgedNonce(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
-	env.waitForEnforcement(t)
+	env.WaitForEnforcement(t)
 
-	_, err := env.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
-		SignedEnvelope: env.envelope(t, []byte("a-nonce-the-server-never-issued")),
+	_, err := env.Client.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
+		SignedEnvelope: env.Envelope(t, []byte("a-nonce-the-server-never-issued")),
 	})
 	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
 	require.ErrorContains(t, err, "unknown, already used, or expired")
@@ -128,17 +123,17 @@ func TestACLAuthenticateRejectsReplayedEnvelope(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
 
-	env.waitForEnforcement(t)
+	env.WaitForEnforcement(t)
 
 	// Step 1: A first authentication succeeds and consumes the nonce.
 	t.Log("Step 1: authenticate once, consuming the nonce")
-	envelope := env.envelope(t, env.nonce(t))
-	token := env.authenticate(t, envelope)
+	envelope := env.Envelope(t, env.Nonce(t))
+	token := env.Authenticate(t, envelope)
 	require.NotEmpty(t, token)
 
 	// Step 2: Replay the very same envelope, as an attacker who captured it would.
 	t.Log("Step 2: replay the identical envelope")
-	_, err := env.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
+	_, err := env.Client.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
 		SignedEnvelope: envelope,
 	})
 	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
@@ -156,63 +151,17 @@ func newACLEnv(t *testing.T) *aclEnv {
 	c.Start(t, runner.FullTxPathWithQuery)
 	c.CreateNamespacesAndCommit(t, aclNamespace, aclOtherNamespace)
 
-	// The signing identity must belong to the channel the system was bootstrapped with, so it is loaded
-	// from the same crypto material the genesis config block was built from.
-	identities, err := testcrypto.GetPeersIdentities(c.OrdererEnv.ArtifactsPath)
-	require.NoError(t, err)
-	require.NotEmpty(t, identities)
-
 	return &aclEnv{
 		c: c,
-		authClient: servicepb.NewAuthServiceClient(
-			test.NewSecuredConnection(t, c.SystemConfig.Services.Auth.GrpcEndpoint, c.SystemConfig.ClientTLS),
-		),
-		signer: identities[0],
+		TestEnv: &auth.TestEnv{
+			Client: servicepb.NewAuthServiceClient(
+				test.NewSecuredConnection(t, c.SystemConfig.Services.Auth.GrpcEndpoint, c.SystemConfig.ClientTLS),
+			),
+			Signer:        auth.LoadTestSigner(t, c.OrdererEnv.ArtifactsPath),
+			ChannelID:     runner.TestChannelName,
+			ArtifactsPath: c.OrdererEnv.ArtifactsPath,
+		},
 	}
-}
-
-// nonce obtains a single-use challenge from the AuthService.
-func (e *aclEnv) nonce(t *testing.T) []byte {
-	t.Helper()
-	resp, err := e.authClient.IssueNonce(t.Context(), &servicepb.IssueNonceRequest{})
-	require.NoError(t, err)
-	return resp.GetNonce()
-}
-
-// envelope builds a signed authentication envelope carrying the given nonce. A nil nonce produces an
-// envelope with no challenge at all, which is what the missing-nonce case needs.
-func (e *aclEnv) envelope(t *testing.T, nonce []byte) *common.Envelope {
-	t.Helper()
-	envelope, err := acl.BuildAuthEnvelope(&acl.AuthEnvelopeParams{
-		Signer:    e.signer,
-		ChannelID: runner.TestChannelName,
-		Nonce:     nonce,
-	})
-	require.NoError(t, err)
-	return envelope
-}
-
-// authenticate exchanges an envelope for a token in exactly one attempt: waitForEnforcement owns the
-// bootstrap wait, and retrying would only replay a challenge the service has already rejected.
-func (e *aclEnv) authenticate(t *testing.T, envelope *common.Envelope) string {
-	t.Helper()
-	resp, err := e.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
-		SignedEnvelope: envelope,
-	})
-	require.NoError(t, err)
-	return resp.GetToken()
-}
-
-// waitForEnforcement blocks until the AuthService has a bundle and answers on the merits, so a test
-// asserting a specific rejection cannot mistake the bootstrap window's Unavailable for it.
-func (e *aclEnv) waitForEnforcement(t *testing.T) {
-	t.Helper()
-	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		_, err := e.authClient.Authenticate(t.Context(), &servicepb.AuthenticateRequest{
-			SignedEnvelope: e.envelope(t, e.nonce(t)),
-		})
-		require.NoError(ct, err)
-	}, 2*time.Minute, 250*time.Millisecond)
 }
 
 // commitRow commits the key and value into both test namespaces through the ordering service.

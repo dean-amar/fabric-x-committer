@@ -22,46 +22,41 @@ import (
 
 const resourceGetTxStatus = "/committerpb.QueryService/GetTransactionStatus"
 
-func TestAuthenticateAndAuthorizeNoMTLS(t *testing.T) {
+// TestAuthenticateAndAuthorize walks the whole mechanism: nonce -> signed envelope -> token -> a decision
+// on a resource. Under mutual TLS the token is additionally bound to the certificate that minted it.
+func TestAuthenticateAndAuthorize(t *testing.T) {
 	t.Parallel()
-	env := newAuthTestEnv(t)
-	svc, _ := newAuthServiceForTest(t, env)
-	ctx := context.Background()
+	for _, tc := range []struct {
+		name      string
+		mutualTLS bool
+	}{
+		{name: "without mutual TLS the token carries no certificate binding"},
+		{name: "under mutual TLS the same certificate authorizes", mutualTLS: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := newAuthTestEnv(t)
+			svc, _ := newAuthServiceForTest(t, env)
 
-	authResp, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
-		SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), nil),
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, authResp.GetToken())
-	require.Greater(t, authResp.GetExpiresAt(), time.Now().Unix())
+			ctx := context.Background()
+			var certHash []byte
+			if tc.mutualTLS {
+				ctx, certHash = peerContextWithCert(t)
+			}
+			authResp, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
+				SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), certHash),
+			})
+			require.NoError(t, err)
+			require.NotEmpty(t, authResp.GetToken())
+			require.Greater(t, authResp.GetExpiresAt(), time.Now().Unix())
 
-	azResp, err := svc.Authorize(ctx, &servicepb.AuthorizeRequest{
-		Token:    authResp.GetToken(),
-		Resource: resourceGetRows,
-	})
-	require.NoError(t, err)
-	require.True(t, azResp.GetAuthorized())
-}
-
-func TestAuthenticateAndAuthorizeMTLS(t *testing.T) {
-	t.Parallel()
-	env := newAuthTestEnv(t)
-	svc, _ := newAuthServiceForTest(t, env)
-	ctx, certHash := peerContextWithCert(t)
-
-	authResp, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
-		SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), certHash),
-	})
-	require.NoError(t, err)
-
-	// The resource server presents the same certificate, so the binding holds.
-	azResp, err := svc.Authorize(context.Background(), &servicepb.AuthorizeRequest{
-		Token:       authResp.GetToken(),
-		Resource:    resourceGetRows,
-		TlsCertHash: certHash,
-	})
-	require.NoError(t, err)
-	require.True(t, azResp.GetAuthorized())
+			azResp, err := svc.Authorize(context.Background(), &servicepb.AuthorizeRequest{
+				Token: authResp.GetToken(), Resource: resourceGetRows, TlsCertHash: certHash,
+			})
+			require.NoError(t, err)
+			require.True(t, azResp.GetAuthorized())
+		})
+	}
 }
 
 func TestAuthenticateScopedTokenLimitsAuthorization(t *testing.T) {
@@ -130,26 +125,19 @@ func TestAuthorizeIsRepeatableForStreamRecheck(t *testing.T) {
 		"a token whose record is absent must fail even though the JWT is still valid")
 }
 
-// TestChallengeRateLimitRejectsSpam verifies the limit on the two RPCs reachable without a token, which is
-// what stops an uncredentialed caller spamming a database row or a signature check per call.
-func TestChallengeRateLimitRejectsSpam(t *testing.T) {
+// TestChallengeRateLimit verifies the budget on the two RPCs reachable without a token, which is what
+// stops an uncredentialed caller spamming a database row or a signature check per call. It is shared, so
+// Authenticate cannot sidestep what IssueNonce has spent; zero disables it rather than rejecting all.
+func TestChallengeRateLimit(t *testing.T) {
 	t.Parallel()
-	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 1, ChallengeBurst: 1})
+	limited := NewAuthService(&Config{ChallengeRequestsPerSecond: 1, ChallengeBurst: 1})
+	require.NoError(t, limited.allowChallenge(), "the first call is within the burst")
+	require.Error(t, limited.allowChallenge(), "the second call in the same second exhausts a 1/s limit")
+	require.Error(t, limited.allowChallenge())
 
-	require.NoError(t, svc.allowChallenge(), "the first call is within the burst")
-	require.Error(t, svc.allowChallenge(), "the second call in the same second exhausts a 1/s limit")
-	// The limit is shared, so Authenticate cannot be used to sidestep a budget IssueNonce has spent.
-	require.Error(t, svc.allowChallenge())
-}
-
-// TestChallengeRateLimitDisabled verifies a zero limit disables throttling rather than rejecting
-// everything, so a test or single-user deployment can opt out.
-func TestChallengeRateLimitDisabled(t *testing.T) {
-	t.Parallel()
-	svc := NewAuthService(&Config{ChallengeRequestsPerSecond: 0})
-
+	unlimited := NewAuthService(&Config{ChallengeRequestsPerSecond: 0})
 	for range 5 {
-		require.NoError(t, svc.allowChallenge())
+		require.NoError(t, unlimited.allowChallenge())
 	}
 }
 
@@ -158,6 +146,8 @@ func TestChallengeRateLimitDisabled(t *testing.T) {
 func TestConfigRejectsBurstAboveRate(t *testing.T) {
 	t.Parallel()
 	require.Error(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 11}).Validate())
+	require.Error(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 0}).Validate(),
+		"a zero burst would admit nothing at all")
 	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 10}).Validate())
 	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 0, ChallengeBurst: 0}).Validate())
 }
@@ -180,33 +170,10 @@ func TestAuthenticateRejectsReplayedNonce(t *testing.T) {
 	require.ErrorContains(t, err, "already used")
 }
 
-// TestAuthenticateRejectsUnissuedNonce verifies an envelope carrying a nonce the server never issued
-// is refused, so a client cannot invent its own challenge.
-func TestAuthenticateRejectsUnissuedNonce(t *testing.T) {
-	t.Parallel()
-	env := newAuthTestEnv(t)
-	svc, _ := newAuthServiceForTest(t, env)
-
-	for _, tc := range []struct {
-		name  string
-		nonce []byte
-	}{
-		{name: "nonce the server never issued", nonce: []byte("home-made-nonce")},
-		{name: "no nonce at all", nonce: nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{
-				SignedEnvelope: env.signedEnvelopeWithNonce(t, tc.nonce, nil),
-			})
-			require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
-		})
-	}
-}
-
 func TestAuthenticateRejects(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
+	svc, _ := newAuthServiceForTest(t, env)
 
 	for _, tc := range []struct {
 		name     string
@@ -219,10 +186,20 @@ func TestAuthenticateRejects(t *testing.T) {
 			envelope: &common.Envelope{Payload: []byte("garbage")},
 			wantCode: codes.Unauthenticated,
 		},
+		{
+			// A client cannot invent its own challenge: only a nonce the server issued is redeemable.
+			name:     "nonce the server never issued",
+			envelope: env.signedEnvelopeWithNonce(t, []byte("home-made-nonce"), nil),
+			wantCode: codes.Unauthenticated,
+		},
+		{
+			name:     "no nonce at all",
+			envelope: env.signedEnvelopeWithNonce(t, nil, nil),
+			wantCode: codes.Unauthenticated,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			svc, _ := newAuthServiceForTest(t, env)
 			_, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{
 				SignedEnvelope: tc.envelope,
 			})
@@ -252,72 +229,63 @@ func TestAuthRPCsUnavailableBeforeBundle(t *testing.T) {
 func TestAuthorizeRejects(t *testing.T) {
 	t.Parallel()
 	env := newAuthTestEnv(t)
+	svc, signer := newAuthServiceForTest(t, env)
+	ctx := context.Background()
+
+	// Verifiable but never stored, so authorization resolves it against the store and finds nothing.
+	ghostToken, err := signer.mint(testRecord("ghost", time.Now().Add(time.Hour)), time.Now())
+	require.NoError(t, err)
+	expiredToken, err := signer.mint(testRecord("old", time.Now().Add(-time.Hour)), time.Now().Add(-2*time.Hour))
+	require.NoError(t, err)
+
+	certCtx, certHash := peerContextWithCert(t)
+	boundResp, err := svc.Authenticate(certCtx, &servicepb.AuthenticateRequest{
+		SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), certHash),
+	})
+	require.NoError(t, err)
+	plainResp, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
+		SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), nil),
+	})
+	require.NoError(t, err)
 
 	for _, tc := range []struct {
 		name     string
-		request  func(t *testing.T, svc *Service, signer *tokenSigner) *servicepb.AuthorizeRequest
+		request  *servicepb.AuthorizeRequest
 		wantCode codes.Code
 	}{
 		{
-			name: "invalid token",
-			request: func(*testing.T, *Service, *tokenSigner) *servicepb.AuthorizeRequest {
-				return &servicepb.AuthorizeRequest{Token: "not.a.jwt", Resource: resourceGetRows}
-			},
+			name:     "invalid token",
+			request:  &servicepb.AuthorizeRequest{Token: "not.a.jwt", Resource: resourceGetRows},
 			wantCode: codes.Unauthenticated,
 		},
 		{
-			name: "unknown token (verified but not stored)",
-			request: func(t *testing.T, _ *Service, signer *tokenSigner) *servicepb.AuthorizeRequest {
-				t.Helper()
-				token, err := signer.mint(testRecord("ghost", time.Now().Add(time.Hour)), time.Now())
-				require.NoError(t, err)
-				return &servicepb.AuthorizeRequest{Token: token, Resource: resourceGetRows}
-			},
+			name:     "unknown token (verified but not stored)",
+			request:  &servicepb.AuthorizeRequest{Token: ghostToken, Resource: resourceGetRows},
 			wantCode: codes.Unauthenticated,
 		},
 		{
-			name: "expired token",
-			request: func(t *testing.T, _ *Service, signer *tokenSigner) *servicepb.AuthorizeRequest {
-				t.Helper()
-				expired := testRecord("old", time.Now().Add(-time.Hour))
-				token, err := signer.mint(expired, time.Now().Add(-2*time.Hour))
-				require.NoError(t, err)
-				return &servicepb.AuthorizeRequest{Token: token, Resource: resourceGetRows}
-			},
+			name:     "expired token",
+			request:  &servicepb.AuthorizeRequest{Token: expiredToken, Resource: resourceGetRows},
 			wantCode: codes.Unauthenticated,
 		},
 		{
 			name: "certificate mismatch",
-			request: func(t *testing.T, svc *Service, _ *tokenSigner) *servicepb.AuthorizeRequest {
-				t.Helper()
-				ctx, certHash := peerContextWithCert(t)
-				resp, err := svc.Authenticate(ctx, &servicepb.AuthenticateRequest{
-					SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), certHash),
-				})
-				require.NoError(t, err)
-				return &servicepb.AuthorizeRequest{
-					Token: resp.GetToken(), Resource: resourceGetRows, TlsCertHash: []byte{0xFF},
-				}
+			request: &servicepb.AuthorizeRequest{
+				Token: boundResp.GetToken(), Resource: resourceGetRows, TlsCertHash: []byte{0xFF},
 			},
 			wantCode: codes.Unauthenticated,
 		},
 		{
 			name: "no policy for resource",
-			request: func(t *testing.T, svc *Service, _ *tokenSigner) *servicepb.AuthorizeRequest {
-				t.Helper()
-				resp, err := svc.Authenticate(context.Background(), &servicepb.AuthenticateRequest{
-					SignedEnvelope: env.signedEnvelopeWithNonce(t, issueNonce(t, svc), nil),
-				})
-				require.NoError(t, err)
-				return &servicepb.AuthorizeRequest{Token: resp.GetToken(), Resource: "/unknown.Service/Method"}
+			request: &servicepb.AuthorizeRequest{
+				Token: plainResp.GetToken(), Resource: "/unknown.Service/Method",
 			},
 			wantCode: codes.PermissionDenied,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			svc, signer := newAuthServiceForTest(t, env)
-			_, err := svc.Authorize(context.Background(), tc.request(t, svc, signer))
+			_, err := svc.Authorize(context.Background(), tc.request)
 			require.Equal(t, tc.wantCode, grpcerror.GetCode(err))
 		})
 	}

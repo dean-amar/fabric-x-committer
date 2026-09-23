@@ -17,6 +17,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,6 +75,9 @@ type (
 		SeedForCryptoGen        *rand.Rand
 		NextExpectedBlockNumber uint64
 		CredFactory             *test.CredentialsFactory
+		// MintParams is everything but the call needed to mint a token, prepared once so that every mint
+		// reuses one AuthService connection instead of dialing its own.
+		MintParams *acl.MintParams
 	}
 
 	// Config represents the runtime configuration.
@@ -371,6 +375,8 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	})
 
 	c.SidecarClientConfig = test.NewTLSClientConfig(c.SystemConfig.ClientTLS, services.Sidecar.GrpcEndpoint)
+
+	c.MintParams = c.prepareMintParams(t)
 }
 
 // OpenNotificationStream starts a notification stream.
@@ -434,7 +440,7 @@ func (c *CommitterRuntime) startRPCsAndStreams(t *testing.T, serviceFlags int) {
 	// configuration, which reaches it through the transaction path Start has just brought up.
 	streamCtx := t.Context()
 	if AuthService&serviceFlags != 0 {
-		streamCtx = acl.ContextWithToken(streamCtx, c.MintAuthToken(t).Token)
+		streamCtx = acl.ContextWithToken(streamCtx, c.MintAuthToken(t))
 	}
 
 	if Sidecar&serviceFlags != 0 {
@@ -715,30 +721,40 @@ func (c *CommitterRuntime) ensureLastCommittedBlockNumber(t *testing.T, blkNum u
 
 // MintAuthToken authenticates against the topology's AuthService and returns a fresh token. Mint at the
 // point of use: no token exists before the transaction path has committed a config block to issue against.
-func (c *CommitterRuntime) MintAuthToken(t *testing.T) *acl.Credentials {
+func (c *CommitterRuntime) MintAuthToken(t *testing.T) string {
 	t.Helper()
-	authEndpoint := c.SystemConfig.Services.Auth.GrpcEndpoint
-	require.False(t, authEndpoint == nil || authEndpoint.Empty(),
-		"cannot mint a token: the topology runs no AuthService")
+	token, err := acl.MintToken(t.Context(), c.MintParams)
+	require.NoError(t, err)
+	return token
+}
 
+// prepareMintParams loads the identity material a mint needs and dials the AuthService. Every topology
+// allocates that endpoint, so this is safe even where Start never launches the service: a mint against an
+// absent one then fails at the point of use, which is where a test can attribute it.
+func (c *CommitterRuntime) prepareMintParams(t *testing.T) *acl.MintParams {
+	t.Helper()
 	identities, idErr := testcrypto.GetPeersIdentities(c.SystemConfig.Policy.ArtifactsPath)
 	require.NoError(t, idErr)
-	require.NotEmpty(t, identities, "an AuthService is configured but no signing identity is "+
-		"available: point policy.artifacts-path at generated crypto")
+	require.NotEmpty(t, identities, "no signing identity is available: point policy.artifacts-path "+
+		"at generated crypto")
 
-	certHash, err := acl.TLSCertHash(c.SystemConfig.ClientTLS)
+	creds, err := connection.NewClientTLSCredentials(c.SystemConfig.ClientTLS)
 	require.NoError(t, err)
 
-	creds, err := acl.MintToken(t.Context(), &acl.MintParams{
-		Client: servicepb.NewAuthServiceClient(
-			test.NewSecuredConnection(t, authEndpoint, c.SystemConfig.ClientTLS),
-		),
+	var certHash []byte
+	if creds.Mode == connection.MutualTLSMode {
+		certHash, err = protoutil.HashTLSCertificate(creds.Cert)
+		require.NoError(t, err)
+	}
+
+	return &acl.MintParams{
+		Client: servicepb.NewAuthServiceClient(test.NewSecuredConnection(
+			t, c.SystemConfig.Services.Auth.GrpcEndpoint, c.SystemConfig.ClientTLS,
+		)),
 		Signer:      identities[0],
 		ChannelID:   c.SystemConfig.Policy.ChannelID,
 		TLSCertHash: certHash,
-	})
-	require.NoError(t, err)
-	return creds
+	}
 }
 
 func (c *CommitterRuntime) ensureAtLeastLastCommittedBlockNumber(t *testing.T, blkNum uint64) {

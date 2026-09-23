@@ -37,7 +37,7 @@ func TestStreamConcurrencyLimit(t *testing.T) {
 
 	// The sidecar authorizes every stream, so each one below carries a token; an unauthorized stream
 	// would be refused before it could take a concurrency slot, which is what this test measures.
-	authCtx := acl.ContextWithToken(t.Context(), c.MintAuthToken(t).Token)
+	authCtx := acl.ContextWithToken(t.Context(), c.MintAuthToken(t))
 
 	// Create a raw gRPC connection to the sidecar without retry policy.
 	// The default retry policy includes RESOURCE_EXHAUSTED, which would

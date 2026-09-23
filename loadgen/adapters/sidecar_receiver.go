@@ -215,7 +215,7 @@ func bindTokenToContext(ctx context.Context, params *sidecarReceiverParameters) 
 	}
 	// The token is minted once, here: it must outlive the run, so the AuthService's token-ttl has
 	// to cover it. An expired token is rejected by the sidecar rather than silently renewed.
-	creds, err := acl.MintToken(ctx, &acl.MintParams{
+	token, err := acl.MintToken(ctx, &acl.MintParams{
 		Client:      servicepb.NewAuthServiceClient(authConn),
 		Signer:      signer,
 		ChannelID:   params.Res.Profile.Policy.ChannelID,
@@ -224,5 +224,5 @@ func bindTokenToContext(ctx context.Context, params *sidecarReceiverParameters) 
 	if err != nil {
 		return ctx, errors.Wrap(err, "failed to mint token")
 	}
-	return metadata.AppendToOutgoingContext(ctx, acl.TokenMetadataKey, creds.Token), nil
+	return metadata.AppendToOutgoingContext(ctx, acl.TokenMetadataKey, token), nil
 }

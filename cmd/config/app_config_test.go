@@ -139,6 +139,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			Auth: &acl.Client{
 				Config:                    newClientConfigWithDefaultTLS("auth", "sidecar", 10001),
 				StreamReAuthorizeInterval: time.Minute,
+				TransientRetryInterval:    5 * time.Second,
 			},
 		},
 	}}

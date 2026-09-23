@@ -153,16 +153,19 @@ channel-buffer-size: 100
 
 # ACL enforcement. While this section is present, block delivery, block query, and the notification
 # streams are authorized against the central auth service. An open stream binds the token it was
-# established with and re-checks it whenever its cached decision lapses (at most
-# stream-re-authorize-interval, and never past the token's own expiry), so token expiry and a configuration
-# change that withdraws access both tear the stream down. Remove it to serve without ACL checks.
+# established with and is bounded twice: by that token's expiry, checked locally on every message, and by a
+# re-authorization every stream-re-authorize-interval, which is what observes a configuration change that
+# withdraws access. Remove this section to serve without ACL checks.
 auth:
   client:
     endpoint: auth:10001
     tls: *tlsConfig
-  # How often an open stream re-authorizes its bound token against the latest policy.
-  # Zero uses the enforcer's default interval (1m).
+  # How often an open stream re-authorizes against the latest policy. Raise it to rely on the token's
+  # lifetime alone. Zero takes the default (1m).
   stream-re-authorize-interval: 1m
+  # How long a stream waits before retrying a re-authorization that failed transiently, so a brief auth
+  # service outage costs one attempt per interval rather than one per message. Zero takes the default (5s).
+  transient-retry-interval: 5s
 
 # Logging configuration
 logging:

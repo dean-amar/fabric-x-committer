@@ -32,7 +32,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
@@ -42,10 +41,6 @@ import (
 const (
 	testChannelID   = "test-channel"
 	resourceGetRows = "/committerpb.QueryService/GetRows"
-
-	testNS1 = "ns1"
-	testNS2 = "ns2"
-	testNS3 = "ns3"
 )
 
 // authTestEnv is a real channel-configuration bundle, the envelope it was built from (for the DB refresh
@@ -81,8 +76,8 @@ func newAuthTestEnv(t *testing.T) *authTestEnv {
 	return &authTestEnv{bundle: bundle, configEnvelope: envelopeBytes, signer: identities[0]}
 }
 
-// envelopeParams describes an envelope to sign, so the builder stays within the argument limit while
-// letting tests vary the header type, channel, payload, and certificate binding independently.
+// envelopeParams describes an envelope to sign, letting a test vary the header type, channel, payload and
+// certificate binding independently. A nil payload signs an empty one, which is the authentication shape.
 type envelopeParams struct {
 	headerType  common.HeaderType
 	channelID   string
@@ -95,7 +90,9 @@ type envelopeParams struct {
 // only verifyEnvelope accepts it; a test going through Authenticate needs signedEnvelopeWithNonce.
 func (e *authTestEnv) signedEnvelope(t *testing.T, tlsCertHash []byte) *common.Envelope {
 	t.Helper()
-	return e.signedEnvelopeFor(t, common.HeaderType_MESSAGE, testChannelID, tlsCertHash)
+	return e.signEnvelope(t, envelopeParams{
+		headerType: common.HeaderType_MESSAGE, channelID: testChannelID, tlsCertHash: tlsCertHash,
+	})
 }
 
 // signedEnvelopeWithNonce builds an authentication envelope carrying a server-issued nonce, as a real
@@ -103,32 +100,9 @@ func (e *authTestEnv) signedEnvelope(t *testing.T, tlsCertHash []byte) *common.E
 func (e *authTestEnv) signedEnvelopeWithNonce(t *testing.T, nonce, tlsCertHash []byte) *common.Envelope {
 	t.Helper()
 	return e.signEnvelope(t, envelopeParams{
-		headerType:  common.HeaderType_MESSAGE,
-		channelID:   testChannelID,
-		payload:     &emptypb.Empty{},
-		tlsCertHash: tlsCertHash,
-		nonce:       nonce,
+		headerType: common.HeaderType_MESSAGE, channelID: testChannelID,
+		tlsCertHash: tlsCertHash, nonce: nonce,
 	})
-}
-
-// signedEnvelopeFor builds a client-signed envelope with an explicit header type and channel id, for
-// exercising the envelope-scope checks.
-func (e *authTestEnv) signedEnvelopeFor(
-	t *testing.T, headerType common.HeaderType, channelID string, tlsCertHash []byte,
-) *common.Envelope {
-	t.Helper()
-	return e.signEnvelope(t, envelopeParams{
-		headerType: headerType, channelID: channelID, payload: &emptypb.Empty{}, tlsCertHash: tlsCertHash,
-	})
-}
-
-// signedEnvelopeWithPayload builds a client-signed envelope carrying an application payload, so a test can
-// assert a transaction-shaped envelope cannot mint a token.
-func (e *authTestEnv) signedEnvelopeWithPayload(
-	t *testing.T, headerType common.HeaderType, channelID string, payload proto.Message,
-) *common.Envelope {
-	t.Helper()
-	return e.signEnvelope(t, envelopeParams{headerType: headerType, channelID: channelID, payload: payload})
 }
 
 // signEnvelope signs and marshals an envelope directly rather than via protoutil's helper, which always
@@ -140,8 +114,11 @@ func (e *authTestEnv) signEnvelope(t *testing.T, p envelopeParams) *common.Envel
 
 	channelHeader := protoutil.MakeChannelHeader(p.headerType, 0, p.channelID, 0)
 	channelHeader.TlsCertHash = p.tlsCertHash
-	data, err := proto.Marshal(p.payload)
-	require.NoError(t, err)
+	var data []byte
+	if p.payload != nil {
+		data, err = proto.Marshal(p.payload)
+		require.NoError(t, err)
+	}
 
 	payloadBytes, err := proto.Marshal(&common.Payload{
 		Header: protoutil.MakePayloadHeader(channelHeader, protoutil.MakeSignatureHeader(creator, p.nonce)),

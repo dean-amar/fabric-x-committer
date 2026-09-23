@@ -132,11 +132,11 @@ func TestInterceptorsExemptHealthChecks(t *testing.T) {
 	require.Equal(t, 0, fake.authorizeCallCount())
 }
 
-func TestStreamInterceptorAllowsAndDenies(t *testing.T) {
+// TestStreamInterceptorDeniesAtEstablishment verifies a denial before the stream exists keeps the handler
+// from running at all, so no message is ever exchanged over an unauthorized stream.
+func TestStreamInterceptorDeniesAtEstablishment(t *testing.T) {
 	t.Parallel()
-
-	// Authorized at establishment: the handler runs and receives the wrapped stream.
-	fake := &fakeAuthClient{}
+	fake := &fakeAuthClient{authorizeErr: status.Error(codes.PermissionDenied, "denied")}
 	enforcer := &Enforcer{Client: fake}
 	handlerRan := false
 	err := enforcer.StreamInterceptor()(
@@ -144,85 +144,79 @@ func TestStreamInterceptorAllowsAndDenies(t *testing.T) {
 		&grpc.StreamServerInfo{FullMethod: testResource},
 		func(any, grpc.ServerStream) error { handlerRan = true; return nil },
 	)
-	require.NoError(t, err)
-	require.True(t, handlerRan)
 
-	// Denied at establishment: the handler never runs.
-	denyFake := &fakeAuthClient{authorizeErr: status.Error(codes.PermissionDenied, "denied")}
-	denyEnforcer := &Enforcer{Client: denyFake}
-	deniedHandlerRan := false
-	err = denyEnforcer.StreamInterceptor()(
-		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
-		&grpc.StreamServerInfo{FullMethod: testResource},
-		func(any, grpc.ServerStream) error { deniedHandlerRan = true; return nil },
-	)
 	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
-	require.False(t, deniedHandlerRan)
+	require.False(t, handlerRan)
 }
 
-// TestStreamReusesDecisionWithinInterval verifies the decision cache: while a decision is still
-// valid, messages flow without consulting the AuthService, so its latency stays off the data path.
-func TestStreamReusesDecisionWithinInterval(t *testing.T) {
+// TestStreamEnforcement covers what an established stream does over its life: it reuses its decision inside
+// the re-authorization interval and renews it past that, while honouring both bounds - the bound token's
+// expiry, checked locally on every message, and a definitive denial - and riding out a brief outage.
+func TestStreamEnforcement(t *testing.T) {
 	t.Parallel()
-	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
-	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Hour}
-
-	err := enforcer.StreamInterceptor()(
-		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
-		&grpc.StreamServerInfo{FullMethod: testResource},
-		func(_ any, ss grpc.ServerStream) error {
-			for range 5 {
-				if recvErr := ss.RecvMsg(nil); recvErr != nil {
-					return recvErr
-				}
-				if sendErr := ss.SendMsg(nil); sendErr != nil {
-					return sendErr
-				}
-			}
-			return nil
+	for _, tc := range []struct {
+		name string
+		// tokenTTL is the bound token's remaining life, as the AuthService reports it.
+		tokenTTL        time.Duration
+		reAuthorize     time.Duration
+		laterErr        error
+		messages        int
+		wantCode        codes.Code
+		wantErrContains string
+		// wantCalls is the exact number of Authorize calls; zero instead asserts the re-check happened.
+		wantCalls int
+	}{
+		{
+			name:     "a decision is reused within the interval, so messages cost no round trips",
+			tokenTTL: time.Hour, reAuthorize: time.Hour, messages: 5, wantCalls: 1,
 		},
-	)
+		{
+			// Establishment, then the receive and the send each renew past the lapsed interval.
+			name:     "a lapsed decision is renewed, which is what makes a policy change observable",
+			tokenTTL: time.Hour, reAuthorize: time.Nanosecond, messages: 1, wantCalls: 3,
+		},
+		{
+			name:     "an expired bound token is denied locally, so an outage cannot extend a stream",
+			tokenTTL: -time.Second, reAuthorize: time.Hour, messages: 1,
+			wantCode: codes.Unauthenticated, wantErrContains: "has expired", wantCalls: 1,
+		},
+		{
+			name:     "a transient re-check failure leaves an established stream serving",
+			tokenTTL: time.Hour, reAuthorize: time.Nanosecond, messages: 3,
+			laterErr: status.Error(codes.Unavailable, "auth service restarting"),
+		},
+		{
+			name:     "a definitive denial terminates the stream",
+			tokenTTL: time.Hour, reAuthorize: time.Nanosecond, messages: 1,
+			laterErr: status.Error(codes.PermissionDenied, "organization removed from channel"),
+			wantCode: codes.PermissionDenied,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeAuthClient{
+				tokenExpiresAt: time.Now().Add(tc.tokenTTL).Unix(),
+				laterErr:       tc.laterErr,
+			}
+			enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: tc.reAuthorize}
 
-	require.NoError(t, err)
-	// Only the establishment call: ten messages added no round trips.
-	require.Equal(t, 1, fake.authorizeCallCount())
-}
+			err := enforcer.StreamInterceptor()(
+				nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
+				&grpc.StreamServerInfo{FullMethod: testResource},
+				exchangeMessages(tc.messages),
+			)
 
-// TestStreamReauthorizesWhenDecisionLapses verifies a lapsed decision makes the next message
-// re-authorize, which is what catches token expiry and policy changes.
-func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
-	t.Parallel()
-	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
-	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Nanosecond}
-
-	err := enforcer.StreamInterceptor()(
-		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
-		&grpc.StreamServerInfo{FullMethod: testResource},
-		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(nil) },
-	)
-
-	require.NoError(t, err)
-	require.Equal(t, 2, fake.authorizeCallCount())
-	require.Equal(t, testToken, fake.lastAuthorizeRequest().GetToken(), "the re-check must carry the token")
-}
-
-// TestStreamDeniesOnceBoundTokenExpires verifies the local hard bound: past the token's expiry the stream
-// is denied without consulting the AuthService, so an outage cannot extend it.
-func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
-	t.Parallel()
-	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(-time.Second).Unix()}
-	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Hour}
-
-	err := enforcer.StreamInterceptor()(
-		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
-		&grpc.StreamServerInfo{FullMethod: testResource},
-		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(nil) },
-	)
-
-	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
-	require.ErrorContains(t, err, "has expired")
-	// Establishment only: the expiry is enforced locally, with no further round trip.
-	require.Equal(t, 1, fake.authorizeCallCount())
+			require.Equal(t, tc.wantCode, grpcerror.GetCode(err))
+			if tc.wantErrContains != "" {
+				require.ErrorContains(t, err, tc.wantErrContains)
+			}
+			if tc.wantCalls > 0 {
+				require.Equal(t, tc.wantCalls, fake.authorizeCallCount())
+				return
+			}
+			require.GreaterOrEqual(t, fake.authorizeCallCount(), 2, "the re-check must have run")
+		})
+	}
 }
 
 // TestStreamDeniesMessageWhenTokenExpiresDuringReceive verifies the post-receive bound: a receive can
@@ -363,6 +357,24 @@ func (f *fakeAuthClient) lastAuthorizeRequest() *servicepb.AuthorizeRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastAuthorize
+}
+
+// exchangeMessages returns a handler that receives and sends count messages, stopping at the first error.
+// A terminal error arrives with the stream context already cancelled, so waiting on it here asserts that a
+// real handler parked on that context wakes rather than holding the stream open.
+func exchangeMessages(count int) grpc.StreamHandler {
+	return func(_ any, ss grpc.ServerStream) error {
+		for range count {
+			if err := ss.RecvMsg(nil); err != nil {
+				<-ss.Context().Done()
+				return err
+			}
+			if err := ss.SendMsg(nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 // fakeServerStream is a minimal grpc.ServerStream whose RecvMsg/SendMsg succeed, carrying a context.

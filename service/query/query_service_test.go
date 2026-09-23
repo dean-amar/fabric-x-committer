@@ -662,7 +662,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 	}
 	var authEnv *auth.TestEnv
 	if opts.enableACL {
-		authEnv = auth.NewServiceTestEnv(t, nil)
+		authEnv = auth.NewAuthTestEnv(t, nil)
 		config.Auth = authEnv.ACLClient(0)
 	}
 	serverConfig := test.NewLocalHostServiceConfig(opts.serverTLS)

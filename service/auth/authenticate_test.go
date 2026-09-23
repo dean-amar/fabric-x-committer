@@ -77,22 +77,27 @@ func TestVerifyEnvelopeRejects(t *testing.T) {
 			wantErr:   ErrCertBindingMismatch,
 		},
 		{
-			name:     "envelope is scoped to another channel",
-			envelope: env.signedEnvelopeFor(t, common.HeaderType_MESSAGE, "other-channel", nil),
-			now:      time.Now(),
-			wantErr:  ErrEnvelopeScope,
+			name: "envelope is scoped to another channel",
+			envelope: env.signEnvelope(t, envelopeParams{
+				headerType: common.HeaderType_MESSAGE, channelID: "other-channel",
+			}),
+			now:     time.Now(),
+			wantErr: ErrEnvelopeScope,
 		},
 		{
-			name:     "header type is not an authentication request",
-			envelope: env.signedEnvelopeFor(t, common.HeaderType_ENDORSER_TRANSACTION, testChannelID, nil),
-			now:      time.Now(),
-			wantErr:  ErrEnvelopeScope,
+			name: "header type is not an authentication request",
+			envelope: env.signEnvelope(t, envelopeParams{
+				headerType: common.HeaderType_ENDORSER_TRANSACTION, channelID: testChannelID,
+			}),
+			now:     time.Now(),
+			wantErr: ErrEnvelopeScope,
 		},
 		{
 			name: "transaction-shaped envelope carries application payload",
-			envelope: env.signedEnvelopeWithPayload(
-				t, common.HeaderType_MESSAGE, testChannelID, wrapperspb.String("transaction-body"),
-			),
+			envelope: env.signEnvelope(t, envelopeParams{
+				headerType: common.HeaderType_MESSAGE, channelID: testChannelID,
+				payload: wrapperspb.String("transaction-body"),
+			}),
 			now:     time.Now(),
 			wantErr: ErrEnvelopeScope,
 		},
