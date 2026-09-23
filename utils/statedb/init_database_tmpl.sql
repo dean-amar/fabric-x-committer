@@ -52,7 +52,6 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql;
 
-
 CREATE TABLE IF NOT EXISTS auth_tokens
 (
     jti        TEXT   NOT NULL PRIMARY KEY,
@@ -60,12 +59,15 @@ CREATE TABLE IF NOT EXISTS auth_tokens
     expires_at BIGINT NOT NULL
 )${SPLIT_INTO_TABLETS};
 
-CREATE INDEX IF NOT EXISTS auth_tokens_expires_at ON auth_tokens (expires_at);
-
 CREATE TABLE IF NOT EXISTS auth_nonces
 (
     nonce      BYTEA  NOT NULL PRIMARY KEY,
     expires_at BIGINT NOT NULL
 )${SPLIT_INTO_TABLETS};
 
-CREATE INDEX IF NOT EXISTS auth_nonces_expires_at ON auth_nonces (expires_at);
+-- Indexes are created during initialization, before services start.
+CREATE INDEX IF NOT EXISTS auth_tokens_expires_at -- noqa: PG01
+    ON auth_tokens (expires_at);
+
+CREATE INDEX IF NOT EXISTS auth_nonces_expires_at -- noqa: PG01
+    ON auth_nonces (expires_at);
