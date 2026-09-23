@@ -52,8 +52,8 @@ type (
 	}
 )
 
-// newTokenSigner loads a PEM-encoded EC (P-256) key, or generates an ephemeral one when keyPath is empty.
-// An ephemeral key survives neither a restart nor a second instance: single-instance dev only.
+// newTokenSigner loads the PEM-encoded EC (P-256) signing key, or generates an ephemeral one when keyPath
+// is empty: single-instance dev only, as an ephemeral key survives neither a restart nor a second instance.
 func newTokenSigner(keyPath string) (*tokenSigner, error) {
 	if keyPath == "" {
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

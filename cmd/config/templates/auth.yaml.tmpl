@@ -13,6 +13,10 @@
 {{ include "rateLimit" . | indent 2 }}
 
 {{ include "database" . | indent 0 }}
+
+# The key the service signs and verifies tokens with, generated into the artifacts by the crypto
+# generator. Every instance must load the same pair, or a token minted by one does not verify at another.
+signing-key-path: {{ .Policy.ArtifactsPath }}/peerOrganizations/peer-org-0.com/peers/auth/sign-verify/sk.key
 {{- if .AuthConfigRefreshInterval }}
 
 # How often the committed channel configuration is re-read to rebuild the evaluation bundle.

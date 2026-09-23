@@ -262,7 +262,8 @@ func wrapNotifierError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return grpcerror.WrapCancelled(err)
 	}
-	return grpcerror.WrapInternalError(err)
+	// Flattening that to Internal would tell a client whose token expired that the sidecar had malfunctioned.
+	return grpcerror.WrapWithContext(err, "notification stream failed")
 }
 
 func fixTimeout(request *committerpb.NotificationRequest, maxTimeout time.Duration) {

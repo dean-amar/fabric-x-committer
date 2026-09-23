@@ -96,13 +96,17 @@ non-mTLS path exists only for local development and tests and must not be used i
 
 ## Configuration
 
-- **`AuthService`** (`cmd/config/samples/auth.yaml`): `signing-key-path` (a shared PEM EC key across
-  instances; ephemeral if empty), `token-ttl`, `envelope-freshness-window`, `nonce-ttl`,
+- **`AuthService`** (`cmd/config/samples/auth.yaml`): `signing-key-path` (the ES256 key the crypto
+  generator writes to each organization's `peers/auth/sign-verify/sk.key`; every instance of that
+  organization must load the same one, and the public half is read from it. Empty means an ephemeral key:
+  single-instance only), `token-ttl`,
+  `envelope-freshness-window`, `nonce-ttl`,
   `config-refresh-interval`, `token-cleanup-interval`, `challenge-requests-per-second` /
   `challenge-burst`, and the state `database`. Use `mtls` for the server TLS mode so tokens are
   certificate-bound.
-- **Resource servers** (Query, Sidecar): an optional `auth:` section (`utils/acl.ClientConfig`) with
-  the `AuthService` endpoint + TLS and an optional `stream-revalidate-interval`. When absent, the
+- **Resource servers** (Query, Sidecar): an optional `auth:` section (`utils/acl.Client`, YAML
+  `auth.client:`) with
+  the `AuthService` endpoint + TLS and an optional `stream-re-authorize-interval`. When absent, the
   service serves without ACL enforcement, preserving existing behavior.
 
 ## Policy resolution
@@ -133,7 +137,7 @@ policy, the request is denied.
   resulting identity re-evaluated against the latest configuration (catching a policy change,
   such as the identity's organization being removed). A valid decision is reused until it lapses, so the
   common case costs no round trip - checking per message would put `AuthService` latency on the data
-  path of every block and batch. A decision is never reused past `stream-revalidate-interval`, and never
+  path of every block and batch. A decision is never reused past `stream-re-authorize-interval`, and never
   past the bound token's own expiry, which the resource server enforces locally.
 - **Rate limiting the front door.** `IssueNonce` and `Authenticate` are reachable without a token, and
   each costs the service real work - a database row for a nonce, a signature verification and MSP
@@ -150,7 +154,7 @@ policy, the request is denied.
   not be observed by another before the token expired anyway. Expiry itself is unaffected by the cache,
   because `Authorize` verifies the JWT's `exp` before consulting the store.
 - **Namespace scope is deferred.** Restricting a token to particular namespaces is future work, not part
-  of this iteration. Only `GetRows` and `StreamAllTransactions` name the namespaces they touch; block
+  of this iteration. Only `GetRows` and `StreamBlocks` name the namespaces they touch; block
   query and block delivery return whole blocks spanning every namespace, and a block cannot be filtered
   to a subset without breaking the verification clients perform on it. A scope enforceable on two
   resources and meaning "denied entirely" on the rest is a poor primitive, and the obvious

@@ -222,7 +222,7 @@ func TestNewTokenSignerFromFile(t *testing.T) {
 			name: "PEM but not an EC key",
 			keyPath: func(t *testing.T) string {
 				t.Helper()
-				block := &pem.Block{Type: "PRIVATE KEY", Bytes: []byte("garbage")}
+				block := &pem.Block{Type: pemPrivateKeyType, Bytes: []byte("garbage")}
 				return writeFile(t, "signing.pem", pem.EncodeToMemory(block))
 			},
 		},
@@ -234,6 +234,8 @@ func TestNewTokenSignerFromFile(t *testing.T) {
 		})
 	}
 }
+
+const pemPrivateKeyType = "PRIVATE KEY"
 
 func newEphemeralSigner(t *testing.T) *tokenSigner {
 	t.Helper()
@@ -264,7 +266,7 @@ func writePKCS8Key(t *testing.T, key *ecdsa.PrivateKey) string {
 	t.Helper()
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(t, err)
-	return writeFile(t, "pkcs8.pem", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	return writeFile(t, "pkcs8.pem", pem.EncodeToMemory(&pem.Block{Type: pemPrivateKeyType, Bytes: der}))
 }
 
 func writeFile(t *testing.T, name string, content []byte) string {

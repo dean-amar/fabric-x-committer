@@ -53,6 +53,8 @@ The Sidecar requires the following configuration settings, provided in a Yaml co
  - *Listen Address*: The local address and port (e.g., 0.0.0.0:7055) where the Sidecar 
    will host its block delivery service, enabling clients to connect and receive 
    committed blocks.
+ - *Auth Service* (optional): with an `auth:` section, block delivery, block query and the
+   notification streams are authorized against it. Omit it to serve without ACL checks.
 
 *Ordering Service Endpoint Precedence*: While ordering service endpoints can be 
 specified in Yaml configuration file, they can be overridden by the endpoints defined within 

@@ -132,9 +132,9 @@ database:
 # convenient for a single-instance dev deployment, but tokens then do not survive a restart and
 # separate instances cannot verify each other's tokens.
 #
-# Left empty here because this sample describes a single instance and the crypto generator produces no
-# signing key for the auth service. Set it for any deployment running more than one instance.
-signing-key-path: ""
+# The crypto generator writes this key alongside the MSP and TLS material, so it is mounted with the
+# rest of the artifacts.
+signing-key-path: /root/artifacts/peerOrganizations/peer-org-0.com/peers/auth/sign-verify/sk.key
 
 # Lifetime of a minted token. A client mints once and does not renew, so this must cover the client's
 # whole run; past it the resource server rejects the token and the client must authenticate again.

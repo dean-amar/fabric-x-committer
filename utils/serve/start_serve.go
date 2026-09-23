@@ -287,43 +287,31 @@ func newGRPCServer(
 		return nil, errors.Wrap(err, "invalid rate limit configuration")
 	}
 
-	unary, stream := serverInterceptors(c, aclEnforcer)
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),
 		grpc.StatsHandler(statsHandler),
 		grpc.Creds(newCredentials(tlsProvider.GetServerTLSCredentials())),
-		// Chained unconditionally: gRPC drops an empty chain and unwraps a single interceptor, so
-		// neither an unlimited nor an unprotected server pays for the chain it does not use.
-		grpc.ChainUnaryInterceptor(unary...),
-		grpc.ChainStreamInterceptor(stream...),
 	}
-	return grpc.NewServer(append(opts, keepAliveOptions(c.KeepAlive)...)...), nil
-}
-
-// serverInterceptors returns the server's interceptors in the order they run: the resource limits
-// first, so a flood is shed before any authorization work is done, then ACL enforcement.
-func serverInterceptors(
-	c *ServerConfig, aclEnforcer *acl.Enforcer,
-) ([]grpc.UnaryServerInterceptor, []grpc.StreamServerInterceptor) {
-	var unary []grpc.UnaryServerInterceptor
-	var stream []grpc.StreamServerInterceptor
 
 	if limiter := NewRateLimiter(&c.RateLimit); limiter != nil {
-		unary = append(unary, RateLimitInterceptor(limiter))
+		opts = append(opts, grpc.ChainUnaryInterceptor(RateLimitInterceptor(limiter)))
 		logger.Infof("Rate limiting enabled: %d requests/second, burst: %d",
 			c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
 	}
 	if sem := NewConcurrencyLimit(c.MaxConcurrentStreams); sem != nil {
-		stream = append(stream, StreamConcurrencyInterceptor(sem))
+		opts = append(opts, grpc.ChainStreamInterceptor(StreamConcurrencyInterceptor(sem)))
 		logger.Infof("Stream concurrency limit enabled: %d max concurrent streams", c.MaxConcurrentStreams)
 	}
 	if aclEnforcer != nil {
-		unary = append(unary, aclEnforcer.UnaryInterceptor())
-		stream = append(stream, aclEnforcer.StreamInterceptor())
+		opts = append(
+			opts,
+			grpc.ChainUnaryInterceptor(aclEnforcer.UnaryInterceptor()),
+			grpc.ChainStreamInterceptor(aclEnforcer.StreamInterceptor()),
+		)
 		logger.Info("ACL enforcement enabled")
 	}
-	return unary, stream
+	return grpc.NewServer(append(opts, keepAliveOptions(c.KeepAlive)...)...), nil
 }
 
 // keepAliveOptions translates the keep-alive configuration, if any, into server options.

@@ -177,7 +177,25 @@ It is deployed as a **single instance**, because hashing a clone is a full scan 
 
 **Reference**: See [snapshot-hasher.md](snapshot-hasher.md) for detailed documentation.
 
-### 3.7 Database Cluster
+### 3.7 Auth Service
+
+The Auth Service issues the tokens the Sidecar and Query Service require, and answers the authorization
+decision for every protected RPC. A client signs a server-issued nonce into an envelope, exchanges it for a 
+token bound to its TLS certificate, and presents that token on each call; the resource server
+forwards it here rather than evaluating policy itself. Policy comes from the channel configuration's `ACLs`
+section, re-read from the committed configuration, so a membership change takes effect without a restart.
+
+It is optional: a deployment that omits the `auth:` section from the Sidecar and Query Service serves
+without ACL enforcement.
+
+**Key Characteristics:**
+
+- **State**: Stateless - tokens, nonces and the channel configuration live in the shared database.
+- **Scalability**: Horizontal and vertical scaling - All shares the same key.
+
+**Reference**: See [auth-service.md](auth-service.md) for detailed documentation.
+
+### 3.8 Database Cluster
 
 The database cluster serves as the system's persistent storage layer, maintaining the world state for all namespaces and the final status of every transaction. The system supports two database options, each optimized for different deployment scenarios.
 
@@ -213,6 +231,11 @@ The system handles failures in any service and ensures correctness.
 **Sidecar Failure.** When the Sidecar restarts, it gets the next expected block number from the Coordinator and compares it to the last block in its local store. If there is a gap, the Sidecar fetches the missing blocks from the Ordering Service and their transaction statuses from the state database to update its store. It then resumes fetching new blocks from the Ordering Service. See [Sidecar Failure and Recovery](sidecar.md#7-failure-and-recovery) for more details.
 
 **Query Service Failure.** The Query Service is stateless and holds no persistent state. On restart, it reconnects to the database and resumes serving queries immediately. Clients experience a brief interruption and can retry against another Query Service instance. See [Query Service Error Handling and Recovery](query-service.md#error-handling-and-recovery) for more details.
+
+**Auth Service Failure.** The Auth Service holds no state of its own, so a restart only reconnects to the
+database. While it is down, protected calls are rejected as `Unavailable` and no new token can be minted;
+already-established streams keep serving until their re-authorization interval lapses, bounded by the expiry of
+the token that opened them. See [auth-service.md](auth-service.md) for more details.
 
 **Snapshot Hasher Failure.** The Snapshot Hasher holds no state of its own; the snapshot record is the state. While it is down, committing continues unaffected and only snapshot hashing is delayed: every record accumulated in the meantime is discovered once it returns. A restart mid-hash leaves the record `IN_PROGRESS` and the partial digest is discarded, so the first poll after restart re-hashes the same immutable clone to the same digest. See [Snapshot Hasher Failure and Recovery](snapshot-hasher.md#7-failure-and-recovery) for more details.
 

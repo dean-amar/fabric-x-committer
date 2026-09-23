@@ -29,9 +29,12 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen"
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
@@ -40,6 +43,7 @@ import (
 
 type (
 	queryServiceTestEnv struct {
+		authEnv      *auth.TestEnv
 		config       *Config
 		serverConfig *serve.Config
 		qs           *Service
@@ -53,6 +57,9 @@ type (
 		clientTLS      connection.TLSConfig
 		maxRequestKeys int
 		maxActiveViews int
+		// enableACL runs a real AuthService and points the query service at it, so enforcement is
+		// exercised end to end rather than against a stand-in.
+		enableACL bool
 	}
 )
 
@@ -557,6 +564,26 @@ func TestQueryWithConsistentView(t *testing.T) {
 	env.endView(t, client, view3)
 }
 
+// TestQueryWithACL runs an ordinary query against an ACL-enforcing service: with a token it reaches the
+// handler, without one it is refused by the interceptor. The second half is what proves enforcement is on -
+// the first would pass just as well with no interceptor installed at all.
+func TestQueryWithACL(t *testing.T) {
+	t.Parallel()
+	env := newQueryServiceTestEnv(t, &queryServiceTestOpts{enableACL: true})
+
+	policies, err := env.clientConn.GetNamespacePolicies(
+		acl.ContextWithToken(t.Context(), env.authEnv.MintToken(t)),
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, policies.Policies, len(env.ns))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	t.Cleanup(cancel)
+	_, err = env.clientConn.GetNamespacePolicies(ctx, nil)
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
+}
+
 func TestQueryPolicies(t *testing.T) {
 	t.Parallel()
 	env := newQueryServiceTestEnv(t, nil)
@@ -633,6 +660,11 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		Database:              dbConf,
 		TLSRefreshInterval:    100 * time.Millisecond,
 	}
+	var authEnv *auth.TestEnv
+	if opts.enableACL {
+		authEnv = auth.NewServiceTestEnv(t, nil)
+		config.Auth = authEnv.ACLClient(0)
+	}
 	serverConfig := test.NewLocalHostServiceConfig(opts.serverTLS)
 
 	qs, err := NewQueryService(config)
@@ -647,6 +679,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 	t.Cleanup(pool.Close)
 
 	return &queryServiceTestEnv{
+		authEnv:      authEnv,
 		config:       config,
 		serverConfig: serverConfig,
 		qs:           qs,

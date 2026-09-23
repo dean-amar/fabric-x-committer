@@ -202,7 +202,7 @@ type Config struct {
    // Auth optionally enables ACL enforcement: when set, every RPC is authorized against the
    // Auth Service. When nil, the query service serves without ACL checks.
    // See auth-service.md.
-   Auth *acl.ClientConfig
+   Auth *acl.Client
 }
 ```
 

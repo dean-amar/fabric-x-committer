@@ -40,7 +40,7 @@ Ordering Service
 
 - **High Throughput** — Pipelined processing with parallel dispatch of conflict-free transactions. Exceeds 100,000 TPS on commodity hardware with YugabyteDB.
 - **Fault Tolerance** — Idempotent commit operations enable automatic recovery from service failures without data corruption. Each service recovers independently on restart.
-- **Horizontal Scaling** — Verifier, VC, Query Service, and Database nodes scale horizontally. Sidecar, Coordinator, and Snapshot Hasher scale vertically.
+- **Horizontal Scaling** — Verifier, VC, Query Service, Auth Service, and Database nodes scale horizontally. Sidecar, Coordinator, and Snapshot Hasher scale vertically.
 - **Flexible Endorsement Policies** — Supports both lightweight threshold rules (single public key) and fine-grained MSP rules (AND/OR/k-of-n over organizational identities).
 - **Observability** — Prometheus metrics for every pipeline stage, with queue-depth gauges for bottleneck identification.
 

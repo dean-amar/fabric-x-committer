@@ -20,7 +20,7 @@ Cite the model files rather than guessing.
 
 ## 1. The `serve.Service` interface
 
-A full-lifecycle service implements three methods (`utils/serve/start_serve.go:31`):
+A full-lifecycle service implements three methods (`utils/serve/start_serve.go:32`):
 
 ```go
 type Service interface {
@@ -59,7 +59,9 @@ func New(config *Config) *Server {
 
 Rules:
 - The constructor does **pure in-memory wiring** (channels, metrics, healthcheck). It does
-  **not** open DB or gRPC connections — those happen in `Run`.
+  **not** open DB or gRPC connections — those happen in `Run`. The one exception is a dependency
+  the gRPC *server* needs at construction time: the ACL enforcer is dialled in the constructor so
+  `serve` can install its interceptors, and closed in `Run` (`service/query/query_service.go`).
 - Return concrete `*T` with **no error** for in-memory wiring. Return `(*T, error)` only
   when construction does I/O (e.g. `newDatabase(ctx, cfg, metrics) (*database, error)`,
   `service/vc/database.go:91`, or `sidecar.New` which parses orderer params eagerly).
@@ -68,7 +70,7 @@ Rules:
 - The body returns a keyed struct literal, one `field: value,` per line.
 
 Model files: `service/coordinator/coordinator.go:110`,
-`service/vc/validator_committer_service.go:72`, `service/sidecar/sidecar.go:85`.
+`service/vc/validator_committer_service.go:72`, `service/sidecar/sidecar.go:124`.
 
 ## 3. Lifecycle
 
@@ -106,9 +108,9 @@ func (vc *ValidatorCommitterService) Run(ctx context.Context) error {
   (`service/verifier/verifier_server.go:52`).
 - A service that must tear down peers on any goroutine's exit wraps with
   `ctx, cancel := context.WithCancel(ctx); defer cancel()`
-  (`service/coordinator/coordinator.go:184`, `service/sidecar/sidecar.go:141`).
+  (`service/coordinator/coordinator.go:184`, `service/sidecar/sidecar.go:194`).
 - Resilient background loops use `retry.Sustain(ctx, profile, op)`
-  (`service/sidecar/sidecar.go:160`).
+  (`service/sidecar/sidecar.go:213`).
 
 ### `WaitForReady(ctx) bool`
 
@@ -207,7 +209,7 @@ Config struct (mapstructure + default tag) → sample YAML → env var → decod
 - `cmd/config/viper.go` holds only what a tag cannot express: the `server.*` limits for
   client-facing services (`setClientFacingServerLimits`) and each service's default endpoint
   (`setEndpoint`).
-- `readYamlAndSetupLogging[T]` (`cmd/config/app_config.go:90`) reads YAML, applies the
+- `readYamlAndSetupLogging[T]` (`cmd/config/app_config.go:104`) reads YAML, applies the
   `SC_<SVC>_YAML` override, and unmarshals + `validate.Struct`s three structs: logging,
   `serve.Config`, and your `T`.
 - Custom decode hooks (`time.Duration`, byte sizes, `Endpoint`, `serve.ServerConfig`) live
@@ -311,10 +313,10 @@ Hand your `serve.Service` to `serve.StartAndServe(ctx, service, serverConfig...)
 `service.Run` in an errgroup, gates on `WaitForReady` with `ServiceStartupTimeout`, then
 constructs and serves the gRPC + HTTP servers in the same group — every `g.Go` does
 `defer cancel()` so any exit tears down the whole service
-(`utils/serve/start_serve.go:68`).
+(`utils/serve/start_serve.go:84`).
 
 Command wiring (cobra → read config → construct → serve),
-`cmd/committer/start_cmd.go:59`:
+`cmd/committer/start_cmd.go:57`:
 
 ```go
 var service serve.Service
@@ -343,5 +345,8 @@ return serve.StartAndServe(ctx, service, serverConfig)
 5. `cmd/config/app_config.go` — `Read<X>YamlAndSetupLogging` via `readYamlAndSetupLogging[<X>.Config]`.
 6. `cmd/committer/config.go` + `start_cmd.go` — add the service to config dispatch and the
    `startService` switch → `serve.StartAndServe`.
-7. Sample YAML under `cmd/config/samples/`. Run `make lint`, `make test`, and
-   `make generate-metrics-doc`.
+7. Sample YAML under `cmd/config/samples/`, plus a template in `cmd/config/templates/` and its
+   `create_config_file.go` wiring if the integration runner starts the service.
+8. A `healthcheck` subcommand, entries in `scripts/cli_help_docs.sh` and `scripts/metrics_doc.sh`,
+   and the Makefile test-group regexp. Run `make lint`, `make test`,
+   `make generate-cli-doc`, and `make generate-metrics-doc`.

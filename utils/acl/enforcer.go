@@ -37,10 +37,6 @@ const (
 	// AuthService would otherwise block indefinitely.
 	authorizeTimeout = 10 * time.Second
 
-	// defaultRevalidateInterval is how often an open stream re-authorizes when the caller does not
-	// configure an interval.
-	defaultRevalidateInterval = time.Minute
-
 	// transientRetryInterval paces re-checks after the AuthService was briefly unreachable, so an
 	// outage costs one attempt per interval rather than one per message.
 	transientRetryInterval = 5 * time.Second
@@ -54,9 +50,10 @@ var ErrMissingToken = errors.New("missing authorization token")
 type Enforcer struct {
 	// Client is the AuthService every decision is delegated to.
 	Client servicepb.AuthServiceClient
-	// RevalidateInterval is how often an open stream re-authorizes its bound token against the latest
-	// policy. Zero means defaultRevalidateInterval.
-	RevalidateInterval time.Duration
+	// ReAuthorizeInterval is how often an open stream re-authorizes its bound token against the latest
+	// policy, which is what makes a configuration change observable to it. Zero means
+	// defaultReAuthorizeInterval. Set it high to rely on the token's own lifetime instead.
+	ReAuthorizeInterval time.Duration
 
 	// conn is set only by NewEnforcer, which dials and therefore owns the connection. It stays nil for
 	// an Enforcer built from a struct literal over an existing client, whose Close is then a no-op.
@@ -76,9 +73,9 @@ func NewEnforcer(config *Client) (*Enforcer, error) {
 	}
 	logger.Infof("ACL enforcement enabled via auth service at %s", config.Config.Endpoint.Address())
 	return &Enforcer{
-		Client:             servicepb.NewAuthServiceClient(conn),
-		RevalidateInterval: config.StreamRevalidateInterval,
-		conn:               conn,
+		Client:              servicepb.NewAuthServiceClient(conn),
+		ReAuthorizeInterval: config.StreamReAuthorizeInterval,
+		conn:                conn,
 	}, nil
 }
 
@@ -132,14 +129,14 @@ func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 		defer cancel()
 		now := time.Now()
 		stream := &authorizedStream{
-			ServerStream:   ss,
-			ctx:            ctx,
-			cancel:         cancel,
-			enforcer:       e,
-			resource:       info.FullMethod,
-			token:          token,
-			tokenExpiresAt: tokenExpiry(resp),
-			validUntil:     e.decisionValidUntil(resp, now),
+			ServerStream:    ss,
+			ctx:             ctx,
+			cancel:          cancel,
+			enforcer:        e,
+			resource:        info.FullMethod,
+			token:           token,
+			tokenExpiresAt:  tokenExpiry(resp),
+			nextAuthorizeAt: now.Add(e.ReAuthorizeInterval),
 		}
 		return handler(srv, stream)
 	}
@@ -163,23 +160,8 @@ func (e *Enforcer) authorize(
 	return resp, nil
 }
 
-// decisionValidUntil caps decision reuse at the revalidation interval and never past the bound token's
-// expiry, so an AuthService outage cannot keep a stream alive on an expired token.
-func (e *Enforcer) decisionValidUntil(resp *servicepb.AuthorizeResponse, now time.Time) time.Time {
-	interval := e.RevalidateInterval
-	if interval <= 0 {
-		interval = defaultRevalidateInterval
-	}
-
-	validUntil := now.Add(interval)
-	if expiry := tokenExpiry(resp); !expiry.IsZero() && expiry.Before(validUntil) {
-		return expiry
-	}
-	return validUntil
-}
-
 // tokenExpiry reads the bound token's expiry, or the zero time when none was reported. Zero means "no
-// locally known bound", not "expired at the epoch": the revalidation interval still bounds reuse.
+// locally known bound", not "expired at the epoch": re-authorization still bounds reuse.
 func tokenExpiry(resp *servicepb.AuthorizeResponse) time.Time {
 	if expiry := resp.GetTokenExpiresAt(); expiry > 0 {
 		return time.Unix(expiry, 0)

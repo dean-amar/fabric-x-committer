@@ -50,56 +50,10 @@ const (
 // runSidecarReceiver receives blocks from the sidecar, authenticating first when an auth service is
 // configured: block delivery is ACL-protected, so an enforcing sidecar refuses an untokened stream.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
-	if params.Auth != nil {
-		authConn, err := connection.NewSingleConnection(params.Auth)
-		if err != nil {
-			return errors.Wrap(err, "failed to connect to the auth service")
-		}
-		defer connection.CloseConnectionsLog(authConn)
-
-		signer, err := ordererdial.NewIdentitySigner(params.Identity)
-		if err != nil {
-			return errors.Wrap(err, "failed to create the signing identity")
-		}
-		if signer == nil {
-			// No identity is configured, so sign with a peer identity from the generated crypto the
-			// profile already points at; it satisfies the channel's Readers policy.
-			identities, idErr := testcrypto.GetPeersIdentities(params.Res.Profile.Policy.ArtifactsPath)
-			if idErr != nil {
-				return errors.Wrap(idErr, "failed to load a signing identity from the artifacts path")
-			}
-			if len(identities) == 0 {
-				return errors.New("an auth service is configured but no signing identity is available")
-			}
-			signer = identities[0]
-		}
-		tlsCreds, err := connection.NewClientTLSCredentials(params.ClientConfig.TLS)
-		if err != nil {
-			return errors.Wrap(err, "failed to load the delivery client TLS credentials")
-		}
-		// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
-		var certHash []byte
-		if tlsCreds.Mode == connection.MutualTLSMode {
-			certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
-			if err != nil {
-				return errors.Wrap(err, "failed to hash the delivery client certificate")
-			}
-		}
-		// The token is minted once, here: it must outlive the run, so the AuthService's token-ttl has
-		// to cover it. An expired token is rejected by the sidecar rather than silently renewed.
-		creds, err := acl.MintToken(ctx, &acl.MintParams{
-			Client:      servicepb.NewAuthServiceClient(authConn),
-			Signer:      signer,
-			ChannelID:   params.Res.Profile.Policy.ChannelID,
-			TLSCertHash: certHash,
-		})
-		if err != nil {
-			return err
-		}
-		// On the context, so it covers the delivery stream and every stream a reconnect opens.
-		ctx = metadata.AppendToOutgoingContext(ctx, acl.TokenMetadataKey, creds.Token)
+	ctx, err := bindTokenToContext(ctx, params)
+	if err != nil {
+		return errors.Wrap(err, "failed to bind token to context")
 	}
-
 	return runDeliveryReceiver(ctx, params.Res, func(gCtx context.Context, committedBlock chan *common.Block) error {
 		return delivercommitter.ToQueue(gCtx, delivercommitter.Parameters{
 			ClientConfig: params.ClientConfig,
@@ -218,4 +172,57 @@ func recapStatusCodes(statusCodes []byte) string {
 		)
 	}
 	return strings.Join(items, ", ")
+}
+
+func bindTokenToContext(ctx context.Context, params *sidecarReceiverParameters) (context.Context, error) {
+	if params.Auth == nil {
+		return ctx, nil
+	}
+
+	authConn, err := connection.NewSingleConnection(params.Auth)
+	if err != nil {
+		return ctx, errors.Wrap(err, "failed to connect to the auth service")
+	}
+	defer connection.CloseConnectionsLog(authConn)
+
+	signer, err := ordererdial.NewIdentitySigner(params.Identity)
+	if err != nil {
+		return ctx, errors.Wrap(err, "failed to create the signing identity")
+	}
+	if signer == nil {
+		// No identity is configured, so sign with a peer identity from the generated crypto the
+		// profile already points at; it satisfies the channel's Readers policy.
+		identities, idErr := testcrypto.GetPeersIdentities(params.Res.Profile.Policy.ArtifactsPath)
+		if idErr != nil {
+			return ctx, errors.Wrap(idErr, "failed to load a signing identity from the artifacts path")
+		}
+		if len(identities) == 0 {
+			return ctx, errors.New("an auth service is configured but no signing identity is available")
+		}
+		signer = identities[0]
+	}
+	tlsCreds, err := connection.NewClientTLSCredentials(params.ClientConfig.TLS)
+	if err != nil {
+		return ctx, errors.Wrap(err, "failed to load the delivery client TLS credentials")
+	}
+	// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
+	var certHash []byte
+	if tlsCreds.Mode == connection.MutualTLSMode {
+		certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
+		if err != nil {
+			return ctx, errors.Wrap(err, "failed to hash the delivery client certificate")
+		}
+	}
+	// The token is minted once, here: it must outlive the run, so the AuthService's token-ttl has
+	// to cover it. An expired token is rejected by the sidecar rather than silently renewed.
+	creds, err := acl.MintToken(ctx, &acl.MintParams{
+		Client:      servicepb.NewAuthServiceClient(authConn),
+		Signer:      signer,
+		ChannelID:   params.Res.Profile.Policy.ChannelID,
+		TLSCertHash: certHash,
+	})
+	if err != nil {
+		return ctx, errors.Wrap(err, "failed to mint token")
+	}
+	return metadata.AppendToOutgoingContext(ctx, acl.TokenMetadataKey, creds.Token), nil
 }

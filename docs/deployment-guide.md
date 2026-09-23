@@ -106,6 +106,10 @@ The following topology is a reference starting point based on micro-benchmarks, 
 - **VC (6, co-located with DB)**: Co-location of VC instances with database nodes minimizes network latency for MVCC operations, reducing round-trip times from milliseconds to microseconds. Each VC instance connects to ALL database nodes via client-side load balancing, so co-location with a subset of nodes is sufficient to gain the latency benefit.
 - **Database (9, RF=3)**: A 9-node cluster with replication factor 3 tolerates up to 2 simultaneous node failures without data loss or availability impact. The node count enables distributed query processing across many tablets for high write throughput.
 - **Snapshot Hasher (1)**: Single instance by design. Hashing a snapshot clone is a full scan and must not be attempted by several processes at once; with exactly one scheduler in the system, snapshot hashing needs no lease or leader election. It does no per-transaction work, so one instance suffices regardless of transaction throughput. Skip it entirely if the deployment never takes state snapshots.
+- **Auth Service (2+, optional)**: Issues and authorizes the tokens the Sidecar and Query Service enforce.
+  It keeps no per-connection state — tokens and nonces live in the shared database — so any instance serves
+  any request; run two behind a load balancer for redundancy. Every instance must load the same signing key.
+  Skip it entirely when ACL is not enabled.
 - **Query Service (2+)**: Provides read-only access to committed world state for clients and endorsers. Minimum 2 instances for redundancy. Does not need to be co-located with database nodes since it performs read-only operations and should not impact the commit path performance. Scale based on the number of endorsers and query throughput requirements.
 
 For detailed service descriptions and architecture, see the [Architecture Guide](architecture.md).

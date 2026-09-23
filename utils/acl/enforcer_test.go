@@ -165,7 +165,7 @@ func TestStreamInterceptorAllowsAndDenies(t *testing.T) {
 func TestStreamReusesDecisionWithinInterval(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
-	enforcer := &Enforcer{Client: fake, RevalidateInterval: time.Hour}
+	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Hour}
 
 	err := enforcer.StreamInterceptor()(
 		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
@@ -193,7 +193,7 @@ func TestStreamReusesDecisionWithinInterval(t *testing.T) {
 func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(time.Hour).Unix()}
-	enforcer := &Enforcer{Client: fake, RevalidateInterval: time.Nanosecond}
+	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Nanosecond}
 
 	err := enforcer.StreamInterceptor()(
 		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
@@ -211,7 +211,7 @@ func TestStreamReauthorizesWhenDecisionLapses(t *testing.T) {
 func TestStreamDeniesOnceBoundTokenExpires(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAuthClient{tokenExpiresAt: time.Now().Add(-time.Second).Unix()}
-	enforcer := &Enforcer{Client: fake, RevalidateInterval: time.Hour}
+	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Hour}
 
 	err := enforcer.StreamInterceptor()(
 		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
@@ -235,14 +235,14 @@ func TestStreamDeniesMessageWhenTokenExpiresDuringReceive(t *testing.T) {
 
 	// Valid when the receive starts, expired by the time it returns.
 	stream := &authorizedStream{
-		ServerStream:   &fakeServerStream{ctx: ctx, recvDelay: 60 * time.Millisecond},
-		ctx:            ctx,
-		cancel:         cancel,
-		enforcer:       &Enforcer{Client: fake, RevalidateInterval: time.Hour},
-		resource:       testResource,
-		token:          testToken,
-		tokenExpiresAt: time.Now().Add(20 * time.Millisecond),
-		validUntil:     time.Now().Add(time.Hour),
+		ServerStream:    &fakeServerStream{ctx: ctx, recvDelay: 60 * time.Millisecond},
+		ctx:             ctx,
+		cancel:          cancel,
+		enforcer:        &Enforcer{Client: fake, ReAuthorizeInterval: time.Hour},
+		resource:        testResource,
+		token:           testToken,
+		tokenExpiresAt:  time.Now().Add(20 * time.Millisecond),
+		nextAuthorizeAt: time.Now().Add(time.Hour),
 	}
 
 	err := stream.RecvMsg(nil)
@@ -260,7 +260,7 @@ func TestStreamTolerantOfTransientReauthErrors(t *testing.T) {
 		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 		laterErr:       status.Error(codes.Unavailable, "auth service restarting"),
 	}
-	enforcer := &Enforcer{Client: fake, RevalidateInterval: time.Nanosecond}
+	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Nanosecond}
 
 	err := enforcer.StreamInterceptor()(
 		nil, &fakeServerStream{ctx: ctxWithToken(testToken)},
@@ -287,7 +287,7 @@ func TestStreamTerminatesWhenReauthorizationDenied(t *testing.T) {
 		tokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 		laterErr:       status.Error(codes.PermissionDenied, "organization removed from channel"),
 	}
-	enforcer := &Enforcer{Client: fake, RevalidateInterval: time.Nanosecond}
+	enforcer := &Enforcer{Client: fake, ReAuthorizeInterval: time.Nanosecond}
 
 	ctxDone := false
 	err := enforcer.StreamInterceptor()(

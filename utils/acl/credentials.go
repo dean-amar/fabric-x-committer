@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
 type (
@@ -53,6 +54,20 @@ type (
 		TLSCertHash []byte
 	}
 )
+
+// TLSCertHash returns the SHA-256 of the certificate tlsConfig presents, for MintParams.TLSCertHash. It is
+// nil unless the mode is mutual TLS: only then does the connection carry a certificate to bind a token to.
+func TLSCertHash(tlsConfig connection.TLSConfig) ([]byte, error) {
+	creds, err := connection.NewClientTLSCredentials(tlsConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load the client TLS credentials")
+	}
+	if creds.Mode != connection.MutualTLSMode {
+		return nil, nil
+	}
+	hash, err := protoutil.HashTLSCertificate(creds.Cert)
+	return hash, errors.Wrap(err, "failed to hash the client certificate")
+}
 
 // MintToken runs the whole client side of authentication: fetch a nonce, sign it into an envelope, exchange
 // it for a cert-bound token. Failure surfaces here rather than inside an unrelated RPC.

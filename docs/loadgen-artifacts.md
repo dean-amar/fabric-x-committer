@@ -109,6 +109,7 @@ The generated directory structure contains all necessary cryptographic materials
     │   │   ├── cacerts/peer-org-0-CA-cert.pem
     │   │   ├── knowncerts
     │   │   │   ├── Admin@peer-org-0.com-cert.pem
+    │   │   │   ├── auth-cert.pem
     │   │   │   ├── client@peer-org-0.com-cert.pem
     │   │   │   ├── coordinator-cert.pem
     │   │   │   ├── db-cert.pem
@@ -119,6 +120,18 @@ The generated directory structure contains all necessary cryptographic materials
     │   │   │   └── verifier-cert.pem
     │   │   └── tlscacerts/tlspeer-org-0-CA-cert.pem
     │   ├── peers
+    │   │   ├── auth
+    │   │   │   ├── tls
+    │   │   │   │   ├── ca.crt
+    │   │   │   │   ├── server.crt
+    │   │   │   │   └── server.key
+    │   │   │   ├── msp
+    │   │   │   │   ├── admincerts/Admin@peer-org-0.com-cert.pem
+    │   │   │   │   ├── cacerts/peer-org-0-CA-cert.pem
+    │   │   │   │   ├── keystore/priv_sk
+    │   │   │   │   ├── signcerts/auth-cert.pem
+    │   │   │   │   └── tlscacerts/tlspeer-org-0-CA-cert.pem
+    │   │   │   └── sign-verify/sk.key
     │   │   ├── coordinator
     │   │   │   ├── tls
     │   │   │   │   ├── ca.crt
@@ -231,6 +244,7 @@ The generated directory structure contains all necessary cryptographic materials
         │   ├── cacerts/peer-org-1-CA-cert.pem
         │   ├── knowncerts
         │   │   ├── Admin@peer-org-1.com-cert.pem
+        │   │   ├── auth-cert.pem
         │   │   ├── client@peer-org-1.com-cert.pem
         │   │   ├── coordinator-cert.pem
         │   │   ├── db-cert.pem
@@ -241,6 +255,18 @@ The generated directory structure contains all necessary cryptographic materials
         │   │   └── verifier-cert.pem
         │   └── tlscacerts/tlspeer-org-1-CA-cert.pem
         ├── peers
+        │   ├── auth
+        │   │   ├── tls
+        │   │   │   ├── ca.crt
+        │   │   │   ├── server.crt
+        │   │   │   └── server.key
+        │   │   ├── msp
+        │   │   │   ├── admincerts/Admin@peer-org-1.com-cert.pem
+        │   │   │   ├── cacerts/peer-org-1-CA-cert.pem
+        │   │   │   ├── keystore/priv_sk
+        │   │   │   ├── signcerts/auth-cert.pem
+        │   │   │   └── tlscacerts/tlspeer-org-1-CA-cert.pem
+        │   │   └── sign-verify/sk.key
         │   ├── coordinator
         │   │   ├── tls
         │   │   │   ├── ca.crt

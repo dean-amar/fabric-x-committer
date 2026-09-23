@@ -16,6 +16,7 @@ import (
 
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	commontypes "github.com/hyperledger/fabric-x-common/api/types"
+	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,8 +137,8 @@ func TestReadConfigSidecar(t *testing.T) {
 			WaitingTxsLimit:               20_000_000,
 			ChannelBufferSize:             100,
 			Auth: &acl.Client{
-				Config:                   newClientConfigWithDefaultTLS("auth", "sidecar", 10001),
-				StreamRevalidateInterval: time.Minute,
+				Config:                    newClientConfigWithDefaultTLS("auth", "sidecar", 10001),
+				StreamReAuthorizeInterval: time.Minute,
 			},
 		},
 	}}
@@ -496,7 +497,9 @@ func TestReadConfigAuth(t *testing.T) {
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
 		}),
 		expectedServiceConfig: &auth.Config{
-			Database:                defaultSampleDBConfig(),
+			Database: defaultSampleDBConfig(),
+			SigningKeyPath: filepath.Join(artifactsPath, cryptogen.PeerOrganizationsDir, "peer-org-0.com",
+				cryptogen.PeerNodesDir, "auth", "sign-verify", "sk.key"),
 			TokenTTL:                5 * time.Minute,
 			EnvelopeFreshnessWindow: 5 * time.Minute,
 			NonceTTL:                time.Minute,

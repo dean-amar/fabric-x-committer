@@ -24,17 +24,17 @@ For internal architecture details, see [sidecar.md — Section 6](sidecar.md#6-n
 
 ## 1. API Definition
 
-The Notification Service provides two streaming RPCs:
+The Sidecar's `SidecarService` provides two streaming notification RPCs, alongside its block-query RPCs:
 
 From [fabric-x-common/api/committerpb](https://github.com/hyperledger/fabric-x-common)
 
 ```protobuf
-service Notifier {
+service SidecarService {
     // Subscribe to specific transaction IDs
     rpc OpenNotificationStream (stream NotificationRequest) returns (stream NotificationResponse);
 
     // Subscribe to all committed transactions
-    rpc StreamAllTransactions (StreamAllRequest) returns (stream TxBatch);
+    rpc StreamBlocks (StreamBlocksRequest) returns (stream BlockEvent);
 }
 ```
 
@@ -90,7 +90,7 @@ Create a gRPC connection to the Sidecar, open a notification stream, and send a
 
 ```go
 conn, err := grpc.NewClient(sidecarEndpoint, dialOpts...)
-client := committerpb.NewNotifierClient(conn)
+client := committerpb.NewSidecarServiceClient(conn)
 
 stream, err := client.OpenNotificationStream(ctx)
 if err != nil {
@@ -187,20 +187,25 @@ the transaction status.
 
 ### 3.1. API Definition
 
-The `StreamAllTransactions` RPC provides a server-streaming interface that delivers all committed transactions in block
+The `StreamBlocks` RPC provides a server-streaming interface that delivers all committed transactions in block
 order. Unlike the transaction ID subscription API, this stream does not require clients to know transaction IDs in
 advance.
 
 ```protobuf
-message StreamAllRequest {
+message StreamBlocksRequest {
     repeated string filter_namespaces = 1;  // Optional: filter by namespace(s)
     repeated Status filter_status = 2;      // Optional: filter by status
     bool include_read_write_sets = 3;       // Optional: include read/write sets
     bool include_endorsements = 4;          // Optional: include endorsements
+    bool include_metadata = 5;              // Accepted but not populated by the sidecar
 }
 
-message TxBatch {
-    repeated TxEvent events = 1;
+// One event per committed block. block_hash and prev_block_hash are not populated by the sidecar.
+message BlockEvent {
+    uint64 block_number = 1;
+    repeated TxEvent events = 2;
+    bytes block_hash = 3;
+    bytes prev_block_hash = 4;
 }
 
 message TxEvent {
@@ -213,11 +218,11 @@ message TxEvent {
 
 ### 3.2. Opening a Stream
 
-Create a gRPC connection to the Sidecar and call `StreamAllTransactions`:
+Create a gRPC connection to the Sidecar and call `StreamBlocks`:
 
 ```go
-client := committerpb.NewNotifierClient(conn)
-stream, err := client.StreamAllTransactions(ctx, &committerpb.StreamAllRequest{
+client := committerpb.NewSidecarServiceClient(conn)
+stream, err := client.StreamBlocks(ctx, &committerpb.StreamBlocksRequest{
     FilterNamespaces: []string{"namespace-1", "namespace-2"},
     FilterStatus: []committerpb.Status{committerpb.Status_COMMITTED},
     IncludeReadWriteSets: true,
@@ -242,8 +247,8 @@ stream, err := client.StreamAllTransactions(ctx, &committerpb.StreamAllRequest{
 
 ### 3.3. Receiving Transaction Events
 
-The server sends `TxBatch` messages containing one or more `TxEvent` entries. Transactions are batched by block. All
-transactions from the same block are delivered in a single `TxBatch`.
+The server sends `BlockEvent` messages containing one or more `TxEvent` entries. Transactions are batched by block. All
+transactions from the same block are delivered in a single `BlockEvent`.
 
 ```go
 for {
@@ -296,7 +301,7 @@ The following configuration options in `sidecar.yaml` control notification behav
 |-------------------------------------|---------|-------------------------------------------------------------------------------------------------|
 | `notification.max-timeout`          | `1m`    | Upper limit on per-request timeout for transaction ID subscriptions.                            |
 | `notification.stream-write-timeout` | `30s`   | Write timeout for all transactions stream. Prevents slow clients from blocking.                 |
-| `server.max-concurrent-streams`     | `10`    | Maximum concurrent streaming RPCs across all stream types (Deliver + Notification + StreamAll). |
+| `server.max-concurrent-streams`     | `10`    | Maximum concurrent streaming RPCs across all stream types (Deliver + Notification + StreamBlocks). |
 | `auth`                              | absent  | Optional ACL enforcement for notification and delivery streams. See [Auth Service](auth-service.md). |
 
 Sample configuration:

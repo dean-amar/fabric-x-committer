@@ -104,6 +104,7 @@ block fixtures. Full picture is in the `tests` skill; the key helpers:
 | Need | Use | Package |
 |------|-----|---------|
 | In-process service / DB / mock harnesses | `test.RunServiceForTest`, `testdb.PrepareTestEnv`, `mock.*` | `utils/test`, `utils/testdb`, `mock/` (this repo) |
+| A running AuthService for an ACL test | `auth.NewServiceTestEnv` (+ `MintToken`, `ACLClient`) | `service/auth` (this repo) |
 | Proto assertions | `test.RequireProtoEqual` / `RequireProtoElementsMatch` | `utils/test` (this repo) |
 | MSP / identity / Fabric config-block fixtures | `testcrypto.CreateOrExtendConfigBlockWithCrypto`, `ConfigBlock`, `PrepareBlockHeaderAndMetadata`, `GetPeersIdentities` / `GetConsenterIdentities` / `GetSigningIdentities` / `GetPeersMspDirs` | `github.com/hyperledger/fabric-x-common/utils/testcrypto` |
 | Test TLS CAs & cert/key pairs | `tlsgen.NewCA()`, `CA`, `CertKeyPair` | `github.com/hyperledger/fabric-x-common/common/crypto/tlsgen` |
@@ -358,7 +359,7 @@ never leak a raw internal error (stack traces must not cross the wire). Availabl
 `WrapCancelled`, `WrapFailedPrecondition`, `WrapUnimplemented`, `WrapNotFound`,
 `WrapUnavailable`, `WrapUnauthenticated`, `WrapPermissionDenied`,
 `WrapResourceExhaustedOrCancelled(ctx, err)`, `WrapWithContext(err, ctx)`. Map sentinels
-to codes with an `errors.Is` chain (`service/query/query_service.go:382`).
+to codes with an `errors.Is` chain (`service/query/query_service.go:388`).
 
 **Sentinel errors:** declare `var ErrXxx = errors.New("...")` with a doc comment in a
 `var (...)` block; compare with `errors.Is`, never `==` (the `errname` linter enforces the

@@ -34,8 +34,8 @@ type authorizedStream struct {
 	mu sync.Mutex
 	// tokenExpiresAt is the hard limit: past it the stream is denied locally, with no round trip.
 	tokenExpiresAt time.Time
-	// validUntil is when the cached decision must be renewed.
-	validUntil time.Time
+	// nextAuthorizeAt is when the decision must be re-authorized against the AuthService.
+	nextAuthorizeAt time.Time
 	// denied is the terminal error once a re-check has definitively failed.
 	denied error
 }
@@ -66,8 +66,9 @@ func (s *authorizedStream) SendMsg(m any) error {
 	return s.ServerStream.SendMsg(m)
 }
 
-// authorizeIfLapsed renews a lapsed decision and terminates the stream on a definitive denial. A
-// transient failure keeps the stream serving, still bounded by the bound token's expiry.
+// authorizeIfLapsed applies the two bounds a stream has. The token's expiry is checked on every message and
+// costs nothing; a full re-authorization happens only once per interval, and is what makes a policy change
+// observable. A transient failure keeps the stream serving, still bounded by the expiry.
 func (s *authorizedStream) authorizeIfLapsed() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,16 +77,15 @@ func (s *authorizedStream) authorizeIfLapsed() error {
 	if err := s.checkBoundTokenLocked(now); err != nil {
 		return err
 	}
-	if now.Before(s.validUntil) {
+	if now.Before(s.nextAuthorizeAt) {
 		return nil
 	}
 
-	resp, err := s.enforcer.authorize(s.ctx, s.token, s.resource)
-	if err != nil {
+	if _, err := s.enforcer.authorize(s.ctx, s.token, s.resource); err != nil {
 		if grpcerror.FilterUnavailableErrorCode(err) == nil {
 			// Transient: keep serving, but back off, or every message re-attempts the call and waits out
 			// its timeout holding mu. Measured after the call, which may have burned the whole timeout.
-			s.validUntil = time.Now().Add(transientRetryInterval)
+			s.nextAuthorizeAt = time.Now().Add(transientRetryInterval)
 			logger.Warnf("ACL re-check for [%s] failed transiently; retrying in %s: %v",
 				s.resource, transientRetryInterval, err)
 			return nil
@@ -95,7 +95,9 @@ func (s *authorizedStream) authorizeIfLapsed() error {
 		return s.denied
 	}
 
-	s.validUntil = s.enforcer.decisionValidUntil(resp, now)
+	// Re-authorization cannot extend the stream: tokenExpiresAt is fixed at establishment and is checked on
+	// every message, so only the interval moves here.
+	s.nextAuthorizeAt = now.Add(s.enforcer.ReAuthorizeInterval)
 	return nil
 }
 

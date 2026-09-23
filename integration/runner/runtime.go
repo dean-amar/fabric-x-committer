@@ -17,7 +17,6 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -725,16 +724,10 @@ func (c *CommitterRuntime) MintAuthToken(t *testing.T) *acl.Credentials {
 	identities, idErr := testcrypto.GetPeersIdentities(c.SystemConfig.Policy.ArtifactsPath)
 	require.NoError(t, idErr)
 	require.NotEmpty(t, identities, "an AuthService is configured but no signing identity is "+
-		"available: set policy.identity or point policy.artifacts-path at generated crypto")
+		"available: point policy.artifacts-path at generated crypto")
 
-	tlsCreds, err := connection.NewClientTLSCredentials(c.SystemConfig.ClientTLS)
+	certHash, err := acl.TLSCertHash(c.SystemConfig.ClientTLS)
 	require.NoError(t, err)
-	// Only mutual TLS puts a certificate on the connection, which is what binds the token to it.
-	var certHash []byte
-	if tlsCreds.Mode == connection.MutualTLSMode {
-		certHash, err = protoutil.HashTLSCertificate(tlsCreds.Cert)
-		require.NoError(t, err)
-	}
 
 	creds, err := acl.MintToken(t.Context(), &acl.MintParams{
 		Client: servicepb.NewAuthServiceClient(
