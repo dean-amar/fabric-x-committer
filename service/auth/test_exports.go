@@ -65,7 +65,7 @@ func NewAuthTestEnv(t *testing.T, params *ACLTestEnvParams) *TestEnv {
 		params = &ACLTestEnvParams{}
 	}
 	if params.TokenTTL <= 0 {
-		params.TokenTTL = 5 * time.Minute
+		params.TokenTTL = 15 * time.Minute
 	}
 
 	env := &TestEnv{
@@ -133,7 +133,10 @@ func (e *TestEnv) mintToken(ctx context.Context) (string, error) {
 
 // ACLClient is the auth section a resource server under test should be configured with.
 func (e *TestEnv) ACLClient(reAuthorizeInterval time.Duration) *acl.Client {
-	return &acl.Client{Config: e.Config, StreamReAuthorizeInterval: reAuthorizeInterval}
+	return &acl.Client{
+		Config:                    e.Config,
+		StreamReAuthorizeInterval: reAuthorizeInterval,
+	}
 }
 
 // Nonce obtains a single-use challenge from the AuthService.

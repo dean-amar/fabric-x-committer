@@ -20,8 +20,8 @@ type Client struct {
 	// StreamReAuthorizeInterval is how often an open stream re-authorizes its bound token against the
 	// latest policy. A stream is always bounded by its token's expiry as well, so a high value here leaves
 	// the token's lifetime as the only bound. Zero means Authorization on every call.
-	StreamReAuthorizeInterval time.Duration `mapstructure:"stream-re-authorize-interval" default:"1m" validate:"gt=0"`
+	StreamReAuthorizeInterval time.Duration `mapstructure:"stream-re-authorize-interval"`
 	// TransientRetryInterval is how long a stream waits before retrying a re-authorization that failed
 	// transiently, so a brief outage costs one attempt per interval rather than one per message.
-	TransientRetryInterval time.Duration `mapstructure:"transient-retry-interval" default:"5s" validate:"gt=0"`
+	TransientRetryInterval time.Duration `mapstructure:"transient-retry-interval"`
 }

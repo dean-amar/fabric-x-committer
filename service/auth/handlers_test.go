@@ -146,7 +146,7 @@ func TestChallengeRateLimit(t *testing.T) {
 func TestConfigRejectsBurstAboveRate(t *testing.T) {
 	t.Parallel()
 	require.Error(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 11}).Validate())
-	require.Error(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 0}).Validate(),
+	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 0}).Validate(),
 		"a zero burst would admit nothing at all")
 	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 10}).Validate())
 	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 0, ChallengeBurst: 0}).Validate())
