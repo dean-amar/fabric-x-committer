@@ -47,13 +47,20 @@ import (
 
 var logger = flogging.MustGetLogger("sidecar")
 
-// Service relays blocks from the orderer to the committer, aggregates transaction status, and serves the
-// result: peer.DeliverServer and block queries from the block store, notification streams via the notifier.
+// Service is a relay service which relays the block from orderer to committer. Further,
+// it aggregates the transaction status and forwards the validated block to clients who have
+// registered on the ledger server.
+//   - Implements peer.DeliverServer by streaming blocks from a blockStore.
+//   - Implements committerpb.SidecarServiceServer: block-store reads are served
+//     here, event streams by the embedded notifier, and RPCs the sidecar does not
+//     implement yet fall through to the notifier's UnimplementedSidecarServiceServer.
 type Service struct {
-	committerpb.UnimplementedSidecarServiceServer
+	// Embedded so the notifier's stream RPCs and the Unimplemented fallbacks are
+	// promoted onto Service. The field keeps the name `notifier`, so existing
+	// s.notifier call sites are unaffected.
+	*notifier
 	deliveryParams deliverorderer.Parameters
 	relay          *relay
-	notifier       *notifier
 	blockStore     *blockStore
 	coordConn      *grpc.ClientConn
 	queues         *queues
@@ -223,8 +230,10 @@ func (s *Service) Run(ctx context.Context) error {
 
 // RegisterService registers the sidecar's gRPC services and monitoring server.
 func (s *Service) RegisterService(srv serve.Servers) {
-	peer.RegisterDeliverServer(srv.GRPC, s)
 	committerpb.RegisterSidecarServiceServer(srv.GRPC, s)
+	// Fabric block delivery keeps its own service so Fabric clients dial the
+	// sidecar with the wire contract they already implement.
+	peer.RegisterDeliverServer(srv.GRPC, s)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
 	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
@@ -726,21 +735,6 @@ func (s *Service) GetTxByID(_ context.Context, req *committerpb.TxID) (*common.E
 		return nil, wrapQueryError(err)
 	}
 	return envelope, nil
-}
-
-// OpenNotificationStream delegates to the notifier, which owns the subscription state. Upstream merged the
-// former Notifier and SidecarService, so one type must answer both halves of SidecarServiceServer.
-func (s *Service) OpenNotificationStream(
-	stream grpc.BidiStreamingServer[committerpb.NotificationRequest, committerpb.NotificationResponse],
-) error {
-	return s.notifier.OpenNotificationStream(stream)
-}
-
-// StreamBlocks streams block events to the client, starting from the request's position.
-func (s *Service) StreamBlocks(
-	req *committerpb.StreamBlocksRequest, stream grpc.ServerStreamingServer[committerpb.BlockEvent],
-) error {
-	return s.notifier.StreamBlocks(req, stream)
 }
 
 func wrapQueryError(err error) error {

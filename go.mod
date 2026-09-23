@@ -22,7 +22,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/hyperledger/fabric-lib-go v1.1.5-0.20260708100132-163bcc919208
 	github.com/hyperledger/fabric-protos-go-apiv2 v0.3.7
-	github.com/hyperledger/fabric-x-common v0.2.9-0.20260723091942-e43f1af10c7e
+	github.com/hyperledger/fabric-x-common v0.2.9-0.20260922091838-0ca3d334f660
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/jackc/puddle/v2 v2.2.2
 	github.com/moby/moby/api v1.55.0
@@ -189,6 +189,8 @@ require (
 	mvdan.cc/gofumpt v0.10.0 // indirect
 )
 
-// TEMPORARY: local fabric-x-common with the `auth` test peer (branch acl-preparation), needed for the
-// AuthService's own TLS certificate. Drop this once that change is released upstream.
-replace github.com/hyperledger/fabric-x-common => github.com/dean-amar/fabric-x-common v0.0.0-20260923112808-d5b71d855c14
+// TEMPORARY: local fabric-x-common with the `auth` test peer, needed for the AuthService's own signing
+// key. Branch acl-preparation-0ca3d334f is the two auth-crypto commits on top of the exact upstream commit
+// this module already requires, so it adds the `auth` peer and nothing else. Drop this once that change is
+// released upstream.
+replace github.com/hyperledger/fabric-x-common => github.com/dean-amar/fabric-x-common v0.0.0-20260923203921-ab36ec99685c

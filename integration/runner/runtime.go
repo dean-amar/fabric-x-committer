@@ -21,7 +21,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -66,8 +65,8 @@ type (
 		QueryServiceClient  committerpb.QueryServiceClient
 		SidecarClientConfig *connection.ClientConfig
 		NotifyClient        committerpb.SidecarServiceClient
-		NotifyStream        grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse]
-		StreamAllTxStream   grpc.ServerStreamingClient[committerpb.BlockEvent]
+		NotifyStream        committerpb.SidecarService_OpenNotificationStreamClient
+		StreamBlocksStream  committerpb.SidecarService_StreamBlocksClient
 
 		CommittedBlock          chan *common.Block
 		TxBuilder               *workload.TxBuilder
@@ -385,7 +384,7 @@ func (c *CommitterRuntime) OpenNotificationStream(ctx context.Context, t *testin
 	var err error
 	c.NotifyStream, err = c.NotifyClient.OpenNotificationStream(ctx)
 	require.NoError(t, err)
-	c.StreamAllTxStream, err = c.NotifyClient.StreamBlocks(ctx, nil)
+	c.StreamBlocksStream, err = c.NotifyClient.StreamBlocks(ctx, nil)
 	require.NoError(t, err)
 }
 
@@ -692,7 +691,13 @@ func (c *CommitterRuntime) ValidateExpectedResultsInCommittedBlock(t *testing.T,
 	}
 
 	sidecar.RequireNotifications(t, c.NotifyStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
-	sidecar.RequireStreamBlocks(t, c.StreamAllTxStream, blk.Header.Number, expected.TxIDs, expected.Statuses)
+	sidecar.RequireStreamBlocks(
+		t,
+		c.StreamBlocksStream,
+		blk.Header,
+		expected.TxIDs,
+		expected.Statuses,
+	)
 }
 
 // CountStatus returns the number of transactions with a given tx status.

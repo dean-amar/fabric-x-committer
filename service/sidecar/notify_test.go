@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -609,17 +609,23 @@ func TestStreamBlocks(t *testing.T) {
 	t.Parallel()
 
 	const (
-		testTxID1 = "tx1"
-		testTxID2 = "tx2"
-		testTxID3 = "tx3"
-		testTxID4 = "tx4"
-		testNs1   = "ns1"
-		testNs2   = "ns2"
-		testNs3   = "ns3"
+		testTxID1                = "tx1"
+		testTxID2                = "tx2"
+		testTxID3                = "tx3"
+		testTxID4                = "tx4"
+		testNs1                  = "ns1"
+		testNs2                  = "ns2"
+		testNs3                  = "ns3"
+		testNonexistentNamespace = "nonexistent"
 	)
 
+	header := &common.BlockHeader{
+		Number:       1,
+		PreviousHash: []byte("previous-block-hash"),
+		DataHash:     []byte("block-data-hash"),
+	}
 	block := &committedBlockWithTxs{
-		blockNumber: 1,
+		header: header,
 		txs: []*servicepb.TxWithRef{
 			createTestTx(testTxID1, 0, testNs1),
 			createTestTx(testTxID2, 1, testNs2),
@@ -659,6 +665,13 @@ func TestStreamBlocks(t *testing.T) {
 			expectedTxIDs: []string{testTxID2, testTxID3}, // tx2 has ns2, tx3 has ns1+ns2
 		},
 		{
+			name: "NamespaceFilter_noMatches",
+			request: &committerpb.StreamBlocksRequest{
+				FilterNamespaces: []string{testNonexistentNamespace},
+			},
+			expectedTxIDs: []string{},
+		},
+		{
 			name: "StatusFilter_COMMITTED",
 			request: &committerpb.StreamBlocksRequest{
 				FilterStatus: []committerpb.Status{committerpb.Status_COMMITTED},
@@ -694,10 +707,17 @@ func TestStreamBlocks(t *testing.T) {
 			},
 			expectedTxIDs: []string{testTxID1, testTxID2, testTxID3, testTxID4},
 		},
+		{
+			name: "NamespaceFilter_NoMatch",
+			request: &committerpb.StreamBlocksRequest{
+				FilterNamespaces: []string{"no-such-namespace"},
+			},
+			expectedTxIDs: []string{}, // we expect the block but without any txs
+		},
 	}
 
 	env := newNotifierTestEnv(t, 0)
-	streams := make([]grpc.ServerStreamingClient[committerpb.BlockEvent], len(cases))
+	streams := make([]committerpb.SidecarService_StreamBlocksClient, len(cases))
 	for i, tc := range cases {
 		var err error
 		streams[i], err = env.client.StreamBlocks(t.Context(), tc.request)
@@ -705,9 +725,9 @@ func TestStreamBlocks(t *testing.T) {
 	}
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		env.n.allTxStreamsMu.RLock()
-		activeStreams := env.n.allTxStreams
-		env.n.allTxStreamsMu.RUnlock()
+		env.n.blockStreamsMu.RLock()
+		activeStreams := env.n.blockStreams
+		env.n.blockStreamsMu.RUnlock()
 		require.Len(ct, activeStreams, len(cases))
 	}, 10*time.Second, 100*time.Millisecond)
 	env.committedBlockWithTxsQueue.Write(block)
@@ -715,17 +735,17 @@ func TestStreamBlocks(t *testing.T) {
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			batch, err := streams[i].Recv()
+			blockEvent, err := streams[i].Recv()
 			require.NoError(t, err)
-			require.EqualValues(t, 1, batch.BlockNumber)
+			test.RequireProtoEqual(t, header, blockEvent.Header)
 
-			actualTxIDs := make([]string, len(batch.Events))
-			for j, event := range batch.Events {
+			actualTxIDs := make([]string, len(blockEvent.Events))
+			for j, event := range blockEvent.Events {
 				actualTxIDs[j] = event.Ref.TxId
 			}
 			require.ElementsMatch(t, tc.expectedTxIDs, actualTxIDs)
 
-			for _, event := range batch.Events {
+			for _, event := range blockEvent.Events {
 				if tc.request.IncludeReadWriteSets {
 					require.NotEmpty(t, event.Namespaces)
 				} else {

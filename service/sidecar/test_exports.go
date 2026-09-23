@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
@@ -28,7 +28,7 @@ import (
 // RequireNotifications verifies that the expected notification were received.
 func RequireNotifications( //nolint:revive // argument-limit.
 	t *testing.T,
-	notifyStream grpc.BidiStreamingClient[committerpb.NotificationRequest, committerpb.NotificationResponse],
+	notifyStream committerpb.SidecarService_OpenNotificationStreamClient,
 	expectedBlockNumber uint64,
 	txIDs []string,
 	status []committerpb.Status,
@@ -61,8 +61,8 @@ func RequireNotifications( //nolint:revive // argument-limit.
 // from the StreamBlocks stream.
 func RequireStreamBlocks( //nolint:revive // argument-limit.
 	t *testing.T,
-	stream grpc.ServerStreamingClient[committerpb.BlockEvent],
-	expectedBlockNumber uint64,
+	stream committerpb.SidecarService_StreamBlocksClient,
+	expectedHeader *common.BlockHeader,
 	txIDs []string,
 	status []committerpb.Status,
 ) {
@@ -73,7 +73,7 @@ func RequireStreamBlocks( //nolint:revive // argument-limit.
 	expected := make([]*committerpb.TxEvent, len(txIDs))
 	for i, txID := range txIDs {
 		expected[i] = &committerpb.TxEvent{
-			Ref:    committerpb.NewTxRef(txID, expectedBlockNumber, uint32(i)),
+			Ref:    committerpb.NewTxRef(txID, expectedHeader.GetNumber(), uint32(i)),
 			Status: status[i],
 		}
 	}
@@ -84,7 +84,7 @@ func RequireStreamBlocks( //nolint:revive // argument-limit.
 		batch, err := stream.Recv()
 		require.NoError(ct, err)
 		require.NotNil(ct, batch)
-		require.Equal(ct, expectedBlockNumber, batch.BlockNumber)
+		test.RequireProtoEqual(ct, expectedHeader, batch.Header)
 		events = batch.Events
 	}, 15*time.Second, 50*time.Millisecond)
 

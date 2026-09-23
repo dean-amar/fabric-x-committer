@@ -407,9 +407,9 @@ func (r *relay) processCommittedBlocksInOrder(
 
 		// Create committedBlockWithTxs from blockWithStatus for notifier
 		outgoingCommittedBlockWithTxs.Write(&committedBlockWithTxs{
-			blockNumber: blkWithStatus.blockNumber,
-			txs:         blkWithStatus.txs,
-			statuses:    blkWithStatus.txStatus,
+			header:   blkWithStatus.block.Header,
+			txs:      blkWithStatus.txs,
+			statuses: blkWithStatus.txStatus,
 		})
 	}
 }
