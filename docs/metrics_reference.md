@@ -206,6 +206,8 @@ The following Auth Service metrics are exported for consumption by Prometheus.
 | authservice_grpc_stream_duration_seconds               | histogram | method status | The duration (seconds) a stream was active from start to end, by method and gRPC status code |
 | authservice_grpc_active_streams                        | gauge     | method        | Number of gRPC streams currently open on the server                                          |
 | authservice_grpc_active_connections                    | gauge     |               | Number of client connections currently open on the server                                    |
+| authservice_grpc_message_received_size_bytes           | histogram | method        | Distribution of the wire sizes in bytes of messages received by the server.                  |
+| authservice_grpc_message_sent_size_bytes               | histogram | method        | Distribution of the wire sizes in bytes of messages sent by the server.                      |
 | authservice_grpc_config_sequence                       | gauge     |               | The channel-configuration sequence the current evaluation bundle was built from.             |
 | authservice_grpc_config_last_refresh_timestamp_seconds | gauge     |               | Unix time of the last successful channel-configuration refresh.                              |
 | authservice_grpc_token_store_size                      | gauge     |               | Number of token records held in the in-memory cache.                                         |
