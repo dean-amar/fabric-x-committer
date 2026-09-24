@@ -12,6 +12,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
@@ -39,7 +40,6 @@ type aclEnv struct {
 func TestACLQueryWithAuthenticatedClient(t *testing.T) {
 	t.Parallel()
 	env := newACLEnv(t)
-
 	// Step 1: Commit a transaction through the normal path, so the query has something real to find.
 	t.Log("Step 1: commit a transaction through the orderer")
 	env.commitRow(t, []byte("k1"), []byte("v1"))
@@ -151,13 +151,18 @@ func newACLEnv(t *testing.T) *aclEnv {
 	c.Start(t, runner.FullTxPathWithQuery)
 	c.CreateNamespacesAndCommit(t, aclNamespace, aclOtherNamespace)
 
+	t.Helper()
+	identities, err := testcrypto.GetPeersIdentities(c.OrdererEnv.ArtifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+
 	return &aclEnv{
 		c: c,
 		TestEnv: &auth.TestEnv{
 			Client: servicepb.NewAuthServiceClient(
 				test.NewSecuredConnection(t, c.SystemConfig.Services.Auth.GrpcEndpoint, c.SystemConfig.ClientTLS),
 			),
-			Signer:        auth.LoadTestSigner(t, c.OrdererEnv.ArtifactsPath),
+			Signer:        identities[0],
 			ChannelID:     runner.TestChannelName,
 			ArtifactsPath: c.OrdererEnv.ArtifactsPath,
 		},

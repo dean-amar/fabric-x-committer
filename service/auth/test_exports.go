@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package auth
 
 import (
-	"context"
+	"path"
 	"testing"
 	"time"
 
@@ -15,6 +15,7 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/msp"
 	"github.com/hyperledger/fabric-x-common/protoutil"
+	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,94 +24,134 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 	"github.com/hyperledger/fabric-x-committer/utils/testdb"
 )
 
-// TestEnvChannelID is the channel NewAuthTestEnv builds its configuration for.
-const TestEnvChannelID = "ch1"
+// defaultTestChannelID is the channel NewAuthTestEnv builds a configuration for when it creates one.
+const defaultTestChannelID = "mychannel"
 
 type (
 	// TestEnv is the client side of an AuthService: a client to reach it with and an identity its channel's
 	// policy accepts. NewAuthTestEnv also starts the service; a test that already has one running - an
 	// integration topology, say - fills these fields in directly instead.
 	TestEnv struct {
-		AuthService *Service
-		// Client reaches the AuthService.
-		Client servicepb.AuthServiceClient
-		// Signer is an MSP identity belonging to ChannelID, which is what makes a token mintable.
-		Signer msp.SigningIdentity
-		// ChannelID scopes every envelope this environment signs.
-		ChannelID string
-		// Config reaches the service NewAuthTestEnv started; hand it to a resource server's
-		// acl.Client. It is empty when the environment was attached to an already-running service.
-		Config *connection.ClientConfig
-		// ArtifactsPath holds the crypto the channel configuration was built from.
+		AuthService   *Service
+		Client        servicepb.AuthServiceClient
+		Signer        msp.SigningIdentity
+		ChannelID     string
 		ArtifactsPath string
+		ServerConfig  *serve.Config
+		Config        *connection.ClientConfig
+		TLSCertHash   []byte
 	}
 
-	// ACLTestEnvParams tunes the environment. A nil value, or a zero field, takes the default.
+	// ACLTestEnvParams describes the AuthService NewAuthTestEnv should start. ArtifactsPath may be shared
+	// with another env that already generated crypto and a config block there; the channel then comes from
+	// that block rather than from ChannelID.
 	ACLTestEnvParams struct {
-		// TokenTTL is how long a minted token lives. A short one lets a test watch an established stream
-		// lapse, since a resource server keeps the token's expiry as its local hard bound.
-		TokenTTL time.Duration
+		ServerTLS     connection.TLSConfig
+		ClientTLS     connection.TLSConfig
+		TokenTTL      time.Duration
+		ArtifactsPath string
+		ChannelID     string
 	}
 )
 
-// NewAuthTestEnv starts an AuthService over a provisioned database and waits until it can authenticate.
+// NewAuthTestEnv starts an AuthService test environment.
 func NewAuthTestEnv(t *testing.T, params *ACLTestEnvParams) *TestEnv {
 	t.Helper()
 	if params == nil {
 		params = &ACLTestEnvParams{}
 	}
 	if params.TokenTTL <= 0 {
-		params.TokenTTL = 15 * time.Minute
+		params.TokenTTL = 30 * time.Minute
+	}
+	if params.ArtifactsPath == "" {
+		params.ArtifactsPath = t.TempDir()
+	}
+	env := &TestEnv{ArtifactsPath: params.ArtifactsPath}
+
+	// The artifacts path may already belong to another env - an orderer test env, say - whose config block
+	// carries state this one cannot reconstruct, notably the orderer endpoints its sidecar dials. Extending
+	// that block drops them silently, so an existing block is read and never rewritten.
+	blockPath := path.Join(env.ArtifactsPath, cryptogen.ConfigBlockFileName)
+	configBlock, readErr := protoutil.ReadBlockFromFile(blockPath)
+	if readErr != nil {
+		if params.ChannelID == "" {
+			params.ChannelID = defaultTestChannelID
+		}
+		var createErr error
+		configBlock, createErr = testcrypto.CreateOrExtendConfigBlockWithCrypto(
+			env.ArtifactsPath,
+			&testcrypto.ConfigBlock{ChannelID: params.ChannelID, PeerOrganizationCount: 1},
+		)
+		require.NoError(t, createErr)
 	}
 
-	env := &TestEnv{
-		ChannelID:     TestEnvChannelID,
-		ArtifactsPath: t.TempDir(),
-	}
-	block, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(env.ArtifactsPath, &testcrypto.ConfigBlock{
-		ChannelID:             env.ChannelID,
-		PeerOrganizationCount: 1,
-	})
+	// The block is the authority on its own channel, so the env cannot be pointed at one channel's
+	// configuration while it signs envelopes for another.
+	channelID, err := protoutil.GetChannelIDFromBlock(configBlock)
 	require.NoError(t, err)
-	env.Signer = LoadTestSigner(t, env.ArtifactsPath)
+	if params.ChannelID != "" {
+		require.Equal(t, channelID, params.ChannelID,
+			"ChannelID does not match the channel of the config block already at ArtifactsPath")
+	}
+	env.ChannelID = channelID
 
-	dbConf := newTestDBConfig(t)
-	seedConfigTransaction(t, dbConf, block)
+	identities, err := testcrypto.GetPeersIdentities(env.ArtifactsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, identities)
+	env.Signer = identities[0]
 
-	serverConfig := test.NewLocalHostServiceConfig(test.InsecureTLSConfig)
+	cs := testdb.PrepareTestEnv(t)
+	dbConf := &statedb.Config{
+		Endpoints:      cs.Endpoints,
+		Username:       cs.User,
+		Password:       cs.Password,
+		Database:       cs.Database,
+		MaxConnections: 10,
+		MinConnections: 1,
+		TLS:            cs.TLS,
+		Retry:          testdb.DefaultRetry,
+	}
+	require.NoError(t, statedb.SetupSystemTablesAndNamespaces(t.Context(), dbConf))
+	seedConfigTransaction(t, dbConf, configBlock)
 
+	env.ServerConfig = test.NewLocalHostServiceConfig(params.ServerTLS)
 	env.AuthService = NewAuthService(&Config{
-		Database:                dbConf,
-		TokenTTL:                params.TokenTTL,
-		NonceTTL:                time.Minute,
-		EnvelopeFreshnessWindow: 5 * time.Minute,
-		ConfigRefreshInterval:   100 * time.Millisecond,
-		TokenCleanupInterval:    time.Minute,
+		Database:                      dbConf,
+		TokenTTL:                      params.TokenTTL,
+		NonceTTL:                      5 * time.Minute,
+		EnvelopeFreshnessWindow:       5 * time.Minute,
+		ConfigRefreshInterval:         100 * time.Millisecond,
+		TokenAndNoncesCleanupInterval: time.Minute,
 	})
-	test.RunServiceAndServeForTest(t.Context(), t, env.AuthService, serverConfig)
-
-	env.Config = test.NewInsecureClientConfig(&serverConfig.GRPC.Endpoint)
+	test.RunServiceAndServeForTest(t.Context(), t, env.AuthService, env.ServerConfig)
+	env.Config = test.NewTLSClientConfig(params.ClientTLS, &env.ServerConfig.GRPC.Endpoint)
 	conn, err := connection.NewSingleConnection(env.Config)
 	require.NoError(t, err)
 	t.Cleanup(func() { connection.CloseConnectionsLog(conn) })
-	env.Client = servicepb.NewAuthServiceClient(conn)
+	env.Client = createAuthClientWithTLS(t, &env.ServerConfig.GRPC.Endpoint, params.ClientTLS)
+	env.TLSCertHash = clientCertHash(t, params.ClientTLS)
 
 	env.WaitForEnforcement(t)
 	return env
 }
 
-// WaitForEnforcement blocks until the AuthService answers on the merits. Readiness is signalled before the
-// configuration provider's first refresh, so until then it has no bundle to judge an envelope against - and
-// a test asserting a specific rejection would otherwise mistake that window's failure for it.
+// WaitForEnforcement blocks until the AuthService accepts a token request,
+// which implies it has loaded the channel configuration and is enforcing ACLs.
 func (e *TestEnv) WaitForEnforcement(t *testing.T) {
 	t.Helper()
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		_, err := e.mintToken(t.Context())
+		_, err := acl.MintToken(t.Context(), &acl.MintParams{
+			Client:      e.Client,
+			Signer:      e.Signer,
+			ChannelID:   e.ChannelID,
+			TLSCertHash: e.TLSCertHash,
+		})
 		assert.NoError(ct, err)
 	}, 2*time.Minute, 250*time.Millisecond, "the auth service never loaded a channel configuration")
 }
@@ -118,25 +159,14 @@ func (e *TestEnv) WaitForEnforcement(t *testing.T) {
 // MintToken authenticates and returns a token the resource servers will accept.
 func (e *TestEnv) MintToken(t *testing.T) string {
 	t.Helper()
-	token, err := e.mintToken(t.Context())
+	token, err := acl.MintToken(t.Context(), &acl.MintParams{
+		Client:      e.Client,
+		Signer:      e.Signer,
+		ChannelID:   e.ChannelID,
+		TLSCertHash: e.TLSCertHash,
+	})
 	require.NoError(t, err)
 	return token
-}
-
-func (e *TestEnv) mintToken(ctx context.Context) (string, error) {
-	return acl.MintToken(ctx, &acl.MintParams{
-		Client:    e.Client,
-		Signer:    e.Signer,
-		ChannelID: e.ChannelID,
-	})
-}
-
-// ACLClient is the auth section a resource server under test should be configured with.
-func (e *TestEnv) ACLClient(reAuthorizeInterval time.Duration) *acl.Client {
-	return &acl.Client{
-		Config:                    e.Config,
-		StreamReAuthorizeInterval: reAuthorizeInterval,
-	}
 }
 
 // Nonce obtains a single-use challenge from the AuthService.
@@ -169,36 +199,6 @@ func (e *TestEnv) Authenticate(t *testing.T, envelope *common.Envelope) string {
 	return resp.GetToken()
 }
 
-// LoadTestSigner returns a signing identity from generated crypto material. The identity must belong to the
-// channel the AuthService judges against, so it comes from what that channel's config block was built from.
-//
-//nolint:ireturn // returning the MSP identity interface is intentional for test purpose.
-func LoadTestSigner(t *testing.T, artifactsPath string) msp.SigningIdentity {
-	t.Helper()
-	identities, err := testcrypto.GetPeersIdentities(artifactsPath)
-	require.NoError(t, err)
-	require.NotEmpty(t, identities)
-	return identities[0]
-}
-
-// newTestDBConfig provisions a database carrying the system schema, which includes the auth tables.
-func newTestDBConfig(t *testing.T) *statedb.Config {
-	t.Helper()
-	cs := testdb.PrepareTestEnv(t)
-	config := &statedb.Config{
-		Endpoints:      cs.Endpoints,
-		Username:       cs.User,
-		Password:       cs.Password,
-		Database:       cs.Database,
-		MaxConnections: 10,
-		MinConnections: 1,
-		TLS:            cs.TLS,
-		Retry:          testdb.DefaultRetry,
-	}
-	require.NoError(t, statedb.SetupSystemTablesAndNamespaces(t.Context(), config))
-	return config
-}
-
 // seedConfigTransaction writes the block's configuration envelope where the service reads it, standing in
 // for the committer that would otherwise have to commit it first.
 func seedConfigTransaction(t *testing.T, dbConf *statedb.Config, block *common.Block) {
@@ -217,4 +217,29 @@ func seedConfigTransaction(t *testing.T, dbConf *statedb.Config, block *common.B
 			"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, version = EXCLUDED.version",
 		[]byte(committerpb.ConfigKey), envelopeBytes)
 	require.NoError(t, err)
+}
+
+func createAuthClientWithTLS(
+	t *testing.T,
+	ep *connection.Endpoint,
+	tlsCfg connection.TLSConfig,
+) servicepb.AuthServiceClient {
+	t.Helper()
+	return test.CreateClientWithTLS(t, ep, tlsCfg, servicepb.NewAuthServiceClient)
+}
+
+// clientCertHash returns the SHA-256 of the client certificate tlsCfg will present, or nil when the mode is
+// not mutual TLS and so no certificate can bind a token. The AuthService takes the binding from the
+// certificate on the Authenticate connection, so a mint that omits this over mutual TLS is rejected with a
+// binding mismatch rather than simply issuing an unbound token.
+func clientCertHash(t *testing.T, tlsCfg connection.TLSConfig) []byte {
+	t.Helper()
+	creds, err := connection.NewClientTLSCredentials(tlsCfg)
+	require.NoError(t, err)
+	if creds.Mode != connection.MutualTLSMode {
+		return nil
+	}
+	hash, err := protoutil.HashTLSCertificate(creds.Cert)
+	require.NoError(t, err)
+	return hash
 }

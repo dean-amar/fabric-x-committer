@@ -57,9 +57,7 @@ type (
 		clientTLS      connection.TLSConfig
 		maxRequestKeys int
 		maxActiveViews int
-		// enableACL runs a real AuthService and points the query service at it, so enforcement is
-		// exercised end to end rather than against a stand-in.
-		enableACL bool
+		enableACL      bool
 	}
 )
 
@@ -572,8 +570,7 @@ func TestQueryWithACL(t *testing.T) {
 	env := newQueryServiceTestEnv(t, &queryServiceTestOpts{enableACL: true})
 
 	policies, err := env.clientConn.GetNamespacePolicies(
-		acl.ContextWithToken(t.Context(), env.authEnv.MintToken(t)),
-		nil,
+		acl.ContextWithToken(t.Context(), env.authEnv.MintToken(t)), nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, policies.Policies, len(env.ns))
@@ -663,7 +660,9 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 	var authEnv *auth.TestEnv
 	if opts.enableACL {
 		authEnv = auth.NewAuthTestEnv(t, nil)
-		config.Auth = authEnv.ACLClient(0)
+		config.Auth = &acl.Client{
+			Config: authEnv.Config,
+		}
 	}
 	serverConfig := test.NewLocalHostServiceConfig(opts.serverTLS)
 

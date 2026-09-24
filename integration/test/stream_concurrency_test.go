@@ -19,8 +19,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
+
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 )
 
 func TestStreamConcurrencyLimit(t *testing.T) {

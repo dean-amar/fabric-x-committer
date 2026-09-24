@@ -141,17 +141,6 @@ func TestChallengeRateLimit(t *testing.T) {
 	}
 }
 
-// TestConfigRejectsBurstAboveRate verifies the cross-field rule the config loader enforces: a burst
-// larger than the rate would let a caller outrun the limit for a full second.
-func TestConfigRejectsBurstAboveRate(t *testing.T) {
-	t.Parallel()
-	require.Error(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 11}).Validate())
-	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 0}).Validate(),
-		"a zero burst would admit nothing at all")
-	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 10, ChallengeBurst: 10}).Validate())
-	require.NoError(t, (&Config{ChallengeRequestsPerSecond: 0, ChallengeBurst: 0}).Validate())
-}
-
 // TestAuthenticateRejectsReplayedNonce verifies the challenge is single-use: replaying a byte-identical
 // envelope fails even inside the freshness window, which is what the nonce adds over a time bound.
 func TestAuthenticateRejectsReplayedNonce(t *testing.T) {

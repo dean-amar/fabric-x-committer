@@ -32,6 +32,9 @@ const (
 	// healthServicePrefix is exempt from enforcement: probes carry no token, and liveness, readiness and
 	// load-balancer checks must keep working once ACL is on.
 	healthServicePrefix = "/grpc.health.v1.Health/"
+
+	defaultTransientRetryInterval    = 5 * time.Second
+	defaultStreamReAuthorizeInterval = 30 * time.Second
 )
 
 // ErrMissingToken is returned when a request carries no authorization token.
@@ -44,8 +47,6 @@ type Enforcer struct {
 	ReAuthorizeInterval    time.Duration
 	TransientRetryInterval time.Duration
 
-	// conn is set only by NewEnforcer, which dials and therefore owns the connection. It stays nil for
-	// an Enforcer built from a struct literal over an existing client, whose Close is then a no-op.
 	conn *grpc.ClientConn
 }
 
@@ -57,6 +58,14 @@ func NewEnforcer(config *Client) (*Enforcer, error) {
 		return nil, errors.Wrap(err, "failed to connect to the auth service")
 	}
 	logger.Infof("ACL enforcement enabled via auth service at %s", config.Config.Endpoint.Address())
+
+	if config.StreamReAuthorizeInterval < 0 {
+		config.StreamReAuthorizeInterval = defaultStreamReAuthorizeInterval
+	}
+	if config.TransientRetryInterval < 0 {
+		config.TransientRetryInterval = defaultTransientRetryInterval
+	}
+
 	return &Enforcer{
 		Client:                 servicepb.NewAuthServiceClient(conn),
 		ReAuthorizeInterval:    config.StreamReAuthorizeInterval,
@@ -109,7 +118,7 @@ func (e *Enforcer) StreamInterceptor() grpc.StreamServerInterceptor {
 			return err
 		}
 
-		// Cancelled when a re-check reaches a definitive denial, so a handler parked on the context
+		// Canceled when a re-check reaches a definitive denial, so a handler parked on the context
 		// observes the teardown; cancelling on handler return also releases the stream's resources.
 		ctx, cancel := context.WithCancel(ss.Context())
 		defer cancel()

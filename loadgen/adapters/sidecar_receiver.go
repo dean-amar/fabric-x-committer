@@ -50,7 +50,7 @@ const (
 // runSidecarReceiver receives blocks from the sidecar, authenticating first when an auth service is
 // configured: block delivery is ACL-protected, so an enforcing sidecar refuses an untokened stream.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
-	ctx, err := bindTokenToContext(ctx, params)
+	ctx, err := prepareAndBindAuthenticationInfoToContext(ctx, params)
 	if err != nil {
 		return errors.Wrap(err, "failed to bind token to context")
 	}
@@ -174,7 +174,9 @@ func recapStatusCodes(statusCodes []byte) string {
 	return strings.Join(items, ", ")
 }
 
-func bindTokenToContext(ctx context.Context, params *sidecarReceiverParameters) (context.Context, error) {
+func prepareAndBindAuthenticationInfoToContext(
+	ctx context.Context, params *sidecarReceiverParameters,
+) (context.Context, error) {
 	if params.Auth == nil {
 		return ctx, nil
 	}

@@ -23,38 +23,11 @@ import (
 // never issued by this deployment or has expired and been swept.
 var ErrTokenNotFound = errors.New("token record not found")
 
-// tokenStore maps a token id to the identity it stands for, in the database so any instance can resolve
-// any token, behind a read-through cache bounded by the token's own expiry. Tokens are not revocable.
+// tokenStore maps a token id to the TokenRecord it stands for in the database so any instance can resolve
+// any token, behind a read-through cache bounded by the token's own expiry.
 type tokenStore struct {
-	pool *pgxpool.Pool
-	// cache is held by value: SyncMap is usable at its zero value, so a tokenStore needs no
-	// constructor to be ready.
+	pool  *pgxpool.Pool
 	cache utils.SyncMap[string, *servicepb.TokenRecord]
-}
-
-// warmCache loads all unexpired token records into the cache, so recently issued tokens resolve
-// without a database round-trip after a restart or failover. It returns the number of records loaded.
-func (s *tokenStore) warmCache(ctx context.Context, now time.Time) (int, error) {
-	rows, err := s.pool.Query(ctx, sqlSelectUnexpired, now.Unix())
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to read token records for cache warm-up")
-	}
-	defer rows.Close()
-
-	count := 0
-	for rows.Next() {
-		var data []byte
-		if err = rows.Scan(&data); err != nil {
-			return count, errors.Wrap(err, "failed to scan token record")
-		}
-		rec := &servicepb.TokenRecord{}
-		if err = proto.Unmarshal(data, rec); err != nil {
-			return count, errors.Wrap(err, "failed to unmarshal token record")
-		}
-		s.cache.Store(rec.GetJti(), rec)
-		count++
-	}
-	return count, errors.Wrap(rows.Err(), "failed while reading token records")
 }
 
 // put persists a token record and caches it.
@@ -109,6 +82,31 @@ func (s *tokenStore) sweep(ctx context.Context, now time.Time) (int64, error) {
 		}
 	}
 	return tag.RowsAffected(), nil
+}
+
+// warmCache loads all unexpired token records into the cache, so recently issued tokens resolve
+// without a database round-trip after a restart or failover. It returns the number of records loaded.
+func (s *tokenStore) warmCache(ctx context.Context, now time.Time) (int, error) {
+	rows, err := s.pool.Query(ctx, sqlSelectUnexpired, now.Unix())
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to read token records for cache warm-up")
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var data []byte
+		if err = rows.Scan(&data); err != nil {
+			return count, errors.Wrap(err, "failed to scan token record")
+		}
+		rec := &servicepb.TokenRecord{}
+		if err = proto.Unmarshal(data, rec); err != nil {
+			return count, errors.Wrap(err, "failed to unmarshal token record")
+		}
+		s.cache.Store(rec.GetJti(), rec)
+		count++
+	}
+	return count, errors.Wrap(rows.Err(), "failed while reading token records")
 }
 
 // size reports the number of cached token records, for the token-store-size metric.

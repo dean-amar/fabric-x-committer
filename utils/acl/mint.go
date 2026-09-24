@@ -13,6 +13,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/protoutil/identity"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -100,4 +101,10 @@ func BuildAuthEnvelope(params *AuthEnvelopeParams) (*common.Envelope, error) {
 		return nil, errors.Wrap(err, "failed to sign authentication envelope")
 	}
 	return &common.Envelope{Payload: payloadBytes, Signature: signature}, nil
+}
+
+// ContextWithToken returns ctx carrying the token in the metadata key the enforcer reads, which is how a
+// caller authorizes one RPC without binding a token to a whole connection.
+func ContextWithToken(ctx context.Context, token string) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, TokenMetadataKey, token)
 }

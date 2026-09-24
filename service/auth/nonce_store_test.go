@@ -29,7 +29,7 @@ func TestNonceIsSingleUse(t *testing.T) {
 	require.Equal(t, now.Add(time.Minute).Unix(), expiresAt.Unix())
 
 	require.NoError(t, store.consume(t.Context(), nonce, now))
-	require.ErrorIs(t, store.consume(t.Context(), nonce, now), ErrNonceNotFound)
+	require.ErrorIs(t, store.consume(t.Context(), nonce, now), errNonceNotFound)
 }
 
 func TestNonceConsumeRejects(t *testing.T) {
@@ -52,7 +52,7 @@ func TestNonceConsumeRejects(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			require.ErrorIs(t, store.consume(t.Context(), tc.nonce, tc.consumeAt), ErrNonceNotFound)
+			require.ErrorIs(t, store.consume(t.Context(), tc.nonce, tc.consumeAt), errNonceNotFound)
 		})
 	}
 }
@@ -74,7 +74,7 @@ func TestNonceSweepRemovesExpired(t *testing.T) {
 	require.Equal(t, int64(1), deleted)
 
 	// The lapsed one is gone; the still-valid one is untouched and remains redeemable.
-	require.ErrorIs(t, store.consume(t.Context(), stale, now), ErrNonceNotFound)
+	require.ErrorIs(t, store.consume(t.Context(), stale, now), errNonceNotFound)
 	require.NoError(t, store.consume(t.Context(), fresh, now))
 }
 

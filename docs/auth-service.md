@@ -25,9 +25,9 @@ The service is composed of focused collaborators, each with one responsibility:
 - **`tokenStore`** (`token_store.go`) — the token-to-identity binding store: it maps a token id (`jti`) to
   the client's resolved MSP identity (plus its certificate binding, scope, and expiry), persisted in
   the dedicated `auth_tokens` table and fronted by an in-memory read-through cache.
-- **`authenticator`** (`authenticate.go`) — verifies a signed envelope and issues a token, writing
+- **`authenticator`** (`authenticator.go`) — verifies a signed envelope and issues a token, writing
   the token-to-identity binding to the store.
-- **`authorizer`** (`authorize.go`) — answers authorization decisions.
+- **`authorizer`** (`authorizer.go`) — answers authorization decisions.
 - **`Service`** (`auth_service.go`) — composes the above and exposes the gRPC handlers.
 
 ## RPCs

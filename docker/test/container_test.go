@@ -25,13 +25,14 @@ import (
 	"github.com/moby/moby/api/types/network"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
+
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -46,10 +47,8 @@ var (
 	mockOrdererPort        = network.MustParsePort("7050/tcp")
 	queryServicePort       = network.MustParsePort("7001/tcp")
 	coordinatorServicePort = network.MustParsePort("9001/tcp")
-	databasePort           = network.MustParsePort("5433/tcp")
 	authServicePort        = network.MustParsePort("10001/tcp")
-
-	dockerChannelID = "mychannel"
+	databasePort           = network.MustParsePort("5433/tcp")
 
 	// The 'db' op initializes the database on its own, so 'init-db' is not passed here.
 	commonTestNodeCMD = []string{runCMD, dbName, committerName, ordererName}
@@ -241,7 +240,7 @@ func TestStartTestNode(t *testing.T) {
 			t, mustGetEndpoint(ctx, t, containerName, authServicePort),
 		)),
 		Signer:    identities[0],
-		ChannelID: dockerChannelID,
+		ChannelID: "mychannel",
 	})
 	require.NoError(t, err)
 
@@ -370,8 +369,6 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_QUERY_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_AUTH_CLIENT_TLS_MODE=" + params.tlsMode,
-				"SC_AUTH_SERVER_TLS_MODE=" + params.tlsMode,
-				"SC_AUTH_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_COMMITTER_TLS_MODE=" + params.tlsMode,
@@ -389,6 +386,8 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_LIMIT_TRANSACTIONS=200_000",
+				"SC_AUTH_SERVER_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_AUTH_CONFIG_REFRESH_INTERVAL=500ms",
 				"SC_AUTH_TOKEN_TTL=1h",
 				"SC_AUTH_NONCE_TTL=1h",

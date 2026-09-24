@@ -16,14 +16,13 @@ import (
 )
 
 const (
-	// nonceLength is the size of an issued nonce. 32 bytes of CSPRNG output makes collisions and
-	// guessing infeasible, matching the entropy of the token ids the service already mints.
+	// nonceLength is the size of an issued nonce.
 	nonceLength = 32
 )
 
-// ErrNonceNotFound is returned when a nonce is unknown, already consumed, or expired. The three are
+// errNonceNotFound is returned when a nonce is unknown, already consumed, or expired. The three are
 // deliberately indistinguishable to the caller, so a client cannot probe which nonces exist.
-var ErrNonceNotFound = errors.New("authentication nonce is unknown, already used, or expired")
+var errNonceNotFound = errors.New("authentication nonce is unknown, already used, or expired")
 
 // nonceStore issues and redeems the single-use nonces that make an envelope non-replayable. They live in
 // the shared database, not memory: a client behind a load balancer may hit two different instances.
@@ -32,7 +31,7 @@ type nonceStore struct {
 	ttl  time.Duration
 }
 
-// issue generates a nonce, records it with its expiry, and returns it with the instant it lapses.
+// issue generates a nonce and records it with its expiry.
 func (s *nonceStore) issue(ctx context.Context, now time.Time) ([]byte, time.Time, error) {
 	nonce := make([]byte, nonceLength)
 	if _, err := rand.Read(nonce); err != nil {
@@ -46,11 +45,10 @@ func (s *nonceStore) issue(ctx context.Context, now time.Time) ([]byte, time.Tim
 	return nonce, expiresAt, nil
 }
 
-// consume redeems a nonce, returning ErrNonceNotFound unless it was present and unexpired. The delete is
-// the single-use gate: one row for a valid nonce, none on a second attempt, even across instances.
+// consume redeems a nonce, returning errNonceNotFound unless it was present and unexpired.
 func (s *nonceStore) consume(ctx context.Context, nonce []byte, now time.Time) error {
 	if len(nonce) == 0 {
-		return errors.Wrap(ErrNonceNotFound, "envelope carries no nonce")
+		return errors.Wrap(errNonceNotFound, "envelope carries no nonce")
 	}
 
 	tag, err := s.pool.Exec(ctx, sqlConsumeNonce, nonce, now.Unix())
@@ -58,7 +56,7 @@ func (s *nonceStore) consume(ctx context.Context, nonce []byte, now time.Time) e
 		return errors.Wrap(err, "failed to consume nonce")
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNonceNotFound
+		return errNonceNotFound
 	}
 	return nil
 }

@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
+
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/cmd/config"
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
@@ -30,7 +32,6 @@ import (
 	"github.com/hyperledger/fabric-x-committer/mock"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
@@ -323,9 +324,9 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		c.VcService[i], s.Services.VCService[i] = newProcess(t, params, p)
 	}
 
+	c.AuthService, s.Services.Auth = newProcess(t, params, cmdAuth)
 	c.Coordinator, s.Services.Coordinator = newProcess(t, params, cmdCoordinator)
 	c.QueryService, s.Services.Query = newProcess(t, params, cmdQuery)
-	c.AuthService, s.Services.Auth = newProcess(t, params, cmdAuth)
 	c.Sidecar, s.Services.Sidecar = newProcess(t, params, cmdSidecar)
 
 	// The load generators are pre-allocated here like every other service, but their config files are

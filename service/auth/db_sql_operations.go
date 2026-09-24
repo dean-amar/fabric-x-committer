@@ -9,8 +9,6 @@ package auth
 import "github.com/hyperledger/fabric-x-committer/utils/statedb"
 
 const (
-	// Tables are created by `init-db` with the rest of the system schema,
-	// so we reference them via statedb's constants rather than string literals.
 	tokens = statedb.AuthTokensTableName
 	nonces = statedb.AuthNoncesTableName
 

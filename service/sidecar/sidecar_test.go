@@ -65,8 +65,7 @@ type sidecarTestConfig struct {
 	InitialNumIDs uint32
 	ServerTLS     connection.TLSConfig
 	ClientTLS     connection.TLSConfig
-	// UseACL runs a real AuthService and points the sidecar at it, so enforcement is exercised end to end.
-	UseACL bool
+	UseACL        bool
 }
 
 const (
@@ -125,7 +124,10 @@ func newSidecarTestEnvWithTLS(
 	var authEnv *auth.TestEnv
 	if conf.UseACL {
 		authEnv = auth.NewAuthTestEnv(t, &auth.ACLTestEnvParams{TokenTTL: aclTestTokenTTL})
-		sidecarConf.Auth = authEnv.ACLClient(aclTestReAuthorizeInterval)
+		sidecarConf.Auth = &acl.Client{
+			Config:                    authEnv.Config,
+			StreamReAuthorizeInterval: aclTestReAuthorizeInterval,
+		}
 	}
 
 	sidecar, err := New(sidecarConf)

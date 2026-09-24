@@ -37,8 +37,7 @@ type (
 		privateKey *ecdsa.PrivateKey
 	}
 
-	// tokenClaims are a minted token's JWT claims. The persisted TokenRecord, not these, is the authority
-	// for authorization; the claims prove issuance and carry the "jti" that keys the record.
+	// tokenClaims are a minted token's JWT claims.
 	tokenClaims struct {
 		jwt.RegisteredClaims
 		Cnf   confirmation
@@ -46,7 +45,7 @@ type (
 		Seq   uint64
 	}
 
-	// confirmation is the JWT "cnf" claim holding the certificate thumbprint per RFC 8705.
+	// confirmation is the JWT "cnf - confirmation" claim holding the certificate thumbprint.
 	confirmation struct {
 		X5tS256 string
 	}
@@ -74,8 +73,7 @@ func newTokenSigner(keyPath string) (*tokenSigner, error) {
 	}, nil
 }
 
-// mint builds and signs a JWT for the given token record. issuedAt is the "iat" claim; the record's
-// ExpiresAt is the "exp" claim.
+// mint builds and signs a JWT for the given token record.
 func (s *tokenSigner) mint(rec *servicepb.TokenRecord, issuedAt time.Time) (string, error) {
 	signedToken, err := jwt.NewWithClaims(jwt.SigningMethodES256, &tokenClaims{
 		Issuer:    tokenIssuer,
@@ -99,8 +97,6 @@ func (s *tokenSigner) mint(rec *servicepb.TokenRecord, issuedAt time.Time) (stri
 // ErrInvalidToken. Every authorization goes through it, a stream's renewals included.
 func (s *tokenSigner) verify(tokenString string) (*tokenClaims, error) {
 	claims := &tokenClaims{}
-	// The token's algorithm is already constrained to ES256 below, so the key function only has to
-	// hand back the verification key.
 	_, err := jwt.ParseWithClaims(
 		tokenString, claims,
 		func(*jwt.Token) (any, error) {
@@ -116,8 +112,6 @@ func (s *tokenSigner) verify(tokenString string) (*tokenClaims, error) {
 	return claims, nil
 }
 
-// loadECPrivateKey reads a PEM-encoded EC (P-256) private key, accepting both the SEC1
-// ("EC PRIVATE KEY") and PKCS#8 ("PRIVATE KEY") encodings.
 func loadECPrivateKey(keyPath string) (*ecdsa.PrivateKey, error) {
 	pemBytes, err := os.ReadFile(keyPath)
 	if err != nil {

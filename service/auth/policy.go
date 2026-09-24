@@ -56,8 +56,6 @@ func evaluateResourcePolicy(
 	if err != nil {
 		return errors.Wrap(err, "identity is no longer valid under the current configuration")
 	}
-	// Deserializing checks neither chain nor CRL, and a signature policy validates the identity only for
-	// MEMBER, CLIENT and PEER - so under an ADMIN or OU rule a revoked certificate would still authorize.
 	if err = identity.Validate(); err != nil {
 		return errors.Wrap(err, "identity is not valid under the current configuration")
 	}

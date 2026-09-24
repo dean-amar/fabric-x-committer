@@ -161,10 +161,10 @@ auth:
     endpoint: auth:10001
     tls: *tlsConfig
   # How often an open stream re-authorizes against the latest policy. Raise it to rely on the token's
-  # lifetime alone. Zero takes the default (1m).
+  # lifetime alone.
   stream-re-authorize-interval: 1m
   # How long a stream waits before retrying a re-authorization that failed transiently, so a brief auth
-  # service outage costs one attempt per interval rather than one per message. Zero takes the default (5s).
+  # service outage costs one attempt per interval rather than one per message.
   transient-retry-interval: 5s
 
 # Logging configuration

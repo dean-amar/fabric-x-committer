@@ -28,8 +28,8 @@ import (
 
 var logger = flogging.MustGetLogger("auth")
 
-// Service is the authentication and authorization gRPC service. It holds no per-connection state, so any
-// instance can serve any client's request.
+// Service is the authentication and authorization service.
+// It holds no per-connection state, so any instance can serve any client's request.
 type Service struct {
 	servicepb.UnimplementedAuthServiceServer
 
@@ -47,8 +47,7 @@ type Service struct {
 	authorizer          *authorizer
 }
 
-// NewAuthService creates a new AuthService from a configuration. It performs only in-memory wiring;
-// the database pool, signing key, and background loops are opened in Run.
+// NewAuthService creates a new AuthService from a configuration.
 func NewAuthService(config *Config) *Service {
 	// A zero rate means "no throttling", so the limiter stays nil: rate.NewLimiter(0, 0) permits nothing,
 	// locking out the only two RPCs reachable before a caller holds a token.
@@ -116,9 +115,6 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	promutil.SetGauge(s.metrics.tokenStoreSize, s.tokens.size())
 
-	s.ready.SignalReady()
-	defer s.ready.Reset()
-
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return s.configBlockProvider.run(gCtx, s.config.ConfigRefreshInterval)
@@ -126,36 +122,11 @@ func (s *Service) Run(ctx context.Context) error {
 	g.Go(func() error {
 		return s.sweepExpiredLoop(gCtx)
 	})
+
+	s.ready.SignalReady()
+	defer s.ready.Reset()
+
 	return g.Wait()
-}
-
-// sweepExpiredLoop periodically removes expired token records and updates the store-size metric.
-func (s *Service) sweepExpiredLoop(ctx context.Context) error {
-	ticker := time.NewTicker(s.config.TokenCleanupInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			now := time.Now()
-
-			if deletedTokens, err := s.tokens.sweep(ctx, now); err != nil {
-				logger.Errorf("Token sweep failed: %v", err)
-			} else if deletedTokens > 0 {
-				logger.Infof("Swept %d expired token records", deletedTokens)
-			}
-
-			promutil.SetGauge(s.metrics.tokenStoreSize, s.tokens.size())
-
-			if deletedNonces, err := s.nonces.sweep(ctx, now); err != nil {
-				logger.Errorf("Nonce sweep failed: %v", err)
-			} else if deletedNonces > 0 {
-				logger.Infof("Swept %d expired nonces", deletedNonces)
-			}
-		}
-	}
 }
 
 // WaitForReady waits until the service is ready to answer requests, or returns false if the context
@@ -215,6 +186,35 @@ func (s *Service) Authorize(
 		return nil, grpcerror.WrapUnavailable(err)
 	}
 	return s.authorizer.authorize(ctx, req, bundle)
+}
+
+// sweepExpiredLoop periodically removes expired token records and updates the store-size metric.
+func (s *Service) sweepExpiredLoop(ctx context.Context) error {
+	ticker := time.NewTicker(s.config.TokenAndNoncesCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			now := time.Now()
+
+			if deletedTokens, err := s.tokens.sweep(ctx, now); err != nil {
+				logger.Errorf("Token sweep failed: %v", err)
+			} else if deletedTokens > 0 {
+				logger.Infof("Swept %d expired token records", deletedTokens)
+			}
+
+			promutil.SetGauge(s.metrics.tokenStoreSize, s.tokens.size())
+
+			if deletedNonces, err := s.nonces.sweep(ctx, now); err != nil {
+				logger.Errorf("Nonce sweep failed: %v", err)
+			} else if deletedNonces > 0 {
+				logger.Infof("Swept %d expired nonces", deletedNonces)
+			}
+		}
+	}
 }
 
 func (s *Service) allowChallenge() error {

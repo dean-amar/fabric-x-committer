@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -44,8 +45,7 @@ var (
 )
 
 type (
-	// authenticator verifies signed envelopes and issues cert-bound tokens. No constructor: its single
-	// caller supplies every field, so a keyed literal says the same without a second type to maintain.
+	// authenticator verifies signed envelopes and issues cert-bound tokens.
 	authenticator struct {
 		signer                  *tokenSigner
 		tokens                  *tokenStore
@@ -117,8 +117,7 @@ func (a *authenticator) authenticate(
 		ExpiresAt:      now.Add(a.tokenTTL).Unix(),
 	}
 
-	// Mint before persisting: if persistence fails the client never receives the token, so no orphan
-	// binding is left behind.
+	// Mint before persisting: if persistence fails the client never receives the token.
 	token, err := a.signer.mint(rec, now)
 	if err != nil {
 		return nil, grpcerror.WrapInternalError(errors.Wrapf(err, "failed to mint token"))
@@ -127,7 +126,7 @@ func (a *authenticator) authenticate(
 		return nil, grpcerror.WrapInternalError(err)
 	}
 
-	logger.Infof("Issued token jti=%s mspID=%s scope=%v seq=%d",
+	logger.Debugf("Issued token with id=%s, mspID=%s, scoped to=%v, with issued seq=%d",
 		jti, rec.GetMspId(), rec.GetScope(), rec.GetIssuedSequence())
 
 	return &servicepb.AuthenticateResponse{
@@ -142,10 +141,7 @@ func (a *authenticator) verifyEnvelope(
 	ctx context.Context, parsed *parsedEnvelope, bundle *channelconfig.Bundle, now time.Time,
 ) (*verifiedIdentity, error) {
 	chdr, signedData := parsed.chdr, parsed.signedData
-	var err error
 
-	// The nonce stops replay; these checks are domain separation, and only the empty payload separates:
-	// a submitter that signs a caller's tx with a caller-chosen nonce always fills Data, so cannot mint.
 	if chdr.GetType() != authEnvelopeType {
 		return nil, errors.Wrapf(ErrEnvelopeScope, "unexpected header type %d", chdr.GetType())
 	}
@@ -157,7 +153,7 @@ func (a *authenticator) verifyEnvelope(
 			"authentication envelope must carry an empty payload, got %d bytes", len(parsed.payloadData))
 	}
 
-	if err = validateTimestamp(chdr.GetTimestamp(), a.envelopeFreshnessWindow, now); err != nil {
+	if err := validateTimestamp(chdr.GetTimestamp(), a.envelopeFreshnessWindow, now); err != nil {
 		return nil, err
 	}
 
@@ -228,12 +224,8 @@ func verifyCertBinding(ctx context.Context, claimedHash []byte) ([]byte, error) 
 	return actualHash, nil
 }
 
-// validateTimestamp rejects a missing, unrepresentable or out-of-window timestamp. It compares signed
-// bounds directly, so a far-future timestamp cannot overflow the arithmetic and be accepted forever.
+// validateTimestamp rejects a missing, unrepresentable or out-of-window timestamp.
 func validateTimestamp(ts *timestamppb.Timestamp, window time.Duration, now time.Time) error {
-	if ts == nil {
-		return errors.Wrap(ErrStaleEnvelope, "missing timestamp")
-	}
 	if err := ts.CheckValid(); err != nil {
 		return errors.Wrapf(ErrStaleEnvelope, "invalid timestamp: %v", err)
 	}
@@ -253,4 +245,31 @@ func newTokenID() (string, error) {
 		return "", errors.Wrap(err, "failed to generate token id")
 	}
 	return id.String(), nil
+}
+
+// normalizeScope trims, de-duplicates and order-preserves a requested scope of gRPC full-method names;
+// empty normalizes to nil (unscoped). A scope only ever narrows: it is checked as well as the policy.
+func normalizeScope(requested []string) []string {
+	if len(requested) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]string, len(requested))
+	normalized := make([]string, 0, len(requested))
+	for _, entry := range requested {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, ok := seen[entry]; ok {
+			continue
+		}
+		seen[entry] = entry
+		normalized = append(normalized, entry)
+	}
+
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }

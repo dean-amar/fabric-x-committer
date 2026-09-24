@@ -43,8 +43,6 @@ func newAuthServiceMetrics() *perfMetrics {
 			Name:      "config_sequence",
 			Help:      "The channel-configuration sequence the current evaluation bundle was built from.",
 		}),
-		// A refresh failure is logged and retried, not fatal, so this timestamp is the only way to tell
-		// "stable" from "unreachable for hours". Alert on it falling behind several refresh intervals.
 		configLastRefresh: p.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subsystemGRPC,

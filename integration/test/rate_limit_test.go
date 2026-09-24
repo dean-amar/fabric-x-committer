@@ -20,8 +20,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
+
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/test"

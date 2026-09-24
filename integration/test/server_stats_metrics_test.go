@@ -17,8 +17,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
+
+	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 

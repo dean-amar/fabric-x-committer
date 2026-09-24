@@ -26,7 +26,7 @@ import (
 var ErrConfigUnavailable = errors.New("channel configuration not available")
 
 // configProvider exposes the latest committed channel configuration as a bundle; it never mutates it. The
-// bundle is swapped atomically, and the version and warm-up flag belong to the single refresh goroutine.
+// bundle is swapped atomically.
 type configProvider struct {
 	pool    *pgxpool.Pool
 	metrics *perfMetrics
@@ -37,7 +37,7 @@ type configProvider struct {
 }
 
 // run reads the configuration now, then every interval. A failed refresh is logged, not returned, so a
-// transient database error leaves the service serving Unavailable rather than stopping it.
+// transient database error leaves the service serving rather than stopping it.
 func (p *configProvider) run(ctx context.Context, interval time.Duration) error {
 	if err := p.refresh(ctx); err != nil {
 		logger.Warnf("Initial channel-configuration load failed (will retry): %v", err)
@@ -57,15 +57,13 @@ func (p *configProvider) run(ctx context.Context, interval time.Duration) error 
 	}
 }
 
-// refresh installs a new bundle only when the committed configuration's version has advanced. The guard is
-// a strict "not newer" test, so a stale read can never roll the ACL policy set backward.
+// refresh installs a new bundle only when the committed configuration's version has advanced.
 func (p *configProvider) refresh(ctx context.Context) error {
 	configTX, err := statedb.ReadConfigTransaction(ctx, p.pool)
 	if err != nil {
 		return err
 	}
-	// Recorded on a successful read, not only on a version change: staleness means "we have not been
-	// able to check", so confirming the configuration is unchanged is itself a successful refresh.
+
 	promutil.SetGauge(p.metrics.configLastRefresh, int(time.Now().Unix()))
 	if len(configTX.GetEnvelope()) == 0 {
 		return nil // No configuration committed yet.

@@ -17,9 +17,9 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// testVerifier is an authenticator with only the freshness window set - enough to exercise
+// newAuthenticator is an authenticator with only the freshness window set - enough to exercise
 // verifyEnvelope without a signer or store.
-func testVerifier() *authenticator {
+func newAuthenticator() *authenticator {
 	return &authenticator{envelopeFreshnessWindow: time.Minute}
 }
 
@@ -29,7 +29,7 @@ func TestVerifyEnvelopeSuccess(t *testing.T) {
 
 	t.Run("no client certificate yields an unbound identity", func(t *testing.T) {
 		t.Parallel()
-		id, err := testVerifier().verifyEnvelope(
+		id, err := newAuthenticator().verifyEnvelope(
 			context.Background(), mustParse(t, env.signedEnvelope(t, nil)), env.bundle, time.Now(),
 		)
 		require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestVerifyEnvelopeSuccess(t *testing.T) {
 	t.Run("client certificate binds the identity", func(t *testing.T) {
 		t.Parallel()
 		ctx, certHash := peerContextWithCert(t)
-		id, err := testVerifier().verifyEnvelope(
+		id, err := newAuthenticator().verifyEnvelope(
 			ctx, mustParse(t, env.signedEnvelope(t, certHash)), env.bundle, time.Now(),
 		)
 		require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestVerifyEnvelopeRejects(t *testing.T) {
 			if tc.certBound {
 				ctx, _ = peerContextWithCert(t)
 			}
-			_, err := testVerifier().verifyEnvelope(ctx, mustParse(t, tc.envelope), env.bundle, tc.now)
+			_, err := newAuthenticator().verifyEnvelope(ctx, mustParse(t, tc.envelope), env.bundle, tc.now)
 			require.ErrorIs(t, err, tc.wantErr)
 		})
 	}
@@ -121,7 +121,7 @@ func TestVerifyEnvelopeRejectsForeignIdentity(t *testing.T) {
 	env := newAuthTestEnv(t)
 	foreign := newAuthTestEnv(t)
 
-	_, err := testVerifier().verifyEnvelope(
+	_, err := newAuthenticator().verifyEnvelope(
 		context.Background(), mustParse(t, foreign.signedEnvelope(t, nil)), env.bundle, time.Now(),
 	)
 	require.ErrorContains(t, err, "failed to deserialize identity")
