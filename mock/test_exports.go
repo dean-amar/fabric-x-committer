@@ -127,7 +127,6 @@ type OrdererTestEnv struct {
 	AllServerConfig   []*serve.Config
 	AllServersStop    []context.CancelFunc
 	AllEndpoints      []*commontypes.OrdererEndpoint
-	ConfigBlock       *common.Block
 }
 
 // OrdererTestParameters describes the parameters for OrdererTestEnv.
@@ -191,7 +190,7 @@ func NewOrdererTestEnv(t *testing.T, p *OrdererTestParameters) *OrdererTestEnv {
 		t.Logf("ORDERER ENDPOINT [%02d] %s", i, e)
 	}
 
-	configBlock, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(p.ArtifactsPath, &testcrypto.ConfigBlock{
+	_, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(p.ArtifactsPath, &testcrypto.ConfigBlock{
 		ChannelID:             p.ChanID,
 		OrdererEndpoints:      filterEndpoints(allEndpoints, p.InitialNumIDs),
 		PeerOrganizationCount: p.PeerOrganizationCount,
@@ -219,7 +218,6 @@ func NewOrdererTestEnv(t *testing.T, p *OrdererTestParameters) *OrdererTestEnv {
 		OrdererConnConfig:     GetOrdererConnConfig(p.ArtifactsPath, p.ClientTLSConfig),
 		PartyStates:           partyStates,
 		Orderer:               ordererService,
-		ConfigBlock:           configBlock,
 	}
 	e.StartServers(t)
 	return e

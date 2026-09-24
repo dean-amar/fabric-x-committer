@@ -26,7 +26,7 @@ type Config struct {
 	// from the state database to refresh its evaluation bundle.
 	ConfigRefreshInterval time.Duration `mapstructure:"config-refresh-interval" default:"1m" validate:"gt=0"`
 	// TokenAndNoncesCleanupInterval is how often expired token and nonce records are swept from the store.
-	TokenAndNoncesCleanupInterval time.Duration `mapstructure:"token-and-nonces-cleanup-interval" default:"1m" validate:"gt=0"` //nolint:lll
+	TokenAndNoncesCleanupInterval time.Duration `mapstructure:"token-and-nonces-cleanup-interval" default:"1m" validate:"gt=0"` //nolint:lll,revive // a struct tag cannot be wrapped.
 	// ChallengeRequestsPerSecond caps IssueNonce and Authenticate together: the only RPCs reachable without
 	// a token. Limited apart from Authorize, whose rate tracks the resource servers' whole load.
 	ChallengeRequestsPerSecond int `mapstructure:"challenge-requests-per-second" default:"200" validate:"gte=0"`

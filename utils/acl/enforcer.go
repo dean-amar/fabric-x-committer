@@ -32,9 +32,6 @@ const (
 	// healthServicePrefix is exempt from enforcement: probes carry no token, and liveness, readiness and
 	// load-balancer checks must keep working once ACL is on.
 	healthServicePrefix = "/grpc.health.v1.Health/"
-
-	defaultTransientRetryInterval    = 5 * time.Second
-	defaultStreamReAuthorizeInterval = 30 * time.Second
 )
 
 // ErrMissingToken is returned when a request carries no authorization token.
@@ -58,13 +55,6 @@ func NewEnforcer(config *Client) (*Enforcer, error) {
 		return nil, errors.Wrap(err, "failed to connect to the auth service")
 	}
 	logger.Infof("ACL enforcement enabled via auth service at %s", config.Config.Endpoint.Address())
-
-	if config.StreamReAuthorizeInterval < 0 {
-		config.StreamReAuthorizeInterval = defaultStreamReAuthorizeInterval
-	}
-	if config.TransientRetryInterval < 0 {
-		config.TransientRetryInterval = defaultTransientRetryInterval
-	}
 
 	return &Enforcer{
 		Client:                 servicepb.NewAuthServiceClient(conn),

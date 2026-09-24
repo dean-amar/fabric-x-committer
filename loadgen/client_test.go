@@ -224,7 +224,6 @@ func TestLoadGenForSidecar(t *testing.T) {
 				ClientTLS:     e.ClientTLSConfig,
 				ServerTLS:     e.ServerTLSConfig,
 				ArtifactsPath: e.ArtifactsPath,
-				ChannelID:     lgEnv.clientConf.LoadProfile.Policy.ChannelID,
 			})
 
 			// Start server under test

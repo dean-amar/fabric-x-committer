@@ -156,7 +156,7 @@ func New(c *Config) (*Service, error) {
 
 	// 3. Dial the auth service, if ACL is configured.
 	// Done here rather than in Run so the enforcer exists before serve builds the gRPC server.
-	if c.Auth != nil {
+	if c.Auth != nil && c.Auth.Config != nil {
 		enforcer, err := acl.NewEnforcer(c.Auth)
 		if err != nil {
 			return nil, err

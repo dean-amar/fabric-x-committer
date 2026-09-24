@@ -48,15 +48,12 @@ type (
 		TLSCertHash   []byte
 	}
 
-	// ACLTestEnvParams describes the AuthService NewAuthTestEnv should start. ArtifactsPath may be shared
-	// with another env that already generated crypto and a config block there; the channel then comes from
-	// that block rather than from ChannelID.
+	// ACLTestEnvParams describes the AuthService NewAuthTestEnv should start.
 	ACLTestEnvParams struct {
 		ServerTLS     connection.TLSConfig
 		ClientTLS     connection.TLSConfig
 		TokenTTL      time.Duration
 		ArtifactsPath string
-		ChannelID     string
 	}
 )
 
@@ -72,21 +69,20 @@ func NewAuthTestEnv(t *testing.T, params *ACLTestEnvParams) *TestEnv {
 	if params.ArtifactsPath == "" {
 		params.ArtifactsPath = t.TempDir()
 	}
-	env := &TestEnv{ArtifactsPath: params.ArtifactsPath}
+	env := &TestEnv{
+		ArtifactsPath: params.ArtifactsPath,
+	}
 
-	// The artifacts path may already belong to another env - an orderer test env, say - whose config block
-	// carries state this one cannot reconstruct, notably the orderer endpoints its sidecar dials. Extending
-	// that block drops them silently, so an existing block is read and never rewritten.
 	blockPath := path.Join(env.ArtifactsPath, cryptogen.ConfigBlockFileName)
 	configBlock, readErr := protoutil.ReadBlockFromFile(blockPath)
 	if readErr != nil {
-		if params.ChannelID == "" {
-			params.ChannelID = defaultTestChannelID
-		}
 		var createErr error
 		configBlock, createErr = testcrypto.CreateOrExtendConfigBlockWithCrypto(
 			env.ArtifactsPath,
-			&testcrypto.ConfigBlock{ChannelID: params.ChannelID, PeerOrganizationCount: 1},
+			&testcrypto.ConfigBlock{
+				ChannelID:             defaultTestChannelID,
+				PeerOrganizationCount: 1,
+			},
 		)
 		require.NoError(t, createErr)
 	}
@@ -95,10 +91,6 @@ func NewAuthTestEnv(t *testing.T, params *ACLTestEnvParams) *TestEnv {
 	// configuration while it signs envelopes for another.
 	channelID, err := protoutil.GetChannelIDFromBlock(configBlock)
 	require.NoError(t, err)
-	if params.ChannelID != "" {
-		require.Equal(t, channelID, params.ChannelID,
-			"ChannelID does not match the channel of the config block already at ArtifactsPath")
-	}
 	env.ChannelID = channelID
 
 	identities, err := testcrypto.GetPeersIdentities(env.ArtifactsPath)
@@ -134,7 +126,9 @@ func NewAuthTestEnv(t *testing.T, params *ACLTestEnvParams) *TestEnv {
 	conn, err := connection.NewSingleConnection(env.Config)
 	require.NoError(t, err)
 	t.Cleanup(func() { connection.CloseConnectionsLog(conn) })
-	env.Client = createAuthClientWithTLS(t, &env.ServerConfig.GRPC.Endpoint, params.ClientTLS)
+	env.Client = test.CreateClientWithTLS(
+		t, &env.ServerConfig.GRPC.Endpoint, params.ClientTLS, servicepb.NewAuthServiceClient,
+	)
 	env.TLSCertHash = clientCertHash(t, params.ClientTLS)
 
 	env.WaitForEnforcement(t)
@@ -217,15 +211,6 @@ func seedConfigTransaction(t *testing.T, dbConf *statedb.Config, block *common.B
 			"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, version = EXCLUDED.version",
 		[]byte(committerpb.ConfigKey), envelopeBytes)
 	require.NoError(t, err)
-}
-
-func createAuthClientWithTLS(
-	t *testing.T,
-	ep *connection.Endpoint,
-	tlsCfg connection.TLSConfig,
-) servicepb.AuthServiceClient {
-	t.Helper()
-	return test.CreateClientWithTLS(t, ep, tlsCfg, servicepb.NewAuthServiceClient)
 }
 
 // clientCertHash returns the SHA-256 of the client certificate tlsCfg will present, or nil when the mode is
