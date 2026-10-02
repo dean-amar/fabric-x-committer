@@ -18,6 +18,8 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -264,6 +266,9 @@ func wrapNotifierError(err error) error {
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return grpcerror.WrapCancelled(err)
+	}
+	if status.Code(err) == codes.Unauthenticated {
+		return err
 	}
 	return grpcerror.WrapInternalError(err)
 }

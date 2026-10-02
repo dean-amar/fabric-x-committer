@@ -40,7 +40,7 @@ The service is composed of focused collaborators, each with one responsibility:
   token's expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached
   decision lapses.
 
-Every non-authorized outcome is a gRPC status error:
+Every non-authorized outcome is a gRPC status error, which the enforcer returns with its exact code:
 `Unauthenticated` (invalid/expired/unknown token or certificate mismatch), `PermissionDenied`
 (scope or policy denial), or `Unavailable` (before the configuration is loaded, or AuthService
 unreachable).
@@ -90,10 +90,19 @@ certificate-bound, and it degrades to a plain bearer token that anyone who captu
 Deploy the `AuthService` and every ACL-protected resource server with `mode: mtls` end to end; the
 non-mTLS path exists only for local development and tests and must not be used in production.
 
-## Client helpers (`utils/acl`)
+## Client and interceptors (`utils/acl`)
 
-`IssueToken` fetches a nonce, signs it into an envelope (`BuildAuthEnvelope`) and exchanges it for a token;
-`TLSCertHash` gives the certificate hash a mutual-TLS client binds its token to.
+- **Server side — `Enforcer`**: every gRPC server built by `utils/serve` carries an `ACLProvider` whose
+  interceptors pass calls through until a resource server registers its enforcer in `RegisterService`
+  (`serve.RegisterACLEnforcer`). Registration happens before the server serves,
+  so enforcement starts with the first RPC. The interceptors forward the caller's token (and TLS
+  certificate hash) to `Authorize`; a stream binds the *token* to its session and renews the decision from
+  it. Health checks (`grpc.health.v1.Health`) are exempt.
+- **Client side**: `IssueToken` fetches a nonce, signs it into an envelope (`BuildAuthEnvelope`) and
+  exchanges it for a token; `ContextWithToken` attaches that token to one RPC or stream. A long-running
+  client dials with `Credentials` (`grpc.WithPerRPCCredentials`) instead, which attaches a token to every
+  RPC and renews it at half its lifetime, so a reconnecting stream always presents a live token. The load
+  generator's sidecar delivery works this way.
 
 ## Configuration
 
@@ -101,6 +110,10 @@ non-mTLS path exists only for local development and tests and must not be used i
   `nonce-ttl`, `config-refresh-interval`, `sweep-interval`, `challenge-rate-limit`, and the state
   `database`, whose `retry` profile governs every query. Use `mtls` for the server TLS mode so tokens are
   certificate-bound.
+- **Resource servers** (Query, Sidecar): an optional `auth:` section (`utils/acl.Config`) with every
+  `AuthService` instance under `endpoints` (calls are balanced across them) and the `tls` to reach them,
+  plus `stream-re-authorize-interval` (default 1m) and `authorize-timeout` (default 10s). Without the
+  section, the service serves without ACL enforcement.
 
 ## Policy resolution
 
@@ -111,6 +124,10 @@ policy, the request is denied.
 
 ## Operational notes
 
+- **Fail-closed.** If a resource server cannot reach the `AuthService`, a unary call, a stream
+  establishment and an open stream's re-authorization all fail, and the failed re-authorization ends the
+  stream. Run multiple `AuthService` instances behind a load balancer; all state is in the shared
+  database, so any instance can serve any request.
 - **Replay resistance.** The single-use nonce is the primary guard (see *Replay protection* above).
   Behind it: an authentication envelope is scoped to this channel and must carry an empty payload, so an
   ordinary transaction - which shares the envelope's header type and channel but always carries a
@@ -118,6 +135,11 @@ policy, the request is denied.
   because any channel reader can observe committed transactions. The freshness window bounds how long an
   unredeemed envelope stays presentable, and under mutual TLS the certificate binding makes a captured
   envelope useless without the signer's private key.
+- **Streaming re-authorization is token-based.** A stream binds the *token* it was established with. Every
+  send and receive checks the token's expiry locally and, once `stream-re-authorize-interval` has passed,
+  re-`Authorize`s it against the latest configuration, catching a policy change such as the identity's
+  organization being removed. The re-check holds the stream's lock, so no message crosses until the new
+  decision is known. An expired token or a failed re-check ends the stream on its next message.
 - **Rate limiting the front door.** `IssueNonce` and `Authenticate` are reachable without a token, and
   each costs the service real work - a database row for a nonce, a signature verification and MSP
   resolution for an authentication - so they share a token-bucket limit

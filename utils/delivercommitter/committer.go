@@ -12,7 +12,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
+	"google.golang.org/grpc"
 
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/deliver"
 )
@@ -20,15 +22,21 @@ import (
 // Parameters needed for deliver to run.
 type Parameters struct {
 	ClientConfig *connection.ClientConfig
+	// Credentials, when set, authorizes every delivery stream - each reconnect included - against a
+	// server that enforces ACL. Without them, ctx must carry a token of its own.
+	Credentials  *acl.Credentials
 	NextBlockNum uint64
 	OutputBlock  chan<- *common.Block
 }
 
-// ToQueue connects to a committer delivery server and delivers the stream to a queue (go channel).
-// It returns when an error occurs or when the context is done.
-// It will attempt to reconnect on errors.
+// ToQueue streams blocks from a committer delivery server into a channel, reconnecting on error, until ctx
+// is done.
 func ToQueue(ctx context.Context, cdp Parameters) error {
-	conn, err := connection.NewSingleConnection(cdp.ClientConfig)
+	var dialOpts []grpc.DialOption
+	if cdp.Credentials != nil {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(cdp.Credentials))
+	}
+	conn, err := connection.NewSingleConnection(cdp.ClientConfig, dialOpts...)
 	if err != nil {
 		return err
 	}

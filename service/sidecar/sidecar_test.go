@@ -34,11 +34,14 @@ import (
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
 	"github.com/hyperledger/fabric-x-committer/utils/deliverorderer"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
@@ -54,6 +57,7 @@ type sidecarTestEnv struct {
 	sidecar        *Service
 	committedBlock chan *common.Block
 	notifyStream   committerpb.SidecarService_OpenNotificationStreamClient
+	authEnv        *auth.TestEnv
 }
 
 type sidecarTestConfig struct {
@@ -61,11 +65,18 @@ type sidecarTestConfig struct {
 	InitialNumIDs uint32
 	ServerTLS     connection.TLSConfig
 	ClientTLS     connection.TLSConfig
+	UseACL        bool
 }
 
 const (
 	blockSize              = 100
 	expectedProcessingTime = 30 * time.Second
+
+	// aclTestTokenTTL is short so a test can watch an established stream lapse within its own runtime: the
+	// sidecar keeps the token's expiry as a local hard bound and refuses the stream past it.
+	aclTestTokenTTL = 10 * time.Second
+	// aclTestReAuthorizeInterval re-checks often, so a lapse is observed promptly rather than a minute on.
+	aclTestReAuthorizeInterval = 200 * time.Millisecond
 )
 
 func newSidecarTestEnvWithTLS(
@@ -110,10 +121,24 @@ func newSidecarTestEnvWithTLS(
 		ChannelBufferSize:             100,
 		Orderer:                       ordererEnv.OrdererConnConfig,
 	}
+	var authEnv *auth.TestEnv
+	if conf.UseACL {
+		authEnv = auth.NewAuthTestEnv(t, &auth.TestEnvParams{
+			TokenTTL:  aclTestTokenTTL,
+			ServerTLS: conf.ServerTLS,
+			ClientTLS: conf.ClientTLS,
+		})
+		sidecarConf.Auth = &acl.Config{
+			MultiClientConfig:         *authEnv.Config,
+			StreamReAuthorizeInterval: aclTestReAuthorizeInterval,
+		}
+	}
+
 	sidecar, err := New(sidecarConf)
 	require.NoError(t, err)
 
 	return &sidecarTestEnv{
+		authEnv:           authEnv,
 		OrdererTestEnv:    ordererEnv,
 		sidecar:           sidecar,
 		coordinator:       coordinator,
@@ -148,7 +173,9 @@ func (env *sidecarTestEnv) startSidecarClient(
 ) {
 	t.Helper()
 	committerClient := test.NewTLSClientConfig(sidecarClientCreds, &env.serverConfig.GRPC.Endpoint)
-	env.committedBlock = delivercommitter.Start(ctx, t, committerClient, startBlkNum)
+	env.committedBlock = delivercommitter.Start(ctx, t, delivercommitter.Parameters{
+		ClientConfig: committerClient, NextBlockNum: startBlkNum,
+	})
 }
 
 func (env *sidecarTestEnv) startNotificationStream(
@@ -161,6 +188,80 @@ func (env *sidecarTestEnv) startNotificationStream(
 	var err error
 	env.notifyStream, err = committerpb.NewSidecarServiceClient(conn).OpenNotificationStream(ctx)
 	require.NoError(t, err)
+}
+
+// TestSidecarWithACL runs an ordinary block query against an ACL-enforcing sidecar under mutual TLS: with a
+// token it reaches the handler, without one the interceptor refuses it, and over another client's
+// certificate the token is refused too, since it is bound to the certificate it was issued for.
+func TestSidecarWithACL(t *testing.T) {
+	t.Parallel()
+	credentials := test.NewCredentialsFactory(t)
+	serverTLS, _ := credentials.CreateServerCredentials(t, connection.MutualTLSMode, "127.0.0.1")
+	clientTLS, _ := credentials.CreateClientCredentials(t, connection.MutualTLSMode)
+	// Issued by the same CA, so the sidecar admits the connection itself.
+	otherClientTLS, _ := credentials.CreateClientCredentials(t, connection.MutualTLSMode)
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{UseACL: true, ServerTLS: serverTLS, ClientTLS: clientTLS})
+	env.startSidecarService(t.Context(), t)
+
+	client := committerpb.NewSidecarServiceClient(
+		test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, clientTLS),
+	)
+	authorized := acl.ContextWithToken(t.Context(), env.authEnv.IssueToken(t))
+	info, err := client.GetBlockchainInfo(authorized, nil)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+
+	_, err = client.GetBlockchainInfo(t.Context(), nil)
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
+
+	otherClient := committerpb.NewSidecarServiceClient(
+		test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, otherClientTLS),
+	)
+	_, err = otherClient.GetBlockchainInfo(authorized, nil)
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
+	require.ErrorContains(t, err, "token is not bound to this certificate")
+}
+
+// TestSidecarStreamLapsesWhenTokenExpires is the property a long-lived stream needs: authorization is not
+// granted once at establishment. The stream opens on a valid token and must fail after that token's expiry,
+// which is the sidecar's local bound - it holds even if the AuthService becomes unreachable meanwhile.
+func TestSidecarStreamLapsesWhenTokenExpires(t *testing.T) {
+	t.Parallel()
+	env := newSidecarTestEnvWithTLS(t, sidecarTestConfig{UseACL: true})
+	env.startSidecarService(t.Context(), t)
+
+	client := committerpb.NewSidecarServiceClient(
+		test.NewSecuredConnection(t, &env.serverConfig.GRPC.Endpoint, test.InsecureTLSConfig),
+	)
+
+	// Step 1: open the stream while the token is valid, and confirm it is serving.
+	t.Log("Step 1: open the notification stream on a fresh token")
+	stream, err := client.OpenNotificationStream(acl.ContextWithToken(t.Context(), env.authEnv.IssueToken(t)))
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&committerpb.NotificationRequest{
+		TxStatusRequest: &committerpb.TxIDsBatch{TxIds: []string{"tx"}},
+		Timeout:         durationpb.New(5 * time.Second),
+	}))
+
+	// Step 2: past the token's expiry the stream must stop serving, without the client re-presenting
+	// anything - the sidecar refuses on its own bound. Each send makes the server receive, which is what
+	// re-checks; the send is what fails once the server tears the stream down, so nothing here may block
+	// on Recv.
+	t.Log("Step 2: wait out the token and require the stream to lapse")
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		assert.Error(ct, stream.Send(&committerpb.NotificationRequest{
+			TxStatusRequest: &committerpb.TxIDsBatch{TxIds: []string{"tx"}},
+			Timeout:         durationpb.New(5 * time.Second),
+		}))
+	}, aclTestTokenTTL+30*time.Second, 200*time.Millisecond,
+		"the stream kept serving past its token's expiry")
+
+	// Step 3: Drain what the stream delivered before it lapsed, to reach the terminal status.
+	t.Log("Step 3: require the stream to have ended with Unauthenticated")
+	for err == nil {
+		_, err = stream.Recv()
+	}
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
 }
 
 func TestSidecarSecureConnection(t *testing.T) {

@@ -50,6 +50,8 @@ func (c *OrdererAdapter) RunWorkload(ctx context.Context, txStream *workload.Str
 			return runSidecarReceiver(gCtx, &sidecarReceiverParameters{
 				ClientConfig: c.config.SidecarClient,
 				Res:          c.res,
+				Auth:         c.config.Auth,
+				Identity:     c.config.Orderer.Identity,
 			})
 		})
 	}
