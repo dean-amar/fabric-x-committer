@@ -95,6 +95,7 @@ most common review rejection:
 | Retry / keep a loop alive | `retry.Sustain`, `retry.WaitForCondition` | `utils/retry` |
 | Run a service + gRPC/HTTP servers | `serve.StartAndServe` | `utils/serve` |
 | Prometheus metrics | `monitoring.Provider` + `promutil.*` | `utils/monitoring` |
+| Enforce/attach gRPC ACL | `acl.Enforcer` (server interceptors), `acl.Credentials` (renewing per-RPC client credentials), `acl.IssueToken` + `acl.ContextWithToken` (one-off token) | `utils/acl` |
 | Package logger | `flogging.MustGetLogger` | `fabric-lib-go/common/flogging` |
 
 **Test fixtures** — test code has its own reuse discipline: don't hand-roll crypto, TLS, or
@@ -103,6 +104,7 @@ block fixtures. Full picture is in the `tests` skill; the key helpers:
 | Need | Use | Package |
 |------|-----|---------|
 | In-process service / DB / mock harnesses | `test.RunServiceForTest`, `testdb.PrepareTestEnv`, `mock.*` | `utils/test`, `utils/testdb`, `mock/` (this repo) |
+| A running AuthService for an ACL test | `auth.NewAuthTestEnv` (+ `TestEnv.IssueToken`, `TestEnv.Config`); `auth.NewAuthTestClient` for a running topology's | `service/auth` (this repo) |
 | Proto assertions | `test.RequireProtoEqual` / `RequireProtoElementsMatch` | `utils/test` (this repo) |
 | MSP / identity / Fabric config-block fixtures | `testcrypto.CreateOrExtendConfigBlockWithCrypto`, `ConfigBlock`, `PrepareBlockHeaderAndMetadata`, `GetPeersIdentities` / `GetConsenterIdentities` / `GetSigningIdentities` / `GetPeersMspDirs` | `github.com/hyperledger/fabric-x-common/utils/testcrypto` |
 | Test TLS CAs & cert/key pairs | `tlsgen.NewCA()`, `CA`, `CertKeyPair` | `github.com/hyperledger/fabric-x-common/common/crypto/tlsgen` |
@@ -355,8 +357,9 @@ if err != nil {
 never leak a raw internal error (stack traces must not cross the wire). Available
 (`utils/grpcerror/wrap.go`, all nil-safe): `WrapInternalError`, `WrapInvalidArgument`,
 `WrapCancelled`, `WrapFailedPrecondition`, `WrapUnimplemented`, `WrapNotFound`,
+`WrapUnavailable`, `WrapUnauthenticated`, `WrapPermissionDenied`,
 `WrapResourceExhaustedOrCancelled(ctx, err)`, `WrapWithContext(err, ctx)`. Map sentinels
-to codes with an `errors.Is` chain (`service/query/query_service.go:382`).
+to codes with an `errors.Is` chain (`service/query/query_service.go:388`).
 
 **Sentinel errors:** declare `var ErrXxx = errors.New("...")` with a doc comment in a
 `var (...)` block; compare with `errors.Is`, never `==` (the `errname` linter enforces the

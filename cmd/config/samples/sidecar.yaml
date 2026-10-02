@@ -164,6 +164,23 @@ max-workers-for-tx-parsing: 1
 # Default: 256
 min-tx-parsing-batch-size: 256
 
+# ACL enforcement. While this section is present, block delivery, block query, and the notification
+# streams are authorized against the central auth service. An open stream is refused once its token
+# expires or a re-authorization (every stream-re-authorize-interval) fails. Remove this section to serve
+# without ACL checks.
+auth:
+  # Every auth service instance. Calls are balanced across them: they share the state database, so any
+  # instance can answer any call.
+  endpoints:
+    - auth:10001
+  tls: *tlsConfig
+  # How often an open stream re-authorizes against the latest policy. Raise it to rely on the token's
+  # lifetime alone. Default: 1m
+  stream-re-authorize-interval: 1m
+  # Bounds each authorization call, so an unreachable auth service fails requests closed instead of holding
+  # them. Default: 10s
+  authorize-timeout: 10s
+
 # Logging configuration
 logging:
   # Log level specification. Can be a single level (e.g., "info", "debug") or

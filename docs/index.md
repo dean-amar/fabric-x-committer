@@ -34,12 +34,13 @@ Ordering Service
 - **Query Service** — Provides read-only access to the committed world state with configurable isolation levels and query batching.
 - **Snapshot Hasher** — Single instance that discovers committed state snapshots from durable state and hashes their clone databases, off the commit path.
 - **Database Cluster** — Stores world state, transaction statuses, and namespace policies. Supports YugabyteDB (recommended) and PostgreSQL.
+- **Auth Service** (optional) — Issues certificate-bound opaque tokens and answers per-RPC authorization decisions, enabling ACL enforcement on the Query Service and Sidecar. Enabled per service via an `auth:` config section.
 
 ## Key Capabilities
 
 - **High Throughput** — Pipelined processing with parallel dispatch of conflict-free transactions. Exceeds 100,000 TPS on commodity hardware with YugabyteDB.
 - **Fault Tolerance** — Idempotent commit operations enable automatic recovery from service failures without data corruption. Each service recovers independently on restart.
-- **Horizontal Scaling** — Verifier, VC, Query Service, and Database nodes scale horizontally. Sidecar, Coordinator, and Snapshot Hasher scale vertically.
+- **Horizontal Scaling** — Verifier, VC, Query Service, Auth Service, and Database nodes scale horizontally. Sidecar, Coordinator, and Snapshot Hasher scale vertically.
 - **Flexible Endorsement Policies** — Supports both lightweight threshold rules (single public key) and fine-grained MSP rules (AND/OR/k-of-n over organizational identities).
 - **Observability** — Prometheus metrics for every pipeline stage, with queue-depth gauges for bottleneck identification.
 

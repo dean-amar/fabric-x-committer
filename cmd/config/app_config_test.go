@@ -24,12 +24,14 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/query"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
@@ -137,6 +139,11 @@ func TestReadConfigSidecar(t *testing.T) {
 			CheckpointHoldRetryInterval:   time.Minute,
 			ChannelBufferSize:             100,
 			TxParsing:                     sidecar.TxParsingConfig{MaxWorkers: 1, MinBatchSize: 256},
+			Auth: &acl.Config{
+				MultiClientConfig:         newMultiClientConfigWithDefaultTLS("auth", "sidecar", 10001),
+				StreamReAuthorizeInterval: time.Minute,
+				AuthorizeTimeout:          10 * time.Second,
+			},
 		},
 	}}
 	for _, tc := range tests {
@@ -364,6 +371,10 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
+			Auth: &acl.Config{
+				MultiClientConfig: newMultiClientConfigWithDefaultTLS("auth", "query", 10001),
+				AuthorizeTimeout:  10 * time.Second,
+			},
 		},
 	}}
 
@@ -433,6 +444,84 @@ func TestReadConfigSnapshotHasher(t *testing.T) {
 	}
 }
 
+func TestReadConfigAuth(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                  string
+		configFilePath        string
+		expectedServiceConfig *auth.Config
+		expectedServerConfig  *serve.Config
+	}{{
+		name:           "default",
+		configFilePath: emptyConfig(t),
+		expectedServerConfig: &serve.Config{
+			GRPC: serve.ServerConfig{
+				Endpoint: *newEndpoint(connection.DefaultHost, authServerPort),
+				RateLimit: serve.RateLimitConfig{
+					RequestsPerSecond: 5000,
+					Burst:             1000,
+				},
+				MaxConcurrentStreams: 10,
+			},
+			HTTP:                  *newServerConfig(authMonitoringPort),
+			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
+		},
+		expectedServiceConfig: &auth.Config{
+			Database:                defaultDBConfig(),
+			TokenTTL:                5 * time.Minute,
+			EnvelopeFreshnessWindow: 5 * time.Minute,
+			NonceTTL:                time.Minute,
+			ConfigRefreshInterval:   time.Minute,
+			SweepInterval:           time.Minute,
+			ChallengeRateLimit:      serve.RateLimitConfig{RequestsPerSecond: 200, Burst: 50},
+		},
+	}, {
+		name:           "sample",
+		configFilePath: "samples/auth.yaml",
+		expectedServerConfig: withClientStreamLimit(&serve.Config{
+			GRPC: serve.ServerConfig{
+				Endpoint: *newEndpoint("", authServerPort),
+				TLS:      test.NewServiceTLSConfig(artifactsPath, "auth", connection.MutualTLSMode),
+				KeepAlive: &serve.ServerKeepAliveConfig{
+					Params: &serve.ServerKeepAliveParamsConfig{
+						Time:    60 * time.Second,
+						Timeout: 10 * time.Second,
+					},
+					EnforcementPolicy: &serve.ServerKeepAliveEnforcementPolicyConfig{
+						MinTime:             60 * time.Second,
+						PermitWithoutStream: true,
+					},
+				},
+				// Unlike the other samples, the auth sample leaves rate limiting on: IssueNonce is
+				// reachable without a token and writes a row per call.
+				RateLimit: serve.RateLimitConfig{RequestsPerSecond: 5000, Burst: 1000},
+			},
+			HTTP:                  *newServerConfigWithDefaultTLS("auth", authMonitoringPort),
+			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
+		}),
+		expectedServiceConfig: &auth.Config{
+			Database:                defaultSampleDBConfig(),
+			TokenTTL:                5 * time.Minute,
+			EnvelopeFreshnessWindow: 5 * time.Minute,
+			NonceTTL:                time.Minute,
+			ConfigRefreshInterval:   time.Minute,
+			SweepInterval:           time.Minute,
+			ChallengeRateLimit:      serve.RateLimitConfig{RequestsPerSecond: 200, Burst: 50},
+		},
+	}}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := NewViperWithAuthDefaults()
+			c, serverConfig, err := ReadAuthYamlAndSetupLogging(v, tc.configFilePath)
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedServiceConfig, c)
+			require.Equal(t, tc.expectedServerConfig, serverConfig)
+		})
+	}
+}
+
 func TestReadConfigLoadGen(t *testing.T) {
 	t.Parallel()
 	loadgenTLSCreds := test.NewServiceTLSConfig(artifactsPath, "loadgen", connection.MutualTLSMode)
@@ -468,6 +557,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", "loadgen", 4001),
+					Auth:          new(newMultiClientConfigWithDefaultTLS("auth", "loadgen", 10001)),
 					Orderer: ordererdial.Config{
 						FaultToleranceLevel:        ordererdial.BFT,
 						LatestKnownConfigBlockPath: "/root/artifacts/config-block.pb.bin",

@@ -43,6 +43,13 @@ type (
 		RegisterService(Servers)
 	}
 
+	// ServerOptionsProvider is implemented by a Registerer that needs its own gRPC server options, such as
+	// the ACL interceptors. They are applied when the server is built, so they are in place before the first
+	// RPC and before RegisterService runs.
+	ServerOptionsProvider interface {
+		ServerOptions() []grpc.ServerOption
+	}
+
 	// Servers holds the gRPC, and HTTP servers along with their listeners.
 	// It provides a unified interface for service registration and lifecycle management.
 	Servers struct {
@@ -116,7 +123,7 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 		return nil
 	}
 
-	servers, err := NewServers(ctx, conf)
+	servers, err := NewServers(ctx, conf, r)
 	defer servers.Stop()
 	if err != nil {
 		return err
@@ -130,7 +137,7 @@ func Serve(ctx context.Context, r Registerer, conf *Config) error {
 // This allows us to avoid nil checks in the service.RegisterService() method in case the endpoint is empty.
 // IMPORTANT: If error is returned, the caller is responsible for calling StopFunc() on the
 // returned Servers.
-func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
+func NewServers(ctx context.Context, conf *Config, r Registerer) (s Servers, err error) {
 	s.stopOnce = &sync.Once{}
 
 	s.GrpcTLSProvider, err = NewTLSProvider(conf.GRPC.TLS)
@@ -140,7 +147,11 @@ func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
 
 	s.StatsHandler = &ServerStatsHandler{}
 
-	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.StatsHandler)
+	var serviceOpts []grpc.ServerOption
+	if provider, ok := r.(ServerOptionsProvider); ok {
+		serviceOpts = provider.ServerOptions()
+	}
+	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.StatsHandler, serviceOpts)
 	if err != nil {
 		return s, errors.Wrapf(err, "failed creating GRPC server")
 	}
@@ -263,8 +274,11 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 	return l, nil
 }
 
-// newGRPCServer instantiate a [grpc.Server].
-func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler) (*grpc.Server, error) {
+// newGRPCServer instantiate a [grpc.Server]. The server-wide limits are the outermost interceptors and the
+// service's own options chain after them, so a service interceptor runs only for a call the limits admitted.
+func newGRPCServer(
+	c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler, serviceOpts []grpc.ServerOption,
+) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),
@@ -302,6 +316,7 @@ func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, statsHandler *Serv
 			PermitWithoutStream: c.KeepAlive.EnforcementPolicy.PermitWithoutStream,
 		}))
 	}
+	opts = append(opts, serviceOpts...)
 	return grpc.NewServer(opts...), nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
@@ -189,8 +190,10 @@ func setupQueryService(
 	})
 	c.Start(t, runner.FullTxPathWithQuery)
 	c.CreateNamespacesAndCommit(t, "1", "2")
-
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute*5)
+	ctx, cancel := context.WithTimeout(
+		acl.ContextWithToken(t.Context(), c.AuthEnv.IssueToken(t)),
+		time.Minute*5,
+	)
 	t.Cleanup(cancel)
 
 	t.Log("Insert TXs")

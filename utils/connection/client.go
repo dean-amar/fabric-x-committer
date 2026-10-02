@@ -166,16 +166,17 @@ func (d *DialInfo) NewConnectionPerEndpoint() ([]*grpc.ClientConn, error) {
 	return connections, nil
 }
 
-// NewSingleConnection creates a single connection given a client config.
-func NewSingleConnection(config *ClientConfig) (*grpc.ClientConn, error) {
+// NewSingleConnection creates a single connection given a client config and any additional dial options.
+func NewSingleConnection(config *ClientConfig, additionalOpts ...grpc.DialOption) (*grpc.ClientConn, error) {
 	tlsCreds, err := config.TLS.ClientCredentials()
 	if err != nil {
 		return nil, err
 	}
 	return NewConnection(ClientParameters{
-		Address: config.Endpoint.Address(),
-		Creds:   tlsCreds,
-		Retry:   config.Retry,
+		Address:        config.Endpoint.Address(),
+		Creds:          tlsCreds,
+		Retry:          config.Retry,
+		AdditionalOpts: additionalOpts,
 	})
 }
 

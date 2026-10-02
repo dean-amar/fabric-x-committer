@@ -16,12 +16,15 @@ import (
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
@@ -63,17 +66,23 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  serve.DynamicTLSUpdater
+		aclEnforcer *acl.Enforcer
 	}
 )
 
 // NewQueryService create a new QueryService given a configuration.
-func NewQueryService(config *Config) *Service {
+func NewQueryService(config *Config) (*Service, error) {
+	aclEnforcer, err := acl.NewEnforcer(config.Auth)
+	if err != nil {
+		return nil, err
+	}
 	return &Service{
 		config:      config,
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
-	}
+		aclEnforcer: aclEnforcer,
+	}, nil
 }
 
 // WaitForReady waits for the service resources to initialize, so it is ready to answers requests.
@@ -84,6 +93,8 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
+	defer q.aclEnforcer.Close()
+
 	pool, poolErr := statedb.NewPool(ctx, q.config.Database)
 	if poolErr != nil {
 		return poolErr
@@ -126,6 +137,11 @@ func (q *Service) RegisterService(s serve.Servers) {
 	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 	serve.RegisterServerMetrics(s.StatsHandler, q.metrics.serverMetrics)
+}
+
+// ServerOptions installs the ACL interceptors, if configured, when serve builds the gRPC server.
+func (q *Service) ServerOptions() []grpc.ServerOption {
+	return q.aclEnforcer.ServerOptions()
 }
 
 // BeginView implements the query-service interface.
@@ -272,7 +288,7 @@ func (q *Service) GetConfigTransaction(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*applicationpb.ConfigTransaction, error) {
-	res, err := queryConfig(ctx, q.batcher.pool)
+	res, err := statedb.ReadConfigTransaction(ctx, q.batcher.pool)
 	return res, grpcerror.WrapInternalError(err)
 }
 
@@ -315,14 +331,14 @@ func (q *Service) validateKeysCount(count int) error {
 
 // refreshTLSFromDB periodically polls the database for the config transaction
 // and updates the dynamic TLS CA certificates only when the config version changes.
-func (q *Service) refreshTLSFromDB(ctx context.Context, pool querier) {
+func (q *Service) refreshTLSFromDB(ctx context.Context, pool *pgxpool.Pool) {
 	var lastVersion uint64
 	seen := false
 
 	// tryRefresh attempts a single refresh. Errors are logged but not returned,
 	// as this is a background polling loop that should continue on transient failures.
 	tryRefresh := func() {
-		configTX, err := queryConfig(ctx, pool)
+		configTX, err := statedb.ReadConfigTransaction(ctx, pool)
 		if err != nil {
 			logger.Errorf("Failed to read config transaction from DB: %v", err)
 			return
