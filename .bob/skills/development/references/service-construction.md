@@ -20,7 +20,7 @@ Cite the model files rather than guessing.
 
 ## 1. The `serve.Service` interface
 
-A full-lifecycle service implements three methods (`utils/serve/start_serve.go:31`):
+A full-lifecycle service implements three methods (`utils/serve/start_serve.go:32`):
 
 ```go
 type Service interface {
@@ -68,7 +68,7 @@ Rules:
 - The body returns a keyed struct literal, one `field: value,` per line.
 
 Model files: `service/coordinator/coordinator.go:110`,
-`service/vc/validator_committer_service.go:72`, `service/sidecar/sidecar.go:85`.
+`service/vc/validator_committer_service.go:72`, `service/sidecar/sidecar.go:124`.
 
 ## 3. Lifecycle
 
@@ -106,9 +106,9 @@ func (vc *ValidatorCommitterService) Run(ctx context.Context) error {
   (`service/verifier/verifier_server.go:52`).
 - A service that must tear down peers on any goroutine's exit wraps with
   `ctx, cancel := context.WithCancel(ctx); defer cancel()`
-  (`service/coordinator/coordinator.go:184`, `service/sidecar/sidecar.go:141`).
+  (`service/coordinator/coordinator.go:184`, `service/sidecar/sidecar.go:194`).
 - Resilient background loops use `retry.Sustain(ctx, profile, op)`
-  (`service/sidecar/sidecar.go:160`).
+  (`service/sidecar/sidecar.go:213`).
 
 ### `WaitForReady(ctx) bool`
 
@@ -209,7 +209,7 @@ Config struct (mapstructure + default tag) → sample YAML → env var → decod
 - `cmd/config/viper.go` holds only what a tag cannot express: the `server.*` limits for
   client-facing services (`setClientFacingServerLimits`) and each service's default endpoint
   (`setEndpoint`).
-- `readYamlAndSetupLogging[T]` (`cmd/config/app_config.go:90`) reads YAML, applies the
+- `readYamlAndSetupLogging[T]` (`cmd/config/app_config.go:104`) reads YAML, applies the
   `SC_<SVC>_YAML` override, and unmarshals + `validate.Struct`s three structs: logging,
   `serve.Config`, and your `T`.
 - Custom decode hooks (`time.Duration`, byte sizes, `Endpoint`, `serve.ServerConfig`) live
@@ -313,10 +313,10 @@ Hand your `serve.Service` to `serve.StartAndServe(ctx, service, serverConfig...)
 `service.Run` in an errgroup, gates on `WaitForReady` with `ServiceStartupTimeout`, then
 constructs and serves the gRPC + HTTP servers in the same group — every `g.Go` does
 `defer cancel()` so any exit tears down the whole service
-(`utils/serve/start_serve.go:68`).
+(`utils/serve/start_serve.go:84`).
 
 Command wiring (cobra → read config → construct → serve),
-`cmd/committer/start_cmd.go:59`:
+`cmd/committer/start_cmd.go:57`:
 
 ```go
 var service serve.Service
