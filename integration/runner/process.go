@@ -118,6 +118,12 @@ var (
 		Args:     []string{"start", "query"},
 		Template: config.TemplateQueryService,
 	}
+	cmdAuth = CmdParameters{
+		Name:     "auth",
+		Bin:      committerCMD,
+		Args:     []string{"start", "auth"},
+		Template: config.TemplateAuth,
+	}
 	cmdLoadGen = CmdParameters{
 		Name: "loadgen",
 		Bin:  loadgenCMD,

@@ -26,8 +26,10 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
 	"github.com/hyperledger/fabric-x-committer/utils/serialization"
@@ -52,6 +54,7 @@ type (
 		DistLoadGen  *ProcessWithConfig
 		Verifier     []*ProcessWithConfig
 		VcService    []*ProcessWithConfig
+		AuthService  []*ProcessWithConfig
 
 		DBEnv      *vc.DatabaseTestEnv
 		OrdererEnv *mock.OrdererTestEnv
@@ -70,6 +73,7 @@ type (
 		SeedForCryptoGen        *rand.Rand
 		NextExpectedBlockNumber uint64
 		CredFactory             *test.CredentialsFactory
+		AuthEnv                 *auth.TestEnv
 	}
 
 	// Config represents the runtime configuration.
@@ -77,6 +81,7 @@ type (
 		NumOrderers       int
 		NumVerifiers      int
 		NumVCService      int
+		NumAuthService    int
 		BlockSize         uint64
 		BlockTimeout      time.Duration
 		LoadgenBlockLimit uint64
@@ -89,6 +94,11 @@ type (
 		CrashTest bool
 		// RateLimit configures rate limiting for services that support it (query, sidecar).
 		RateLimit *serve.RateLimitConfig
+		// AuthConfigRefreshInterval is how often the AuthService re-reads the committed configuration.
+		AuthConfigRefreshInterval time.Duration
+		AuthTokenTTL              time.Duration
+		AuthNonceTTL              time.Duration
+
 		// MaxRequestKeys is the maximum number of keys allowed in a single query request.
 		// Set to 0 to disable the limit.
 		MaxRequestKeys int
@@ -135,6 +145,7 @@ const (
 	Verifier
 	VC
 	QueryService
+	AuthService
 
 	LoadGenForOnlyOrderer
 	LoadGenForOrderer
@@ -144,7 +155,7 @@ const (
 	LoadGenForVCService
 	LoadGenForDistributedLoadGen
 
-	CommitterTxPath       = Sidecar | Coordinator | Verifier | VC
+	CommitterTxPath       = Sidecar | Coordinator | Verifier | VC | AuthService
 	FullTxPath            = Orderer | CommitterTxPath
 	FullTxPathWithLoadGen = FullTxPath | LoadGenForOrderer
 	FullTxPathWithQuery   = FullTxPath | QueryService
@@ -170,6 +181,18 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 	}
 	if conf.NumVCService <= 0 {
 		conf.NumVCService = 1
+	}
+	if conf.NumAuthService <= 0 {
+		conf.NumAuthService = 1
+	}
+	if conf.AuthConfigRefreshInterval <= 0 {
+		conf.AuthConfigRefreshInterval = time.Second
+	}
+	if conf.AuthTokenTTL <= 0 {
+		conf.AuthTokenTTL = time.Hour
+	}
+	if conf.AuthNonceTTL <= 0 {
+		conf.AuthNonceTTL = time.Hour
 	}
 
 	t.Log("create TLS manager and clients certificate")
@@ -234,6 +257,9 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 			VerifierBatchTimeCutoff:             conf.VerifierBatchTimeCutoff,
 			VerifierBatchSizeCutoff:             conf.VerifierBatchSizeCutoff,
 			QueryTLSRefreshInterval:             conf.QueryTLSRefreshInterval,
+			AuthConfigRefreshInterval:           conf.AuthConfigRefreshInterval,
+			AuthTokenTTL:                        conf.AuthTokenTTL,
+			AuthNonceTTL:                        conf.AuthNonceTTL,
 
 			// Keep-alive configuration for services which exposes their API.
 			KeepAliveTime:                conf.KeepAliveTime,
@@ -297,6 +323,14 @@ func NewRuntime(t *testing.T, conf *Config) *CommitterRuntime {
 		c.VcService[i], s.Services.VCService[i] = newProcess(t, params, p)
 	}
 
+	s.Services.Auth = make([]config.ServiceConfig, conf.NumAuthService)
+	c.AuthService = make([]*ProcessWithConfig, conf.NumAuthService)
+	for i := range conf.NumAuthService {
+		p := cmdAuth
+		p.Name = fmt.Sprintf("%s-%d", p.Name, i)
+		c.AuthService[i], s.Services.Auth[i] = newProcess(t, params, p)
+	}
+
 	c.Coordinator, s.Services.Coordinator = newProcess(t, params, cmdCoordinator)
 	c.QueryService, s.Services.Query = newProcess(t, params, cmdQuery)
 	c.Sidecar, s.Services.Sidecar = newProcess(t, params, cmdSidecar)
@@ -347,6 +381,19 @@ func (c *CommitterRuntime) CreateRuntimeClients(ctx context.Context, t *testing.
 	})
 
 	c.SidecarClientConfig = test.NewTLSClientConfig(c.SystemConfig.ClientTLS, services.Sidecar.GrpcEndpoint)
+
+	// Balanced across every AuthService instance, so issuing a token may fetch its nonce from one instance
+	// and authenticate at another - which the shared database must make safe. Every topology allocates the
+	// endpoints, so this is safe even where Start never launches the service.
+	authEndpoints := make([]*connection.Endpoint, len(services.Auth))
+	for i, s := range services.Auth {
+		authEndpoints[i] = s.GrpcEndpoint
+	}
+	c.AuthEnv = auth.NewAuthClientTestEnv(
+		t,
+		test.NewTLSMultiClientConfig(c.SystemConfig.ClientTLS, authEndpoints...),
+		c.SystemConfig.Policy.ArtifactsPath, c.SystemConfig.Policy.ChannelID,
+	)
 }
 
 // OpenNotificationStream starts a notification stream.
@@ -367,6 +414,11 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 		"cannot use load generator for committer with an orderer")
 
 	t.Log("Running services")
+	if AuthService&serviceFlags != 0 {
+		for _, p := range c.AuthService {
+			p.Restart(t)
+		}
+	}
 	if loadGenMatcher&serviceFlags != 0 {
 		c.startLoadGen(t, serviceFlags)
 	}
@@ -392,10 +444,26 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	}
 	if Sidecar&serviceFlags != 0 {
 		c.Sidecar.Restart(t)
-		c.OpenNotificationStream(t.Context(), t)
 	}
 	if QueryService&serviceFlags != 0 {
 		c.QueryService.Restart(t)
+	}
+
+	c.startStreams(t, serviceFlags)
+}
+
+// startStreams opens this runtime's own streams, once Start has the services running.
+func (c *CommitterRuntime) startStreams(t *testing.T, serviceFlags int) {
+	t.Helper()
+	// Issued here rather than earlier: the AuthService issues a token only against a channel
+	// configuration, which reaches it through the transaction path Start has just brought up.
+	streamCtx := t.Context()
+	if AuthService&serviceFlags != 0 {
+		streamCtx = acl.ContextWithToken(streamCtx, c.AuthEnv.IssueToken(t))
+	}
+
+	if Sidecar&serviceFlags != 0 {
+		c.OpenNotificationStream(streamCtx, t)
 	}
 
 	if Coordinator&serviceFlags != 0 && Sidecar&serviceFlags != 0 {
@@ -405,7 +473,7 @@ func (c *CommitterRuntime) Start(t *testing.T, serviceFlags int) {
 	}
 
 	if Sidecar&serviceFlags != 0 {
-		c.startBlockDelivery(t)
+		c.startBlockDelivery(streamCtx, t)
 	}
 }
 
@@ -453,14 +521,17 @@ func (c *CommitterRuntime) startLoadGen(t *testing.T, serviceFlags int) {
 	}
 }
 
-func (c *CommitterRuntime) startBlockDelivery(t *testing.T) {
+// startBlockDelivery streams committed blocks into c.CommittedBlock. ctxWithToken must already carry the
+// token, since an enforcing sidecar authorizes the delivery stream and each of its reconnects.
+func (c *CommitterRuntime) startBlockDelivery(ctxWithToken context.Context, t *testing.T) {
 	t.Helper()
 	t.Log("Running delivery client")
-	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
-		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx, delivercommitter.Parameters{
-			ClientConfig: c.SidecarClientConfig,
-			OutputBlock:  c.CommittedBlock,
-		}))
+	test.RunServiceForTest(ctxWithToken, t, func(ctx context.Context) error {
+		return connection.FilterStreamRPCError(delivercommitter.ToQueue(ctx,
+			delivercommitter.Parameters{
+				ClientConfig: c.SidecarClientConfig,
+				OutputBlock:  c.CommittedBlock,
+			}))
 	}, func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():
@@ -700,7 +771,8 @@ func (c *CommitterRuntime) requireAllServicesAreRunning(t test.TestingT) {
 // are excluded: their template and worker count depend on the service flags passed to Start, so
 // startLoadGen writes their config and starts them.
 func (c *CommitterRuntime) serverProcesses() []*ProcessWithConfig {
-	procs := make([]*ProcessWithConfig, 0, 4+len(c.Verifier)+len(c.VcService))
+	procs := make([]*ProcessWithConfig, 0, 4+len(c.AuthService)+len(c.Verifier)+len(c.VcService))
+	procs = append(procs, c.AuthService...)
 	procs = append(procs, c.MockOrderer, c.Coordinator, c.Sidecar, c.QueryService)
 	procs = append(procs, c.Verifier...)
 	procs = append(procs, c.VcService...)

@@ -7,4 +7,8 @@ orderer-client:
 {{ include "endpointWithTLS" (dict "Endpoint" .Services.Sidecar.GrpcEndpoint "TLS" .ClientTLS) | indent 4 }}
 {{ include "ordererDialConfig" . | indent 2 }}
   broadcast-parallelism: 5
+{{- if .Services.Auth }}
+  auth:
+{{ include "endpointListWithSharedTLS" (dict "Servers" .Services.Auth "TLS" .ClientTLS) | indent 4 }}
+{{- end }}
 {{ include "loadgenConfig" . | indent 0 }}

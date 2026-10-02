@@ -12,3 +12,4 @@ set -e
 "$BINS_PATH/committer" healthcheck vc           --config "$CONFIGS_PATH/vc.yaml"
 "$BINS_PATH/committer" healthcheck verifier     --config "$CONFIGS_PATH/verifier.yaml"
 "$BINS_PATH/committer" healthcheck query        --config "$CONFIGS_PATH/query.yaml"
+"$BINS_PATH/committer" healthcheck auth         --config "$CONFIGS_PATH/auth.yaml"

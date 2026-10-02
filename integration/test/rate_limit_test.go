@@ -21,10 +21,13 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
+
+const numParallelRequests = 5
 
 func TestRateLimit(t *testing.T) {
 	t.Parallel()
@@ -38,8 +41,6 @@ func TestRateLimit(t *testing.T) {
 	})
 
 	c.Start(t, runner.FullTxPathWithQuery)
-
-	numParallelRequests := 5
 
 	tests := []struct {
 		name             string
@@ -110,9 +111,12 @@ func TestRateLimit(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = conn.Close() })
 			}
-
+			reqCtx, cancel := context.WithTimeout(
+				acl.ContextWithToken(t.Context(), c.AuthEnv.IssueToken(t)), tt.timeout,
+			)
+			t.Cleanup(cancel)
 			successCount, rateLimitedCount, otherErrorCount := makeParallelRequests(
-				t, numParallelRequests, conn, tt.requestFn, tt.timeout,
+				reqCtx, t, conn, tt.requestFn,
 			)
 
 			if tt.expectAllSucceed {
@@ -125,25 +129,21 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
-func makeParallelRequests( //nolint:revive // argument-limit 5 but limit is 4
+func makeParallelRequests(
+	ctx context.Context,
 	t *testing.T,
-	numParallelRequests int,
 	conn *grpc.ClientConn,
 	requestFn func(ctx context.Context, conn *grpc.ClientConn) error,
-	timeout time.Duration,
 ) (success, rateLimited, otherErrors int32) {
 	t.Helper()
 
 	var successCount, rateLimitedCount, otherErrorCount atomic.Int32
 	var wg sync.WaitGroup
 
-	reqCtx, cancel := context.WithTimeout(t.Context(), timeout)
-	defer cancel()
-
 	for range numParallelRequests {
 		wg.Go(
 			func() {
-				err := requestFn(reqCtx, conn)
+				err := requestFn(ctx, conn)
 				if err == nil {
 					successCount.Add(1)
 					return
