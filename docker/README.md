@@ -47,6 +47,8 @@ docker push docker-eu.artifactory.swg-devops.com/res-decentralized-trust-team-sc
 ## Run Image
 The image contains the binaries, default config files, and default genesis block.
 By default, the test node image will run a full system: DB, mock-orderer, committer, and a simple generated load with mutual tls mode.
+The `committer` op also starts the Auth Service, and the sidecar and query APIs require a token, so an
+external client must authenticate first (see [auth-service.md](../docs/auth-service.md)).
 ```shell
 docker run -it --rm icr.io/cbdc/committer-test-node:0.0.2
 ```

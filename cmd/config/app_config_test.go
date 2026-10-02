@@ -31,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
@@ -138,6 +139,11 @@ func TestReadConfigSidecar(t *testing.T) {
 			CheckpointHoldRetryInterval:   time.Minute,
 			ChannelBufferSize:             100,
 			TxParsing:                     sidecar.TxParsingConfig{MaxWorkers: 1, MinBatchSize: 256},
+			Auth: &acl.Config{
+				MultiClientConfig:         newMultiClientConfigWithDefaultTLS("auth", "sidecar", 10001),
+				StreamReAuthorizeInterval: time.Minute,
+				AuthorizeTimeout:          10 * time.Second,
+			},
 		},
 	}}
 	for _, tc := range tests {
@@ -365,6 +371,10 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
+			Auth: &acl.Config{
+				MultiClientConfig: newMultiClientConfigWithDefaultTLS("auth", "query", 10001),
+				AuthorizeTimeout:  10 * time.Second,
+			},
 		},
 	}}
 
@@ -547,6 +557,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 			Adapter: adapters.AdapterConfig{
 				OrdererClient: &adapters.OrdererClientConfig{
 					SidecarClient: newClientConfigWithDefaultTLS("sidecar", "loadgen", 4001),
+					Auth:          new(newMultiClientConfigWithDefaultTLS("auth", "loadgen", 10001)),
 					Orderer: ordererdial.Config{
 						FaultToleranceLevel:        ordererdial.BFT,
 						LatestKnownConfigBlockPath: "/root/artifacts/config-block.pb.bin",
