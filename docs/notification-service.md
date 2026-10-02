@@ -292,6 +292,12 @@ All stream types compete for the same pool of stream slots.
 When the limit is reached, new stream requests are rejected with a gRPC `ResourceExhausted`
 status code. Clients should handle this error with appropriate backoff and retry logic.
 
+When the sidecar is configured with an `auth:` section, notification streams are additionally
+subject to ACL enforcement. A stream is authorized at establishment — a missing or invalid token
+is rejected with `Unauthenticated`, and a policy denial with `PermissionDenied` — and its bound
+token is re-authorized on a fixed interval thereafter. Once the token expires or a re-authorization fails,
+the stream ends on its next message. See [Auth Service](auth-service.md).
+
 ## 5. Configuration
 
 The following configuration options in `sidecar.yaml` control notification behavior:
@@ -301,6 +307,7 @@ The following configuration options in `sidecar.yaml` control notification behav
 | `notification.max-timeout`          | `1m`    | Upper limit on per-request timeout for transaction ID subscriptions.                               |
 | `notification.stream-write-timeout` | `30s`   | Write timeout for the block stream. Prevents slow clients from blocking.                           |
 | `server.max-concurrent-streams`     | `10`    | Maximum concurrent streaming RPCs across all stream types (Deliver + Notification + StreamBlocks). |
+| `auth`                              | absent  | Optional ACL enforcement for notification and delivery streams. See [Auth Service](auth-service.md). |
 
 Sample configuration:
 

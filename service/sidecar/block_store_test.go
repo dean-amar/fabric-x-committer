@@ -69,7 +69,9 @@ func TestBlockStoreAndDelivery(t *testing.T) {
 	require.Greater(t, test.GetMetricValue(t, metrics.appendBlockToLedgerSeconds), float64(0))
 
 	committerClient := test.NewInsecureClientConfig(&serverConfig.GRPC.Endpoint)
-	receivedBlocksFromLedgerService := delivercommitter.Start(t.Context(), t, committerClient, 0)
+	receivedBlocksFromLedgerService := delivercommitter.Start(t.Context(), t, delivercommitter.Parameters{
+		ClientConfig: committerClient,
+	})
 
 	blk1, _ := createBlockForTest(t, 1, protoutil.BlockHeaderHash(blk0.Header))
 	blk1.Metadata = metadata

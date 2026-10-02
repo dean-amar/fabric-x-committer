@@ -27,10 +27,12 @@ import (
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/coordinator"
 	"github.com/hyperledger/fabric-x-committer/service/sidecar"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
@@ -217,6 +219,12 @@ func TestLoadGenForSidecar(t *testing.T) {
 			// The sidecar adapter runs its own orderer.
 			e.StopServers()
 
+			authEnv := auth.NewAuthTestEnv(t, &auth.TestEnvParams{
+				ClientTLS:     e.ClientTLSConfig,
+				ServerTLS:     e.ServerTLSConfig,
+				ArtifactsPath: e.ArtifactsPath,
+			})
+
 			// Start server under test
 			sidecarConf := &sidecar.Config{
 				LastCommittedBlockSetInterval: 100 * time.Millisecond,
@@ -236,6 +244,9 @@ func TestLoadGenForSidecar(t *testing.T) {
 					Path: t.TempDir(),
 				},
 				Orderer: e.OrdererConnConfig,
+				Auth: &acl.Config{
+					MultiClientConfig: *authEnv.Config,
+				},
 			}
 			service, err := sidecar.New(sidecarConf)
 			require.NoError(t, err)
@@ -244,6 +255,7 @@ func TestLoadGenForSidecar(t *testing.T) {
 			lgEnv.clientConf.Adapter.SidecarClient = &adapters.SidecarClientConfig{
 				OrdererServers: test.GrpcServiceToConnectionServerConfigs(e.AllServerConfig...),
 				SidecarClient:  test.NewTLSClientConfig(e.ClientTLSConfig, &sidecarServerConf.GRPC.Endpoint),
+				Auth:           authEnv.Config,
 			}
 			lgEnv.testLoadGenerator(t)
 		})
