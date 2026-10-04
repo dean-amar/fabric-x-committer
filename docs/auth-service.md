@@ -94,12 +94,12 @@ non-mTLS path exists only for local development and tests and must not be used i
 
 ## Client and interceptors (`utils/acl`)
 
-- **Server side — `Enforcer`**: the unary and stream interceptors a resource server installs by returning
-  `Enforcer.ServerOptions()` from its `ServerOptions` method, which `utils/serve` applies when it builds the
-  gRPC server. They forward the caller's token (and TLS certificate hash) to `Authorize`; a stream binds the
-  *token* to its session and renews the decision from it. Health checks (`grpc.health.v1.Health`) are
-  exempt. The interceptors never inspect the request body: a decision depends only on the token, the
-  certificate on the connection, and the method name.
+- **Server side — `Enforcer`**: every gRPC server built by `utils/serve` carries an `ACLProvider` whose
+  interceptors pass calls through until a resource server registers its enforcer in `RegisterService`
+  (`serve.RegisterACLEnforcer`). Registration happens before the server serves,
+  so enforcement starts with the first RPC. The interceptors forward the caller's token (and TLS
+  certificate hash) to `Authorize`; a stream binds the *token* to its session and renews the decision from
+  it. Health checks (`grpc.health.v1.Health`) are exempt.
 - **Client side**: `IssueToken` fetches a nonce, signs it into an envelope (`BuildAuthEnvelope`) and
   exchanges it for a token; `ContextWithToken` attaches that token to one RPC or stream. A long-running
   client dials with `Credentials` (`grpc.WithPerRPCCredentials`) instead, which attaches a token to every

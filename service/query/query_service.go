@@ -18,7 +18,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -71,18 +70,13 @@ type (
 )
 
 // NewQueryService create a new QueryService given a configuration.
-func NewQueryService(config *Config) (*Service, error) {
-	aclEnforcer, err := acl.NewEnforcer(config.Auth)
-	if err != nil {
-		return nil, err
-	}
+func NewQueryService(config *Config) *Service {
 	return &Service{
 		config:      config,
 		metrics:     newQueryServiceMetrics(),
 		ready:       channel.NewReady(),
 		healthcheck: serve.DefaultHealthCheckService(),
-		aclEnforcer: aclEnforcer,
-	}, nil
+	}
 }
 
 // WaitForReady waits for the service resources to initialize, so it is ready to answers requests.
@@ -93,6 +87,13 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
+	// Must be set before SignalReady: serve registers it with the gRPC server only once the service is
+	// ready, so ACL is still enforced from the first RPC.
+	aclEnforcer, err := acl.NewEnforcer(q.config.Auth)
+	if err != nil {
+		return err
+	}
+	q.aclEnforcer = aclEnforcer
 	defer q.aclEnforcer.Close()
 
 	pool, poolErr := statedb.NewPool(ctx, q.config.Database)
@@ -135,13 +136,9 @@ func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
 	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
+	serve.RegisterACLEnforcer(s.ACLProvider, q.aclEnforcer)
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 	serve.RegisterServerMetrics(s.StatsHandler, q.metrics.serverMetrics)
-}
-
-// ServerOptions installs the ACL interceptors, if configured, when serve builds the gRPC server.
-func (q *Service) ServerOptions() []grpc.ServerOption {
-	return q.aclEnforcer.ServerOptions()
 }
 
 // BeginView implements the query-service interface.

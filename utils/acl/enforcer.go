@@ -52,10 +52,9 @@ type Enforcer struct {
 	config Config
 }
 
-// NewEnforcer dials the AuthService, or returns nil when the auth section is absent. It is called from a
-// service constructor, so the enforcer exists before serve builds the gRPC server: whether ACL is enforced
-// follows from configuration alone, never from startup ordering. Every method is nil-safe, so a service
-// holds and uses the result either way.
+// NewEnforcer dials the AuthService, or returns nil when the auth section is absent. A service creates it in
+// Run before signaling ready, and registers it with its gRPC server (serve.RegisterACLEnforcer), where a nil
+// enforcer leaves the server unenforced. Close is nil-safe, so a service closes the result either way.
 func NewEnforcer(config *Config) (*Enforcer, error) {
 	if config == nil {
 		return nil, nil //nolint:nilnil // a nil enforcer is the deliberate result when ACL is not configured.
@@ -87,17 +86,6 @@ func NewEnforcer(config *Config) (*Enforcer, error) {
 	return e, nil
 }
 
-// ServerOptions returns the interceptors that enforce ACL on a gRPC server, or none for a nil Enforcer.
-func (e *Enforcer) ServerOptions() []grpc.ServerOption {
-	if e == nil {
-		return nil
-	}
-	return []grpc.ServerOption{
-		grpc.ChainUnaryInterceptor(e.unaryInterceptor),
-		grpc.ChainStreamInterceptor(e.streamInterceptor),
-	}
-}
-
 // Close releases the connection the enforcer owns.
 func (e *Enforcer) Close() {
 	if e == nil {
@@ -106,8 +94,8 @@ func (e *Enforcer) Close() {
 	connection.CloseConnectionsLog(e.conn)
 }
 
-// unaryInterceptor authorizes every non-exempt unary RPC before its handler runs.
-func (e *Enforcer) unaryInterceptor(
+// UnaryInterceptor authorizes every non-exempt unary RPC before its handler runs.
+func (e *Enforcer) UnaryInterceptor(
 	ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
 ) (any, error) {
 	if isExempt(info.FullMethod) {
@@ -123,9 +111,9 @@ func (e *Enforcer) unaryInterceptor(
 	return handler(ctx, req)
 }
 
-// streamInterceptor authorizes a non-exempt stream at establishment and binds its token, so the decision
+// StreamInterceptor authorizes a non-exempt stream at establishment and binds its token, so the decision
 // can be renewed for as long as the stream lives.
-func (e *Enforcer) streamInterceptor(
+func (e *Enforcer) StreamInterceptor(
 	srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler,
 ) error {
 	if isExempt(info.FullMethod) {

@@ -143,12 +143,6 @@ func New(c *Config) (*Service, error) {
 	deliveryParams.Metrics = metrics.delivery
 	relayService := newRelay(c.LastCommittedBlockSetInterval, c.CheckpointHoldRetryInterval, c.TxParsing, metrics)
 
-	// 3. Enforce ACL on the exposed API, if configured.
-	aclEnforcer, err := acl.NewEnforcer(c.Auth)
-	if err != nil {
-		return nil, err
-	}
-
 	return &Service{
 		deliveryParams: deliveryParams,
 		relay:          relayService,
@@ -158,7 +152,6 @@ func New(c *Config) (*Service, error) {
 		metrics:        metrics,
 		queues:         q,
 		ready:          channel.NewReady(),
-		aclEnforcer:    aclEnforcer,
 	}, nil
 }
 
@@ -170,6 +163,13 @@ func (s *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the sidecar service. The call to Run blocks until an error occurs or the context is canceled.
 func (s *Service) Run(ctx context.Context) error {
+	// Must be set before SignalReady: serve registers it with the gRPC server only once the service is
+	// ready, so ACL is still enforced from the first RPC.
+	aclEnforcer, err := acl.NewEnforcer(s.config.Auth)
+	if err != nil {
+		return err
+	}
+	s.aclEnforcer = aclEnforcer
 	defer s.aclEnforcer.Close()
 
 	// Deliver the block with status to client.
@@ -230,13 +230,9 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	peer.RegisterDeliverServer(srv.GRPC, s)
 	healthgrpc.RegisterHealthServer(srv.GRPC, s.healthcheck)
 	serve.RegisterDynamicTLSUpdater(srv.GrpcTLSProvider, &s.tlsUpdater)
+	serve.RegisterACLEnforcer(srv.ACLProvider, s.aclEnforcer)
 	monitoring.RegisterMonitoringServer(srv.HTTP, s.metrics.Provider)
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
-}
-
-// ServerOptions installs the ACL interceptors, if configured, when serve builds the gRPC server.
-func (s *Service) ServerOptions() []grpc.ServerOption {
-	return s.aclEnforcer.ServerOptions()
 }
 
 func (s *Service) sendBlocksAndReceiveStatus(

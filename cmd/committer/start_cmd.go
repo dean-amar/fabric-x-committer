@@ -67,10 +67,7 @@ func startServiceCommand(name string) *cobra.Command {
 			case *verifier.Config:
 				service = verifier.New(c)
 			case *query.Config:
-				service, err = query.NewQueryService(c)
-				if err != nil {
-					return errors.Wrap(err, "failed to create query service")
-				}
+				service = query.NewQueryService(c)
 			case *snapshothasher.Config:
 				service = snapshothasher.NewSnapshotHasherService(c)
 			case *auth.Config:

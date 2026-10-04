@@ -59,9 +59,7 @@ func New(config *Config) *Server {
 
 Rules:
 - The constructor does **pure in-memory wiring** (channels, metrics, healthcheck). It does
-  **not** open DB or gRPC connections — those happen in `Run`. The one exception is a dependency
-  the gRPC *server* needs at construction time: the ACL enforcer is dialed in the constructor so
-  `serve` can install its interceptors, and closed in `Run`.
+  **not** open DB or gRPC connections — those happen in `Run`.
 - Return concrete `*T` with **no error** for in-memory wiring. Return `(*T, error)` only
   when construction does I/O (e.g. `newDatabase(ctx, cfg, metrics) (*database, error)`,
   `service/vc/database.go:91`, or `sidecar.New` which parses orderer params eagerly).
