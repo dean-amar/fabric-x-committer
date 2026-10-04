@@ -71,6 +71,25 @@ func TestACLQuery(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, grpcerror.GetCode(err))
 }
 
+// TestACLSidecar verifies the sidecar enforces ACL against a live system: a block query with a token reaches
+// the handler, and the same query without one is refused.
+func TestACLSidecar(t *testing.T) {
+	t.Parallel()
+	c := newACLRuntime(t, 1)
+	ctx := t.Context()
+
+	// Step 1: A token admits the query.
+	t.Log("Step 1: query the blockchain info with a token")
+	info, err := c.NotifyClient.GetBlockchainInfo(acl.ContextWithToken(ctx, c.AuthEnv.IssueToken(t)), nil)
+	require.NoError(t, err)
+	require.Positive(t, info.GetHeight())
+
+	// Step 2: Without a token, the sidecar refuses it before the handler.
+	t.Log("Step 2: the same query without a token is refused")
+	_, err = c.NotifyClient.GetBlockchainInfo(ctx, nil)
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
+}
+
 // TestACLAuthServiceRestart verifies an AuthService restart is invisible to its clients: a token issued before
 // it still authorizes after it, because tokens live in the database.
 func TestACLAuthServiceRestart(t *testing.T) {

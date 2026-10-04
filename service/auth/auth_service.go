@@ -9,7 +9,6 @@ package auth
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -37,8 +36,7 @@ import (
 
 var logger = flogging.MustGetLogger("auth")
 
-// authEnvelopeType is the header type an authentication envelope carries. Ordinary transactions use it
-// too, so it is domain separation, not replay protection - the single-use nonce is what stops replay.
+// authEnvelopeType is the header type an authentication envelope carries.
 const authEnvelopeType = int32(common.HeaderType_MESSAGE)
 
 type (
@@ -155,8 +153,7 @@ func (s *Service) RegisterService(srv serve.Servers) {
 	serve.RegisterServerMetrics(srv.StatsHandler, s.metrics.serverMetrics)
 }
 
-// IssueNonce issues a single-use nonce for the client's next Authenticate. It needs no configuration
-// bundle: a nonce carries no authority on its own.
+// IssueNonce issues a single-use nonce for the client's next Authenticate.
 func (s *Service) IssueNonce(
 	ctx context.Context, _ *servicepb.IssueNonceRequest,
 ) (*servicepb.IssueNonceResponse, error) {
@@ -193,11 +190,11 @@ func (s *Service) Authenticate(
 	now := time.Now()
 	parsed, err := parseSignedEnvelope(req.GetSignedEnvelope())
 	if err != nil {
-		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+		return nil, grpcerror.WrapUnauthenticated(errors.Newf("authentication failed: %v", err))
 	}
 
-	// Redeem before verifying the signature: a spent nonce is a replay however well signed, and redeeming
-	// first stops a replayer from making the service repeat the expensive signature check.
+	// Redeem before verifying the signature: redeeming first stops a replayer from making
+	// the service repeat the expensive signature check.
 	if err = s.db.consumeNonce(ctx, parsed.nonce, now); err != nil {
 		if !errors.Is(err, errNonceNotFound) {
 			return nil, grpcerror.WrapInternalError(err)
@@ -207,7 +204,7 @@ func (s *Service) Authenticate(
 
 	identity, err := s.verifyEnvelope(ctx, parsed, bundle, now)
 	if err != nil {
-		return nil, grpcerror.WrapUnauthenticated(fmt.Errorf("authentication failed: %w", err))
+		return nil, grpcerror.WrapUnauthenticated(errors.Newf("authentication failed: %v", err))
 	}
 
 	rec := &servicepb.TokenRecord{

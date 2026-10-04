@@ -70,8 +70,6 @@ func evaluateResourcePolicy(
 			ref, resource)
 	}
 	if err = policy.EvaluateIdentities([]msp.Identity{identity}); err != nil {
-		// Return the bare reason; the resource-server interceptor prefixes it with the resource
-		// name so the "ACL check failed for [resource]:" context appears exactly once.
 		return errors.Wrap(err, "identity is not authorized by the resource policy")
 	}
 	return nil

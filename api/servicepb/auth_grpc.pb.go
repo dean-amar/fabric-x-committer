@@ -44,10 +44,14 @@ type AuthServiceClient interface {
 	// replayed even within the freshness window.
 	IssueNonce(ctx context.Context, in *IssueNonceRequest, opts ...grpc.CallOption) (*IssueNonceResponse, error)
 	// Authenticate verifies a signed envelope and issues a short-lived, cert-bound opaque token.
+	// (-- api-linter: core::0136::verb-noun=disabled
+	//     aip.dev/not-precedent: Authenticate is the conventional name for this RPC. --)
 	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
 	// Authorize evaluates a token against a resource policy for a resource server. A stream calls it
 	// again with the same token whenever its cached decision lapses, so token expiry and configuration
 	// changes both take effect on an established stream.
+	// (-- api-linter: core::0136::verb-noun=disabled
+	//     aip.dev/not-precedent: Authorize is the conventional name for this RPC. --)
 	Authorize(ctx context.Context, in *AuthorizeRequest, opts ...grpc.CallOption) (*AuthorizeResponse, error)
 }
 
@@ -104,10 +108,14 @@ type AuthServiceServer interface {
 	// replayed even within the freshness window.
 	IssueNonce(context.Context, *IssueNonceRequest) (*IssueNonceResponse, error)
 	// Authenticate verifies a signed envelope and issues a short-lived, cert-bound opaque token.
+	// (-- api-linter: core::0136::verb-noun=disabled
+	//     aip.dev/not-precedent: Authenticate is the conventional name for this RPC. --)
 	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
 	// Authorize evaluates a token against a resource policy for a resource server. A stream calls it
 	// again with the same token whenever its cached decision lapses, so token expiry and configuration
 	// changes both take effect on an established stream.
+	// (-- api-linter: core::0136::verb-noun=disabled
+	//     aip.dev/not-precedent: Authorize is the conventional name for this RPC. --)
 	Authorize(context.Context, *AuthorizeRequest) (*AuthorizeResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }

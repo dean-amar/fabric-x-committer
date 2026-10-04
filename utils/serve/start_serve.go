@@ -310,7 +310,8 @@ func newGRPCServer(
 			PermitWithoutStream: c.KeepAlive.EnforcementPolicy.PermitWithoutStream,
 		}))
 	}
-	opts = append(opts,
+	opts = append(
+		opts,
 		grpc.ChainUnaryInterceptor(aclProvider.unaryInterceptor),
 		grpc.ChainStreamInterceptor(aclProvider.streamInterceptor),
 	)

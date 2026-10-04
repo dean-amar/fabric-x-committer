@@ -107,7 +107,7 @@ func NewAuthTestEnv(t *testing.T, params *TestEnvParams) *TestEnv {
 	return env
 }
 
-// NewAuthClientTestEnv connects to running AuthService instances - such as an integration topology's - and
+// NewAuthClientTestEnv connects to running AuthService instances and
 // signs as the first peer identity found under artifactsPath. The client balances across the instances,
 // so a nonce issued by one of them is redeemed at another.
 func NewAuthClientTestEnv(
@@ -137,7 +137,7 @@ func NewAuthClientTestEnv(
 }
 
 // IssueToken authenticates and returns a token the resource servers accept. It retries until the service
-// has loaded a channel configuration to authenticate against, so it doubles as the wait for one.
+// has loaded a channel configuration to authenticate against.
 func (e *TestEnv) IssueToken(t *testing.T) string {
 	t.Helper()
 	var token string

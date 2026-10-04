@@ -151,8 +151,7 @@ sweep-interval: 1m
 
 # Throttles IssueNonce and Authenticate - the only RPCs reachable without a token, and the only ones
 # costing a signature verification and an MSP resolution. Separate from the server's `rate-limit` above
-# because that must stay high enough for Authorize, which fires once per protected RPC across the whole
-# cluster; one number cannot serve both.
+# because that must stay high enough for Authorize, which fires once per protected RPC; one number cannot serve both.
 challenge-rate-limit:
   # Set to 0 to disable. Default: 200
   requests-per-second: 200

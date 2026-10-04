@@ -17,13 +17,11 @@ authoritative state lives in one place (the state database), not on a socket or 
 The service is composed of focused collaborators, each with one responsibility:
 
 - **`configProvider`** (`config_provider.go`) — *reads* the latest committed channel configuration from the
-  `ns__config` namespace and exposes it as a `channelconfig.Bundle`, refreshing on an interval. It
-  mirrors how the query service reads the config transaction to refresh its TLS roots; the auth
+  `ns__config` namespace and exposes it as a `channelconfig.Bundle`, refreshing on an interval. The auth
   service never owns or mutates configuration, it only reads what the sidecar and coordinator commit.
 - **`database`** (`database.go`) — persists the token-to-identity bindings in the `auth_tokens` table,
   keyed by each token's SHA-256 (with the client's MSP identity, certificate binding, scope, and expiry),
-  and the unredeemed nonces in the `auth_nonces` table. It has no in-memory cache: each lookup is a
-  primary-key read, and a cache is deferred until profiling shows the read matters.
+  and the unredeemed nonces in the `auth_nonces` table.
 - **`Service`** (`auth_service.go`) — owns the above and exposes the gRPC handlers: `Authenticate`
   verifies a signed envelope (scope, freshness, certificate binding, MSP identity, signature) and issues a
   token, and `Authorize` answers authorization decisions, with `policy.go` resolving the resource policy.

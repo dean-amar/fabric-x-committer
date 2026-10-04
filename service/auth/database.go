@@ -114,9 +114,7 @@ func (db *database) insertNonce(ctx context.Context, expiresAt time.Time) ([]byt
 	}, puddle.ErrClosedPool)
 }
 
-// consumeNonce redeems a nonce, returning errNonceNotFound unless it was present and unexpired. If a delete
-// commits but loses its reply, the retry finds the nonce gone and rejects it: that fails closed, and the
-// client authenticates again with a fresh nonce.
+// consumeNonce redeems a nonce, returning errNonceNotFound unless it was present and unexpired.
 func (db *database) consumeNonce(ctx context.Context, nonce []byte, now time.Time) error {
 	if len(nonce) == 0 {
 		return errors.Wrap(errNonceNotFound, "envelope carries no nonce")
