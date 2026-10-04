@@ -133,12 +133,12 @@ func (e *Enforcer) StreamInterceptor(
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
 	// A reported expiry of zero means the AuthService knows of no bound, not "expired at the epoch":
-	// leaving it as the zero time is what checkBoundTokenLocked reads as "no local bound".
+	// leaving it as the zero time is what checkBoundToken reads as "no local bound".
 	var tokenExpiresAt time.Time
 	if expiry := resp.GetTokenExpiresAt(); expiry > 0 {
 		tokenExpiresAt = time.Unix(expiry, 0)
 	}
-	return handler(srv, &authorizedStream{
+	stream := &authorizedStream{
 		ServerStream:    ss,
 		ctx:             ctx,
 		cancel:          cancel,
@@ -147,7 +147,14 @@ func (e *Enforcer) StreamInterceptor(
 		token:           token,
 		tokenExpiresAt:  tokenExpiresAt,
 		nextAuthorizeAt: time.Now().Add(e.config.StreamReAuthorizeInterval),
-	})
+	}
+
+	err = handler(srv, stream)
+	// A denial also cancels the stream's context, so the handler may return that cancellation instead.
+	if denied := stream.deniedError(); denied != nil {
+		return denied
+	}
+	return err
 }
 
 // authorize fails closed: a policy denial, an invalid token and an unreachable AuthService all surface as
