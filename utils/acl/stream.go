@@ -66,6 +66,13 @@ func (s *authorizedStream) SendMsg(m any) error {
 	return s.ServerStream.SendMsg(m)
 }
 
+// deniedError returns the terminal error, or nil while the stream is authorized.
+func (s *authorizedStream) deniedError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.denied
+}
+
 // authorizeIfLapsed applies the two bounds a stream has: the token's expiry, checked locally on every message,
 // and a re-authorization once per interval, which makes a policy change observable. Any failed
 // re-authorization ends the stream.
