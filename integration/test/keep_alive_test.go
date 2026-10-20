@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
@@ -86,7 +87,10 @@ func TestKeepAliveSidecarDeadConnectionDetection(t *testing.T) {
 		t, c.SystemConfig.Services.Sidecar.GrpcEndpoint.Address(), clientCredentials(t, c),
 	)
 
-	sendSidecarInitialMessage(t, conn)
+	ctx, cancel := context.WithTimeout(acl.ContextWithToken(t.Context(), c.AuthEnv.IssueToken(t)), 5*time.Minute)
+	t.Cleanup(cancel)
+
+	sendSidecarInitialMessage(ctx, t, conn)
 
 	blockAndWaitForServerClose(t, blockAndWaitParameters{
 		proxy:                   proxy,
@@ -118,7 +122,7 @@ func TestKeepAliveQueryDeadConnectionDetection(t *testing.T) {
 		t, c.SystemConfig.Services.Query.GrpcEndpoint.Address(), clientCredentials(t, c),
 	)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(acl.ContextWithToken(t.Context(), c.AuthEnv.IssueToken(t)), 5*time.Minute)
 	t.Cleanup(cancel)
 
 	_, err := committerpb.NewQueryServiceClient(conn).GetTransactionStatus(ctx, &committerpb.TxStatusQuery{
@@ -162,10 +166,10 @@ func TestKeepAliveSidecarStreamSlotRelease(t *testing.T) {
 
 	proxy, conn := dialThroughProxy(t, addr, clientCreds)
 
-	sendSidecarInitialMessage(t, conn)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(acl.ContextWithToken(t.Context(), c.AuthEnv.IssueToken(t)), 5*time.Minute)
 	t.Cleanup(cancel)
+
+	sendSidecarInitialMessage(ctx, t, conn)
 
 	conn2, err := grpc.NewClient(addr, grpc.WithTransportCredentials(clientCreds))
 	require.NoError(t, err)
@@ -262,10 +266,8 @@ func blockAndWaitForServerClose(t *testing.T, params blockAndWaitParameters) {
 }
 
 // sendSidecarInitialMessage opens a notification stream so the sidecar has traffic to monitor with keep-alive.
-func sendSidecarInitialMessage(t *testing.T, conn *grpc.ClientConn) {
+func sendSidecarInitialMessage(ctx context.Context, t *testing.T, conn *grpc.ClientConn) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-	t.Cleanup(cancel)
 
 	stream, err := committerpb.NewSidecarServiceClient(conn).OpenNotificationStream(ctx)
 	require.NoError(t, err)

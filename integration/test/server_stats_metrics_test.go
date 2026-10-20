@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/test"
 )
 
@@ -46,7 +47,9 @@ func TestServerStatsMetricsFullSystem(t *testing.T) {
 	c := runner.NewRuntime(t, &runner.Config{BlockTimeout: 2 * time.Second})
 	c.Start(t, runner.FullTxPathWithQuery)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(
+		acl.ContextWithToken(t.Context(), c.AuthEnv.IssueToken(t)), 5*time.Minute,
+	)
 	t.Cleanup(cancel)
 
 	queryMetrics := test.NewMetricsConnectionParameters(

@@ -28,7 +28,9 @@ import (
 	"github.com/hyperledger/fabric-x-committer/integration/runner"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
 	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/delivercommitter"
@@ -43,6 +45,7 @@ var (
 	mockOrdererPort        = network.MustParsePort("7050/tcp")
 	queryServicePort       = network.MustParsePort("7001/tcp")
 	coordinatorServicePort = network.MustParsePort("9001/tcp")
+	authServicePort        = network.MustParsePort("10001/tcp")
 	databasePort           = network.MustParsePort("5433/tcp")
 
 	// The 'db' op initializes the database on its own, so 'init-db' is not passed here.
@@ -105,6 +108,9 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 						Sidecar:     getServerConfig(sidecarPort),
 						Query:       getServerConfig(queryServicePort),
 						Coordinator: getServerConfig(coordinatorServicePort),
+						Auth: []config.ServiceConfig{
+							getServerConfig(authServicePort),
+						},
 					},
 					Policy:    &c.LoadProfile.Policy,
 					ClientTLS: clientTLS,
@@ -124,12 +130,15 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			}
 
 			runtime.CreateRuntimeClients(ctx, t)
-			runtime.OpenNotificationStream(ctx, t)
+
+			authCtx := acl.ContextWithToken(t.Context(), runtime.AuthEnv.IssueToken(t))
+
+			runtime.OpenNotificationStream(authCtx, t)
 
 			// Adding namespace policy and creating transaction builder
 			runtime.AddOrUpdateNamespaces(t, "1")
 
-			runtime.CommittedBlock = delivercommitter.Start(ctx, t, delivercommitter.Parameters{
+			runtime.CommittedBlock = delivercommitter.Start(authCtx, t, delivercommitter.Parameters{
 				ClientConfig: runtime.SidecarClientConfig,
 			})
 
@@ -161,7 +170,7 @@ func TestStartTestNodeWithTLSModesAndRemoteConnection(t *testing.T) {
 			require.Len(t, txIDs, 1)
 
 			t.Log("Query Rows")
-			timeoutContext, cancel := context.WithTimeout(ctx, time.Minute)
+			timeoutContext, cancel := context.WithTimeout(authCtx, time.Minute)
 			t.Cleanup(cancel)
 
 			ret, err := runtime.QueryServiceClient.GetRows(
@@ -220,7 +229,21 @@ func TestStartTestNode(t *testing.T) {
 	t.Log("Try to fetch the first block")
 	sidecarEndpoint := mustGetEndpoint(ctx, t, containerName, sidecarPort)
 	committerClient := test.NewInsecureClientConfig(sidecarEndpoint)
-	committedBlock := delivercommitter.Start(ctx, t, delivercommitter.Parameters{ClientConfig: committerClient})
+
+	// The sidecar enforces ACL, so the delivery stream carries a token signed by the container's own crypto.
+	authEnv := auth.NewAuthClientTestEnv(
+		t,
+		test.NewTLSMultiClientConfig(
+			test.InsecureTLSConfig,
+			mustGetEndpoint(ctx, t, containerName, authServicePort),
+		),
+		copyArtifactsFromContainer(ctx, t, containerName),
+		"mychannel",
+	)
+	committedBlock := delivercommitter.Start(
+		acl.ContextWithToken(ctx, authEnv.IssueToken(t)),
+		t, delivercommitter.Parameters{ClientConfig: committerClient},
+	)
 	b, ok := channel.NewReader(ctx, committedBlock).Read()
 	require.True(t, ok)
 	t.Logf("Received block #%d with %d TXs", b.Header.Number, len(b.Data.Data))
@@ -291,6 +314,11 @@ func TestYugabyteDriverDiscoveryWithSingleNodeConnection(t *testing.T) {
 			"SC_QUERY_DATABASE_LOAD_BALANCE=true",
 			"SC_QUERY_DATABASE_TLS_MODE=" + connection.NoneTLSMode,
 
+			"SC_AUTH_DATABASE_ENDPOINTS=" + singleTabletAddress,
+			"SC_AUTH_DATABASE_USERNAME=" + testdb.YugaDBType,
+			"SC_AUTH_DATABASE_DATABASE=" + testdb.YugaDBType,
+			"SC_AUTH_DATABASE_LOAD_BALANCE=true",
+			"SC_AUTH_DATABASE_TLS_MODE=" + connection.NoneTLSMode,
 			// We are limiting the number of transactions to ensure transactions are not processed from the VC queue.
 			"SC_LOADGEN_STREAM_RATE_LIMIT=1000",
 		},
@@ -327,6 +355,7 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				queryServicePort:       struct{}{},
 				coordinatorServicePort: struct{}{},
 				databasePort:           struct{}{},
+				authServicePort:        struct{}{},
 			},
 			Env: append([]string{
 				"SC_COORDINATOR_SERVER_TLS_MODE=" + params.tlsMode,
@@ -335,9 +364,11 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_COORDINATOR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_QUERY_MONITORING_TLS_MODE=" + params.tlsMode,
+				"SC_QUERY_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_SIDECAR_COMMITTER_TLS_MODE=" + params.tlsMode,
+				"SC_SIDECAR_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_VC_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_VC_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_VERIFIER_SERVER_TLS_MODE=" + params.tlsMode,
@@ -348,7 +379,10 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				"SC_LOADGEN_SERVER_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_MONITORING_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_SIDECAR_CLIENT_TLS_MODE=" + params.tlsMode,
+				"SC_LOADGEN_ORDERER_CLIENT_AUTH_TLS_MODE=" + params.tlsMode,
 				"SC_LOADGEN_ORDERER_CLIENT_ORDERER_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_SERVER_TLS_MODE=" + params.tlsMode,
+				"SC_AUTH_MONITORING_TLS_MODE=" + params.tlsMode,
 			}, params.additionalEnvs...),
 			Healthcheck: &container.HealthConfig{
 				Test:        []string{"CMD", "healthcheck"},
@@ -368,6 +402,7 @@ func startCommitter(ctx context.Context, t *testing.T, params startNodeParameter
 				queryServicePort:       localHostBind,
 				coordinatorServicePort: localHostBind,
 				databasePort:           localHostBind,
+				authServicePort:        localHostBind,
 			},
 		},
 		name: params.node,
