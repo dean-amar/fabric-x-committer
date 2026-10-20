@@ -18,3 +18,8 @@ max-request-keys: {{ .MaxRequestKeys }}
 {{- if .QueryTLSRefreshInterval }}
 tls-refresh-interval: {{ .QueryTLSRefreshInterval }}
 {{- end }}
+
+{{- if .Services.Auth }}
+auth:
+{{ include "endpointListWithSharedTLS" (dict "Servers" .Services.Auth "TLS" .ClientTLS) | indent 2 }}
+{{- end }}
