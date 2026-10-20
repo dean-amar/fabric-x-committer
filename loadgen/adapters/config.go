@@ -30,6 +30,9 @@ type (
 		// SidecarClient is used to deliver status from the sidecar.
 		// If omitted, we will fetch directly from the orderer.
 		SidecarClient *connection.ClientConfig `mapstructure:"sidecar-client"`
+		// Auth lists the auth service instances the sidecar delivery stream authenticates against,
+		// required when the sidecar enforces ACL. Ignored when delivery falls back to the orderer.
+		Auth *connection.MultiClientConfig `mapstructure:"auth"`
 	}
 
 	// SidecarClientConfig is a struct that contains the configuration for the sidecar client.
@@ -37,5 +40,8 @@ type (
 	SidecarClientConfig struct {
 		SidecarClient  *connection.ClientConfig `mapstructure:"sidecar-client"`
 		OrdererServers []*serve.ServerConfig    `mapstructure:"orderer-servers"`
+		// Auth lists the auth service instances the sidecar delivery stream authenticates against,
+		// required when the sidecar enforces ACL.
+		Auth *connection.MultiClientConfig `mapstructure:"auth"`
 	}
 )

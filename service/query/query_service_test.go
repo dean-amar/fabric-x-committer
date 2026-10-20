@@ -23,15 +23,19 @@ import (
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/codes"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen"
 	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
 	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/hyperledger/fabric-x-committer/service/auth"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/serve"
 	"github.com/hyperledger/fabric-x-committer/utils/signature"
 	"github.com/hyperledger/fabric-x-committer/utils/statedb"
@@ -40,6 +44,7 @@ import (
 
 type (
 	queryServiceTestEnv struct {
+		authEnv      *auth.TestEnv
 		config       *Config
 		serverConfig *serve.Config
 		qs           *Service
@@ -53,6 +58,7 @@ type (
 		clientTLS      connection.TLSConfig
 		maxRequestKeys int
 		maxActiveViews int
+		enableACL      bool
 	}
 )
 
@@ -557,6 +563,33 @@ func TestQueryWithConsistentView(t *testing.T) {
 	env.endView(t, client, view3)
 }
 
+// TestQueryWithACL runs an ordinary query against an ACL-enforcing service: with a token it reaches the
+// handler, without one it is refused by the interceptor, while health checks stay exempt. The refusal is
+// what proves enforcement is on - the first call would pass just as well with no interceptor installed.
+func TestQueryWithACL(t *testing.T) {
+	t.Parallel()
+	serverTLS, clientTLS := test.CreateServerAndClientTLSConfig(t, connection.MutualTLSMode)
+	env := newQueryServiceTestEnv(t, &queryServiceTestOpts{
+		serverTLS: serverTLS,
+		clientTLS: clientTLS,
+		enableACL: true,
+	})
+
+	policies, err := env.clientConn.GetNamespacePolicies(
+		acl.ContextWithToken(t.Context(), env.authEnv.IssueToken(t)), nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, policies.Policies, len(env.ns))
+
+	_, err = env.clientConn.GetNamespacePolicies(t.Context(), nil)
+	require.Equal(t, codes.Unauthenticated, grpcerror.GetCode(err))
+
+	// Probes carry no token, so liveness and readiness checks must keep working once ACL is on.
+	health := test.CreateClientWithTLS(t, &env.serverConfig.GRPC.Endpoint, clientTLS, healthgrpc.NewHealthClient)
+	_, err = health.Check(t.Context(), &healthgrpc.HealthCheckRequest{})
+	require.NoError(t, err)
+}
+
 func TestQueryPolicies(t *testing.T) {
 	t.Parallel()
 	env := newQueryServiceTestEnv(t, nil)
@@ -633,6 +666,19 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 		Database:              dbConf,
 		TLSRefreshInterval:    100 * time.Millisecond,
 	}
+	var authEnv *auth.TestEnv
+	if opts.enableACL {
+		// Two instances over one database, so every ACL test authorizes across both - round robin sends a
+		// token issued through one instance to the other on the next call.
+		authEnv = auth.NewAuthTestEnv(t, &auth.TestEnvParams{
+			Instances: 2,
+			ServerTLS: opts.serverTLS,
+			ClientTLS: opts.clientTLS,
+		})
+		config.Auth = &acl.Config{
+			MultiClientConfig: *authEnv.Config,
+		}
+	}
 	serverConfig := test.NewLocalHostServiceConfig(opts.serverTLS)
 
 	qs := NewQueryService(config)
@@ -646,6 +692,7 @@ func newQueryServiceTestEnv(t *testing.T, opts *queryServiceTestOpts) *queryServ
 	t.Cleanup(pool.Close)
 
 	return &queryServiceTestEnv{
+		authEnv:      authEnv,
 		config:       config,
 		serverConfig: serverConfig,
 		qs:           qs,
