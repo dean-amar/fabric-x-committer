@@ -447,7 +447,7 @@ Cross-reference PR changes against documentation:
 
 | Documentation | Path | Update When... |
 |---------------|------|----------------|
-| Service architecture | `docs/{sidecar,coordinator,validator-committer,verification-service,query-service}.md` | Workflow/pipeline/API changes |
+| Service architecture | `docs/{sidecar,coordinator,validator-committer,verification-service,query-service,auth-service}.md` | Workflow/pipeline/API changes |
 | Core concurrency | `docs/core-concurrency-pattern.md` | New concurrency primitives |
 | Setup guide | `docs/setup.md` | New prereqs, env vars, config changes |
 | TLS config | `docs/tls-configurations.md` | TLS mode/cert changes |
