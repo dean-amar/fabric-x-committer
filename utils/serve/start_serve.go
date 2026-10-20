@@ -55,6 +55,10 @@ type (
 		// Services opt in by registering via RegisterServerMetrics.
 		StatsHandler *ServerStatsHandler
 
+		// ACLProvider enforces ACL on the gRPC server's RPCs.
+		// Services opt in by registering via RegisterACLEnforcer.
+		ACLProvider *ACLProvider
+
 		httpServer *http.Server
 
 		grpcListener net.Listener
@@ -139,8 +143,9 @@ func NewServers(ctx context.Context, conf *Config) (s Servers, err error) {
 	}
 
 	s.StatsHandler = &ServerStatsHandler{}
+	s.ACLProvider = &ACLProvider{}
 
-	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.StatsHandler)
+	s.GRPC, err = newGRPCServer(&conf.GRPC, s.GrpcTLSProvider, s.StatsHandler, s.ACLProvider)
 	if err != nil {
 		return s, errors.Wrapf(err, "failed creating GRPC server")
 	}
@@ -263,8 +268,11 @@ func newHTTPListener(ctx context.Context, c *ServerConfig, tlsConfig *tls.Config
 	return l, nil
 }
 
-// newGRPCServer instantiate a [grpc.Server].
-func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler) (*grpc.Server, error) {
+// newGRPCServer instantiate a [grpc.Server]. The ACL interceptors chain after the server-wide limits, so ACL
+// is checked only for a call the limits admitted.
+func newGRPCServer(
+	c *ServerConfig, tlsProvider *TLSProvider, statsHandler *ServerStatsHandler, aclProvider *ACLProvider,
+) (*grpc.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(connection.MaxMsgSize),
 		grpc.MaxSendMsgSize(connection.MaxMsgSize),
@@ -302,6 +310,11 @@ func newGRPCServer(c *ServerConfig, tlsProvider *TLSProvider, statsHandler *Serv
 			PermitWithoutStream: c.KeepAlive.EnforcementPolicy.PermitWithoutStream,
 		}))
 	}
+	opts = append(
+		opts,
+		grpc.ChainUnaryInterceptor(aclProvider.unaryInterceptor),
+		grpc.ChainStreamInterceptor(aclProvider.streamInterceptor),
+	)
 	return grpc.NewServer(opts...), nil
 }
 

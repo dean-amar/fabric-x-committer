@@ -127,6 +127,7 @@ Each module in the codebase registers a named logger. Use these names in the `lo
 
 | Module Name | Description |
 |-------------|-------------|
+| `acl` | ACL enforcement interceptors and client token source |
 | `config-reader` | Configuration reader |
 | `grpc-connection` | gRPC connection utilities |
 | `grpcerror` | gRPC error handling |

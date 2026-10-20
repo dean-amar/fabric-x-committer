@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/channel"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
@@ -64,6 +65,7 @@ type (
 		ready       *channel.Ready
 		healthcheck *health.Server
 		tlsUpdater  serve.DynamicTLSUpdater
+		aclEnforcer *acl.Enforcer
 	}
 )
 
@@ -85,6 +87,15 @@ func (q *Service) WaitForReady(ctx context.Context) bool {
 
 // Run starts the Prometheus server.
 func (q *Service) Run(ctx context.Context) error {
+	// Must be set before SignalReady: serve registers it with the gRPC server only once the service is
+	// ready, so ACL is still enforced from the first RPC.
+	aclEnforcer, err := acl.NewEnforcer(q.config.Auth)
+	if err != nil {
+		return err
+	}
+	q.aclEnforcer = aclEnforcer
+	defer q.aclEnforcer.Close()
+
 	pool, poolErr := statedb.NewPool(ctx, q.config.Database)
 	if poolErr != nil {
 		return poolErr
@@ -125,6 +136,7 @@ func (q *Service) RegisterService(s serve.Servers) {
 	committerpb.RegisterQueryServiceServer(s.GRPC, q)
 	healthgrpc.RegisterHealthServer(s.GRPC, q.healthcheck)
 	serve.RegisterDynamicTLSUpdater(s.GrpcTLSProvider, &q.tlsUpdater)
+	serve.RegisterACLEnforcer(s.ACLProvider, q.aclEnforcer)
 	monitoring.RegisterMonitoringServer(s.HTTP, q.metrics.Provider)
 	serve.RegisterServerMetrics(s.StatsHandler, q.metrics.serverMetrics)
 }

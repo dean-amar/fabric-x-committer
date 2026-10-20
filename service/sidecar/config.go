@@ -9,6 +9,7 @@ package sidecar
 import (
 	"time"
 
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 )
@@ -32,7 +33,10 @@ type (
 		// ChannelBufferSize is the buffer size that will be used to queue blocks, requests, and statuses.
 		ChannelBufferSize int                       `mapstructure:"channel-buffer-size" default:"100" validate:"gt=0"`
 		Notification      NotificationServiceConfig `mapstructure:"notification"`
-		TxParsing         TxParsingConfig           `mapstructure:",squash"`
+		// Auth optionally enables ACL enforcement: when set, block delivery, block query and the
+		// notification streams are authorized against the AuthService. Nil serves without ACL checks.
+		Auth      *acl.Config     `mapstructure:"auth"`
+		TxParsing TxParsingConfig `mapstructure:",squash"`
 	}
 
 	// TxParsingConfig controls how many goroutines parse a block's transactions before the sidecar

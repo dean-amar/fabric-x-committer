@@ -8,11 +8,14 @@ package acl
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/protoutil/identity"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/hyperledger/fabric-x-committer/api/servicepb"
@@ -35,7 +38,43 @@ type (
 		ChannelID   string
 		TLSCertHash []byte
 	}
+
+	// Credentials attaches a token to every RPC of a connection dialed with [grpc.WithPerRPCCredentials],
+	// authenticating again once half of the current token's lifetime has passed. A stream is bound to the
+	// token it opened with, so a stream that reconnects picks up a live token rather than retrying forever
+	// with the one that expired.
+	Credentials struct {
+		Params *IssueParams
+
+		// mu is held while authenticating, so concurrent RPCs wait for one new token rather than each
+		// fetching their own.
+		mu      sync.Mutex
+		token   string
+		renewAt time.Time
+	}
 )
+
+// GetRequestMetadata implements [credentials.PerRPCCredentials].
+func (c *Credentials) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if now := time.Now(); c.token == "" || !now.Before(c.renewAt) {
+		resp, err := IssueToken(ctx, c.Params)
+		if err != nil {
+			return nil, err
+		}
+		c.token = resp.GetToken()
+		c.renewAt = now.Add(time.Unix(resp.GetExpiresAt(), 0).Sub(now) / 2)
+	}
+	return map[string]string{TokenMetadataKey: c.token}, nil
+}
+
+// RequireTransportSecurity implements [credentials.PerRPCCredentials]. It does not insist on TLS: the
+// connection's TLS mode is the operator's choice, and the token's binding follows from it.
+func (*Credentials) RequireTransportSecurity() bool {
+	return false
+}
 
 // IssueToken runs the whole client side of authentication: fetch a nonce, sign it into an envelope, exchange
 // it for a cert-bound token.
@@ -87,4 +126,10 @@ func TLSCertHash(tlsConfig connection.TLSConfig) ([]byte, error) {
 	}
 	hash, err := protoutil.HashTLSCertificate(creds.Cert)
 	return hash, errors.Wrap(err, "failed to hash the client TLS certificate")
+}
+
+// ContextWithToken returns ctx carrying the token in the metadata key the enforcer reads, which is how a
+// caller authorizes one RPC without binding a token to a whole connection.
+func ContextWithToken(ctx context.Context, token string) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, TokenMetadataKey, token)
 }
