@@ -173,7 +173,7 @@ func (s *Service) Run(ctx context.Context) error {
 	defer s.aclEnforcer.Close()
 
 	// Deliver the block with status to client.
-	blockStoreInstance, err := newBlockStore(s.config.Ledger.Path, s.config.Ledger.SyncInterval, s.metrics)
+	blockStoreInstance, err := newBlockStore(&s.config.Ledger, s.metrics)
 	if err != nil {
 		return fmt.Errorf("failed to create block store: %w", err)
 	}
