@@ -46,6 +46,16 @@ const (
 	defaultDatabaseName = "yugabyte"
 )
 
+// defaultFlowControl is what every client and server section decodes to when the YAML leaves its
+// flow-control section out.
+var defaultFlowControl = connection.FlowControlConfig{
+	InitialWindowSize:     16 * 1024 * 1024,
+	InitialConnWindowSize: 32 * 1024 * 1024,
+}
+
+// noAuth is what an omitted auth section decodes to: present, with no endpoints, so ACL stays off.
+var noAuth = &acl.Config{MultiClientConfig: connection.MultiClientConfig{FlowControl: defaultFlowControl}}
+
 func TestReadConfigSidecar(t *testing.T) {
 	t.Parallel()
 	sidecarTLSCreds := test.NewServiceTLSConfig(artifactsPath, "sidecar", connection.MutualTLSMode)
@@ -62,16 +72,19 @@ func TestReadConfigSidecar(t *testing.T) {
 				Endpoint:             *newEndpoint(connection.DefaultHost, sidecarServerPort),
 				RateLimit:            serve.RateLimitConfig{RequestsPerSecond: 5000, Burst: 1000},
 				MaxConcurrentStreams: 10,
+				FlowControl:          defaultFlowControl,
 			},
 			HTTP:                  *newServerConfig(sidecarMonitoringPort),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
 		},
 		expectedServiceConfig: &sidecar.Config{
 			Committer: &connection.ClientConfig{
-				Endpoint: newEndpoint(connection.DefaultHost, coordinatorServerPort),
+				Endpoint:    newEndpoint(connection.DefaultHost, coordinatorServerPort),
+				FlowControl: defaultFlowControl,
 			},
 			Orderer: ordererdial.Config{
 				SuspicionGracePeriodPerBlock: time.Second,
+				FlowControl:                  defaultFlowControl,
 			},
 			Ledger: sidecar.LedgerConfig{
 				Path: "./ledger/",
@@ -87,6 +100,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			CheckpointHoldRetryInterval:   time.Minute,
 			ChannelBufferSize:             100,
 			TxParsing:                     sidecar.TxParsingConfig{MaxWorkers: 1, MinBatchSize: 256},
+			Auth:                          noAuth,
 		},
 	}, {
 		name:           "sample",
@@ -106,6 +120,7 @@ func TestReadConfigSidecar(t *testing.T) {
 					},
 				},
 				MaxConcurrentStreams: 10,
+				FlowControl:          defaultFlowControl,
 			},
 			HTTP:                  *newServerConfigWithDefaultTLS("sidecar", 2114),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
@@ -122,6 +137,7 @@ func TestReadConfigSidecar(t *testing.T) {
 					CACertPaths: sidecarTLSCreds.CACertPaths,
 				},
 				SuspicionGracePeriodPerBlock: time.Second,
+				FlowControl:                  defaultFlowControl,
 			},
 			Committer: newClientConfigWithDefaultTLS("coordinator", "sidecar", 9001),
 			Ledger: sidecar.LedgerConfig{
@@ -171,10 +187,12 @@ func TestReadConfigCoordinator(t *testing.T) {
 		expectedServerConfig: newServeConfig(coordinatorServerPort, coordinatorMonitoringPort),
 		expectedServiceConfig: &coordinator.Config{
 			Verifier: connection.MultiClientConfig{
-				Endpoints: []*connection.Endpoint{newEndpoint(connection.DefaultHost, verifierServerPort)},
+				Endpoints:   []*connection.Endpoint{newEndpoint(connection.DefaultHost, verifierServerPort)},
+				FlowControl: defaultFlowControl,
 			},
 			ValidatorCommitter: connection.MultiClientConfig{
-				Endpoints: []*connection.Endpoint{newEndpoint(connection.DefaultHost, vcServerPort)},
+				Endpoints:   []*connection.Endpoint{newEndpoint(connection.DefaultHost, vcServerPort)},
+				FlowControl: defaultFlowControl,
 			},
 			DependencyGraph: &coordinator.DependencyGraphConfig{
 				NumOfLocalDepConstructors: 1,
@@ -325,6 +343,7 @@ func TestReadConfigQuery(t *testing.T) {
 					Burst:             1000,
 				},
 				MaxConcurrentStreams: 10,
+				FlowControl:          defaultFlowControl,
 			},
 			HTTP:                  *newServerConfig(queryMonitoringPort),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
@@ -339,6 +358,7 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
+			Auth:                  noAuth,
 		},
 	}, {
 		name:           "sample",
@@ -357,6 +377,7 @@ func TestReadConfigQuery(t *testing.T) {
 						PermitWithoutStream: true,
 					},
 				},
+				FlowControl: defaultFlowControl,
 			},
 			HTTP:                  *newServerConfigWithDefaultTLS("query", queryMonitoringPort),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
@@ -462,6 +483,7 @@ func TestReadConfigAuth(t *testing.T) {
 					Burst:             1000,
 				},
 				MaxConcurrentStreams: 10,
+				FlowControl:          defaultFlowControl,
 			},
 			HTTP:                  *newServerConfig(authMonitoringPort),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
@@ -494,7 +516,8 @@ func TestReadConfigAuth(t *testing.T) {
 				},
 				// Unlike the other samples, the auth sample leaves rate limiting on: IssueNonce is
 				// reachable without a token and writes a row per call.
-				RateLimit: serve.RateLimitConfig{RequestsPerSecond: 5000, Burst: 1000},
+				RateLimit:   serve.RateLimitConfig{RequestsPerSecond: 5000, Burst: 1000},
+				FlowControl: defaultFlowControl,
 			},
 			HTTP:                  *newServerConfigWithDefaultTLS("auth", authMonitoringPort),
 			ServiceStartupTimeout: serve.DefaultServiceStartupTimeout,
@@ -531,10 +554,15 @@ func TestReadConfigLoadGen(t *testing.T) {
 		expectedServiceConfig *loadgen.ClientConfig
 		expectedServerConfig  *serve.Config
 	}{{
-		name:                  "default",
-		configFilePath:        emptyConfig(t),
-		expectedServerConfig:  newServeConfig(loadgenServerPort, loadgenMonitoringPort),
-		expectedServiceConfig: &loadgen.ClientConfig{},
+		name:                 "default",
+		configFilePath:       emptyConfig(t),
+		expectedServerConfig: newServeConfig(loadgenServerPort, loadgenMonitoringPort),
+		expectedServiceConfig: &loadgen.ClientConfig{
+			Adapter: newAdapterConfig(&adapters.OrdererClientConfig{
+				Orderer:       ordererdial.Config{FlowControl: defaultFlowControl},
+				SidecarClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
+			}),
+		},
 	}, {
 		name:           "sample",
 		configFilePath: "samples/loadgen.yaml",
@@ -554,24 +582,23 @@ func TestReadConfigLoadGen(t *testing.T) {
 					},
 				},
 			},
-			Adapter: adapters.AdapterConfig{
-				OrdererClient: &adapters.OrdererClientConfig{
-					SidecarClient: newClientConfigWithDefaultTLS("sidecar", "loadgen", 4001),
-					Auth:          new(newMultiClientConfigWithDefaultTLS("auth", "loadgen", 10001)),
-					Orderer: ordererdial.Config{
-						FaultToleranceLevel:        ordererdial.BFT,
-						LatestKnownConfigBlockPath: "/root/artifacts/config-block.pb.bin",
-						Identity:                   newIdentityConfig(),
-						TLS: connection.TLSConfig{
-							Mode:        loadgenTLSCreds.Mode,
-							KeyPath:     loadgenTLSCreds.KeyPath,
-							CertPath:    loadgenTLSCreds.CertPath,
-							CACertPaths: loadgenTLSCreds.CACertPaths,
-						},
+			Adapter: newAdapterConfig(&adapters.OrdererClientConfig{
+				SidecarClient: newClientConfigWithDefaultTLS("sidecar", "loadgen", 4001),
+				Auth:          new(newMultiClientConfigWithDefaultTLS("auth", "loadgen", 10001)),
+				Orderer: ordererdial.Config{
+					FaultToleranceLevel:        ordererdial.BFT,
+					LatestKnownConfigBlockPath: "/root/artifacts/config-block.pb.bin",
+					Identity:                   newIdentityConfig(),
+					TLS: connection.TLSConfig{
+						Mode:        loadgenTLSCreds.Mode,
+						KeyPath:     loadgenTLSCreds.KeyPath,
+						CertPath:    loadgenTLSCreds.CertPath,
+						CACertPaths: loadgenTLSCreds.CACertPaths,
 					},
-					BroadcastParallelism: 1,
+					FlowControl: defaultFlowControl,
 				},
-			},
+				BroadcastParallelism: 1,
+			}),
 			LoadProfile: &workload.Profile{
 				Block: workload.BlockProfile{
 					MaxSize:       500,
@@ -626,6 +653,19 @@ func TestReadConfigLoadGen(t *testing.T) {
 			require.Equal(t, tc.expectedServerConfig, serverConfig)
 		})
 	}
+}
+
+// TestLoadGenRejectsConfigWithoutAdapter verifies that a loadgen config naming no adapter is rejected,
+// though every adapter section is present to hold its defaults (see getAdapter).
+func TestLoadGenRejectsConfigWithoutAdapter(t *testing.T) {
+	t.Parallel()
+	f := filepath.Join(t.TempDir(), "loadgen.yaml")
+	require.NoError(t, os.WriteFile(f, []byte("load-profile:\n  transaction:\n    key-size: 32\n"), 0o600))
+	conf, _, err := ReadLoadGenYamlAndSetupLogging(NewViperWithLoadGenDefaults(), f)
+	require.NoError(t, err)
+
+	_, err = loadgen.NewLoadGenClient(conf)
+	require.ErrorIs(t, err, adapters.ErrInvalidAdapterConfig)
 }
 
 // TestLoadGenProbabilityValidation exercises the decode-and-validate path for the loadgen
@@ -743,8 +783,9 @@ func defaultSampleDBConfig() *statedb.Config {
 
 func newClientConfigWithDefaultTLS(host, fromService string, port int) *connection.ClientConfig {
 	return &connection.ClientConfig{
-		Endpoint: newEndpoint(host, port),
-		TLS:      test.NewServiceTLSConfig(artifactsPath, fromService, connection.MutualTLSMode),
+		Endpoint:    newEndpoint(host, port),
+		TLS:         test.NewServiceTLSConfig(artifactsPath, fromService, connection.MutualTLSMode),
+		FlowControl: defaultFlowControl,
 	}
 }
 
@@ -753,7 +794,28 @@ func newMultiClientConfigWithDefaultTLS(host, fromService string, port int) conn
 		Endpoints: []*connection.Endpoint{
 			newEndpoint(host, port),
 		},
-		TLS: test.NewServiceTLSConfig(artifactsPath, fromService, connection.MutualTLSMode),
+		TLS:         test.NewServiceTLSConfig(artifactsPath, fromService, connection.MutualTLSMode),
+		FlowControl: defaultFlowControl,
+	}
+}
+
+// newAdapterConfig is the loadgen adapter config with ordererClient as its orderer client. Every
+// other section holds only its flow-control defaults (see getAdapter).
+func newAdapterConfig(ordererClient *adapters.OrdererClientConfig) adapters.AdapterConfig {
+	// An omitted auth section still decodes to a client with the flow-control defaults; see noAuth.
+	if ordererClient.Auth == nil {
+		ordererClient.Auth = &connection.MultiClientConfig{FlowControl: defaultFlowControl}
+	}
+	return adapters.AdapterConfig{
+		OrdererClient: ordererClient,
+		SidecarClient: &adapters.SidecarClientConfig{
+			SidecarClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
+			Auth:          &connection.MultiClientConfig{FlowControl: defaultFlowControl},
+		},
+		LoadGenClient:     &connection.ClientConfig{FlowControl: defaultFlowControl},
+		CoordinatorClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
+		VCClient:          &connection.MultiClientConfig{FlowControl: defaultFlowControl},
+		VerifierClient:    &connection.MultiClientConfig{FlowControl: defaultFlowControl},
 	}
 }
 
@@ -782,14 +844,16 @@ func withClientStreamLimit(c *serve.Config) *serve.Config {
 
 func newServerConfigWithDefaultTLS(serviceName string, port int) *serve.ServerConfig {
 	return &serve.ServerConfig{
-		Endpoint: *newEndpoint("", port),
-		TLS:      test.NewServiceTLSConfig(artifactsPath, serviceName, connection.MutualTLSMode),
+		Endpoint:    *newEndpoint("", port),
+		TLS:         test.NewServiceTLSConfig(artifactsPath, serviceName, connection.MutualTLSMode),
+		FlowControl: defaultFlowControl,
 	}
 }
 
 func newServerConfig(port int) *serve.ServerConfig {
 	return &serve.ServerConfig{
-		Endpoint: *newEndpoint(connection.DefaultHost, port),
+		Endpoint:    *newEndpoint(connection.DefaultHost, port),
+		FlowControl: defaultFlowControl,
 	}
 }
 

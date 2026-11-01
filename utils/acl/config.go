@@ -12,8 +12,8 @@ import (
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
-// Config configures a resource server's connection to the AuthService. It carries no `default` tags on
-// purpose: an operator who omits the section leaves the pointer nil, which disables enforcement.
+// Config configures a resource server's connection to the AuthService. Enforcement is on only when it lists
+// endpoints: the embedded client's flow-control defaults make the section present even when the YAML omits it.
 type Config struct {
 	// MultiClientConfig lists the AuthService instances and the TLS the resource server uses to reach them.
 	connection.MultiClientConfig `mapstructure:",squash"`
