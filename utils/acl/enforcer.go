@@ -52,16 +52,13 @@ type Enforcer struct {
 	config Config
 }
 
-// NewEnforcer dials the AuthService, or returns nil when the auth section is absent. A service creates it in
+// NewEnforcer dials the AuthService, or returns nil when no auth service endpoints are configured. A service creates it in
 // Run before signaling ready, and registers it with its gRPC server (serve.RegisterACLEnforcer), where a nil
 // enforcer leaves the server unenforced. Close is nil-safe, so a service closes the result either way.
 func NewEnforcer(config *Config) (*Enforcer, error) {
-	if config == nil {
+	if config == nil || len(config.Endpoints) == 0 {
+		logger.Infof("ACL enforcement disabled: no auth service endpoints are configured")
 		return nil, nil //nolint:nilnil // a nil enforcer is the deliberate result when ACL is not configured.
-	}
-	// An empty list would dial nothing and fail every RPC; refusing to start makes the misconfiguration loud.
-	if len(config.Endpoints) == 0 {
-		return nil, errors.New("the auth client lists no auth service endpoints")
 	}
 	conn, err := connection.NewLoadBalancedConnection(&config.MultiClientConfig)
 	if err != nil {

@@ -48,7 +48,7 @@ const (
 // service is configured, every delivery stream - each reconnect included - carries a live token.
 func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) error {
 	var credentials *acl.Credentials
-	if params.Auth != nil {
+	if params.Auth != nil && len(params.Auth.Endpoints) > 0 {
 		authConn, err := connection.NewLoadBalancedConnection(params.Auth)
 		if err != nil {
 			return errors.Wrap(err, "failed to connect to the auth service")

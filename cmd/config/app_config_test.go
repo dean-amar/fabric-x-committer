@@ -31,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
 	"github.com/hyperledger/fabric-x-committer/service/vc"
 	"github.com/hyperledger/fabric-x-committer/service/verifier"
+	"github.com/hyperledger/fabric-x-committer/utils/acl"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
 	"github.com/hyperledger/fabric-x-committer/utils/retry"
@@ -51,6 +52,9 @@ var defaultFlowControl = connection.FlowControlConfig{
 	InitialWindowSize:     16 * 1024 * 1024,
 	InitialConnWindowSize: 32 * 1024 * 1024,
 }
+
+// noAuth is what an omitted auth section decodes to: present, with no endpoints, so ACL stays off.
+var noAuth = &acl.Config{MultiClientConfig: connection.MultiClientConfig{FlowControl: defaultFlowControl}}
 
 func TestReadConfigSidecar(t *testing.T) {
 	t.Parallel()
@@ -96,6 +100,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			CheckpointHoldRetryInterval:   time.Minute,
 			ChannelBufferSize:             100,
 			TxParsing:                     sidecar.TxParsingConfig{MaxWorkers: 1, MinBatchSize: 256},
+			Auth:                          noAuth,
 		},
 	}, {
 		name:           "sample",
@@ -150,6 +155,7 @@ func TestReadConfigSidecar(t *testing.T) {
 			CheckpointHoldRetryInterval:   time.Minute,
 			ChannelBufferSize:             100,
 			TxParsing:                     sidecar.TxParsingConfig{MaxWorkers: 1, MinBatchSize: 256},
+			Auth:                          noAuth,
 		},
 	}}
 	for _, tc := range tests {
@@ -348,6 +354,7 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
+			Auth:                  noAuth,
 		},
 	}, {
 		name:           "sample",
@@ -381,6 +388,7 @@ func TestReadConfigQuery(t *testing.T) {
 			MaxViewTimeout:        10 * time.Second,
 			MaxRequestKeys:        10000,
 			TLSRefreshInterval:    time.Minute,
+			Auth:                  noAuth,
 		},
 	}}
 
@@ -786,10 +794,13 @@ func newMultiClientConfigWithDefaultTLS(host, fromService string, port int) conn
 // newAdapterConfig is the loadgen adapter config with ordererClient as its orderer client. Every
 // other section holds only its flow-control defaults (see getAdapter).
 func newAdapterConfig(ordererClient *adapters.OrdererClientConfig) adapters.AdapterConfig {
+	// An omitted auth section still decodes to a client with the flow-control defaults; see noAuth.
+	ordererClient.Auth = &connection.MultiClientConfig{FlowControl: defaultFlowControl}
 	return adapters.AdapterConfig{
 		OrdererClient: ordererClient,
 		SidecarClient: &adapters.SidecarClientConfig{
 			SidecarClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
+			Auth:          &connection.MultiClientConfig{FlowControl: defaultFlowControl},
 		},
 		LoadGenClient:     &connection.ClientConfig{FlowControl: defaultFlowControl},
 		CoordinatorClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
