@@ -17,7 +17,6 @@ import (
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
 	"github.com/hyperledger/fabric-x-committer/utils"
 	"github.com/hyperledger/fabric-x-committer/utils/acl"
@@ -56,7 +55,7 @@ func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) 
 		}
 		defer connection.CloseConnectionsLog(authConn)
 
-		issueParams, err := newIssueParams(params, servicepb.NewAuthServiceClient(authConn))
+		issueParams, err := newIssueParams(params, committerpb.NewAuthServiceClient(authConn))
 		if err != nil {
 			return err
 		}
@@ -73,7 +72,7 @@ func runSidecarReceiver(ctx context.Context, params *sidecarReceiverParameters) 
 
 // newIssueParams resolves the identity the delivery stream authenticates as.
 func newIssueParams(
-	params *sidecarReceiverParameters, client servicepb.AuthServiceClient,
+	params *sidecarReceiverParameters, client committerpb.AuthServiceClient,
 ) (*acl.IssueParams, error) {
 	signer, err := ordererdial.NewIdentitySigner(params.Identity)
 	if err != nil {

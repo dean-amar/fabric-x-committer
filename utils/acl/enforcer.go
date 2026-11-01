@@ -13,13 +13,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/common/util"
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
 )
@@ -47,7 +47,7 @@ var (
 // Enforcer authorizes a resource server's RPCs against the AuthService, forwarding the caller's token and
 // the certificate hash seen on the connection. It never inspects the request body.
 type Enforcer struct {
-	client servicepb.AuthServiceClient
+	client committerpb.AuthServiceClient
 	conn   *grpc.ClientConn
 	config Config
 }
@@ -71,7 +71,7 @@ func NewEnforcer(config *Config) (*Enforcer, error) {
 		connection.AddressString(config.Endpoints...))
 
 	e := &Enforcer{
-		client: servicepb.NewAuthServiceClient(conn),
+		client: committerpb.NewAuthServiceClient(conn),
 		conn:   conn,
 		config: *config,
 	}
@@ -161,11 +161,11 @@ func (e *Enforcer) StreamInterceptor(
 // a gRPC status error. Bounded by AuthorizeTimeout, since neither a unary nor a stream context carries one.
 func (e *Enforcer) authorize(
 	ctx context.Context, token, resource string,
-) (*servicepb.AuthorizeResponse, error) {
+) (*committerpb.AuthorizeResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.config.AuthorizeTimeout)
 	defer cancel()
 
-	resp, err := e.client.Authorize(ctx, &servicepb.AuthorizeRequest{
+	resp, err := e.client.Authorize(ctx, &committerpb.AuthorizeRequest{
 		Token:       token,
 		Resource:    resource,
 		TlsCertHash: util.ExtractCertificateHashFromContext(ctx),

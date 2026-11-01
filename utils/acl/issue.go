@@ -13,12 +13,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/hyperledger/fabric-x-common/protoutil/identity"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
 	"github.com/hyperledger/fabric-x-committer/utils/connection"
 )
 
@@ -27,7 +27,7 @@ type (
 	IssueParams struct {
 		EnvelopeParams
 		// Client authenticates against the AuthService.
-		Client servicepb.AuthServiceClient
+		Client committerpb.AuthServiceClient
 		// Scope optionally requests a least-privilege token limited to these resources.
 		Scope []string
 	}
@@ -78,8 +78,8 @@ func (*Credentials) RequireTransportSecurity() bool {
 
 // IssueToken runs the whole client side of authentication: fetch a nonce, sign it into an envelope, exchange
 // it for a cert-bound token.
-func IssueToken(ctx context.Context, params *IssueParams) (*servicepb.AuthenticateResponse, error) {
-	nonce, err := params.Client.IssueNonce(ctx, &servicepb.IssueNonceRequest{})
+func IssueToken(ctx context.Context, params *IssueParams) (*committerpb.AuthenticateResponse, error) {
+	nonce, err := params.Client.IssueNonce(ctx, &committerpb.IssueNonceRequest{})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to obtain an authentication nonce")
 	}
@@ -88,7 +88,7 @@ func IssueToken(ctx context.Context, params *IssueParams) (*servicepb.Authentica
 		return nil, err
 	}
 
-	resp, err := params.Client.Authenticate(ctx, &servicepb.AuthenticateRequest{
+	resp, err := params.Client.Authenticate(ctx, &committerpb.AuthenticateRequest{
 		SignedEnvelope: envelope,
 		RequestedScope: params.Scope,
 	})
