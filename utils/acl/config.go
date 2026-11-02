@@ -21,7 +21,7 @@ type Config struct {
 	// latest policy. A stream is always bounded by its token's expiry as well, so a high value here leaves
 	// the token's lifetime as the only bound.
 	StreamReAuthorizeInterval time.Duration `mapstructure:"stream-re-authorize-interval"`
-	// AuthorizeTimeout bounds each Authorize call. Neither a unary nor a stream context carries a deadline, so
+	// AuthorizeTimeout bounds each AuthorizeIdentity call. Neither a unary nor a stream context carries a deadline, so
 	// without it a call to an unreachable auth service would wait for it indefinitely.
 	AuthorizeTimeout time.Duration `mapstructure:"authorize-timeout"`
 }
