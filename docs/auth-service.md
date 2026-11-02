@@ -143,9 +143,9 @@ the section names none (`policy.go`).
   envelope useless without the signer's private key.
 - **Streaming re-authorization is token-based.** A stream binds the *token* it was established with. Every
   send and receive checks the token's expiry locally and, once `stream-re-authorize-interval` has passed,
-  re-`Authorize`s it against the latest configuration, catching a policy change such as the identity's
-  organization being removed. The re-check holds the stream's lock, so no message crosses until the new
-  decision is known. An expired token or a failed re-check ends the stream on its next message.
+  calls `AuthorizeIdentity` on it again against the latest configuration, catching a policy change such as
+  the identity's organization being removed. The re-check holds the stream's lock, so no message crosses
+  until the new decision is known. An expired token or a failed re-check ends the stream on its next message.
 - **Rate limiting the front door.** `IssueNonce` and `AuthenticateIdentity` are reachable without a token, and
   each costs the service real work - a database row for a nonce, a signature verification and MSP
   resolution for an authentication - so they share a token-bucket limit
