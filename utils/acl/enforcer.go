@@ -158,11 +158,11 @@ func (e *Enforcer) StreamInterceptor(
 // a gRPC status error. Bounded by AuthorizeTimeout, since neither a unary nor a stream context carries one.
 func (e *Enforcer) authorize(
 	ctx context.Context, token, resource string,
-) (*committerpb.AuthorizeResponse, error) {
+) (*committerpb.AuthorizeIdentityResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.config.AuthorizeTimeout)
 	defer cancel()
 
-	resp, err := e.client.Authorize(ctx, &committerpb.AuthorizeRequest{
+	resp, err := e.client.AuthorizeIdentity(ctx, &committerpb.AuthorizeIdentityRequest{
 		Token:       token,
 		Resource:    resource,
 		TlsCertHash: util.ExtractCertificateHashFromContext(ctx),
