@@ -42,7 +42,7 @@ func TestACLQuery(t *testing.T) {
 	require.Len(t, txIDs, 1)
 
 	// Step 2: The query service authorizes every RPC against the AuthService, so this proves the whole
-	// chain: nonce -> envelope -> token -> interceptor -> Authorize -> handler.
+	// chain: nonce -> envelope -> token -> interceptor -> AuthorizeIdentity -> handler.
 	t.Log("Step 2: query the committed row with a token")
 	rows, err := getRows(acl.ContextWithToken(ctx, c.AuthEnv.IssueToken(t)), c)
 	require.NoError(t, err)
