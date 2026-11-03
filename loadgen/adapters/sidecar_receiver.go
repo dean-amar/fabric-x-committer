@@ -13,6 +13,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
+	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"golang.org/x/sync/errgroup"
@@ -101,6 +102,8 @@ func newIssueParams(
 		Signer:      signer,
 		ChannelID:   params.Res.Profile.Policy.ChannelID,
 		TLSCertHash: certHash,
+		// A token reaches only what its scope names, and the receiver only opens the delivery stream.
+		Scope: []string{peer.Deliver_Deliver_FullMethodName},
 	}, nil
 }
 
