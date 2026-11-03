@@ -557,11 +557,16 @@ func TestReadConfigLoadGen(t *testing.T) {
 		name:                 "default",
 		configFilePath:       emptyConfig(t),
 		expectedServerConfig: newServeConfig(loadgenServerPort, loadgenMonitoringPort),
+		// The latency tracker's table size defaults rather than falling back to a single slot,
+		// which would silently lose almost every measurement.
 		expectedServiceConfig: &loadgen.ClientConfig{
 			Adapter: newAdapterConfig(&adapters.OrdererClientConfig{
 				Orderer:       ordererdial.Config{FlowControl: defaultFlowControl},
 				SidecarClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
 			}),
+			Monitoring: metrics.Config{
+				Latency: metrics.LatencyConfig{MaxTrackedTXs: 10_000},
+			},
 		},
 	}, {
 		name:           "sample",
@@ -572,6 +577,7 @@ func TestReadConfigLoadGen(t *testing.T) {
 		expectedServiceConfig: &loadgen.ClientConfig{
 			Monitoring: metrics.Config{
 				Latency: metrics.LatencyConfig{
+					MaxTrackedTXs: 10_000,
 					SamplerConfig: metrics.SamplerConfig{
 						Portion: 0.01,
 					},
@@ -809,8 +815,9 @@ func newAdapterConfig(ordererClient *adapters.OrdererClientConfig) adapters.Adap
 	return adapters.AdapterConfig{
 		OrdererClient: ordererClient,
 		SidecarClient: &adapters.SidecarClientConfig{
-			SidecarClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
-			Auth:          &connection.MultiClientConfig{FlowControl: defaultFlowControl},
+			SidecarClient:    &connection.ClientConfig{FlowControl: defaultFlowControl},
+			Auth:             &connection.MultiClientConfig{FlowControl: defaultFlowControl},
+			OutBlockCapacity: 1000,
 		},
 		LoadGenClient:     &connection.ClientConfig{FlowControl: defaultFlowControl},
 		CoordinatorClient: &connection.ClientConfig{FlowControl: defaultFlowControl},
