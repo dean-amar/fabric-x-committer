@@ -46,7 +46,7 @@ const (
 	dbName          = "db"
 
 	runCMD        = "run"
-	initDBCommand = "init-db"
+	initDBCommand = "init"
 )
 
 type (
