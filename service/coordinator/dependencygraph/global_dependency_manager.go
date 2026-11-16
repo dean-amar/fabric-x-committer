@@ -197,8 +197,21 @@ func (dm *globalDependencyManager) processValidatedTransactions(ctx context.Cont
 			return
 		}
 		processValidatedStart := time.Now()
-		dm.waitingTxsSlots.Release(int64(len(txsNode)))
-		promutil.SubFromGauge(m.gdgWaitingTxCount, len(txsNode))
+
+		// The slots bound the transactions held by the graph. A rejected transaction (see
+		// NewRejectedTransactionNode) bypasses the graph on its way to the vcservice but returns
+		// on this stream; it still occupies memory until its status is reported, but bounding
+		// that is the sidecar's job, not the graph's. Releasing a slot for it would let the graph
+		// admit one extra transaction per rejection, and counting it as processed would overstate
+		// the graph's work.
+		graphTxCount := 0
+		for _, txNode := range txsNode {
+			if !txNode.rejected {
+				graphTxCount++
+			}
+		}
+		dm.waitingTxsSlots.Release(int64(graphTxCount))
+		promutil.SubFromGauge(m.gdgWaitingTxCount, graphTxCount)
 
 		start := time.Now()
 		dm.mu.Lock()
@@ -225,16 +238,13 @@ func (dm *globalDependencyManager) processValidatedTransactions(ctx context.Cont
 		}
 		promutil.Observe(m.gdgAddFreedTxSeconds, time.Since(start))
 
-		promutil.AddToCounter(dm.metrics.gdgValidatedTxProcessedTotal, len(txsNode))
+		promutil.AddToCounter(dm.metrics.gdgValidatedTxProcessedTotal, graphTxCount)
 		promutil.Observe(m.gdgValidatedTxProcessingSeconds, time.Since(processValidatedStart))
 	}
 }
 
 func (dm *globalDependencyManager) outputFreedExistingTransactions(ctx context.Context) {
-	stop := context.AfterFunc(ctx, func() {
-		dm.freedTransactionsSet.nonEmpty.Store(true)
-		dm.freedTransactionsSet.cond.Signal()
-	})
+	stop := context.AfterFunc(ctx, dm.freedTransactionsSet.signal)
 	defer stop()
 
 	for ctx.Err() == nil {
@@ -256,7 +266,15 @@ func (f *dependencyFreedTransactions) add(txsNode TxNodeBatch) {
 	)
 	f.mu.Unlock()
 
+	f.signal()
+}
+
+// signal wakes the waiter in waitAndRemove. The flag is set under cond.L, which the waiter holds from
+// its check until Wait registers it, so the signal cannot fall between the two and be lost.
+func (f *dependencyFreedTransactions) signal() {
+	f.cond.L.Lock()
 	f.nonEmpty.Store(true)
+	f.cond.L.Unlock()
 	f.cond.Signal()
 }
 
