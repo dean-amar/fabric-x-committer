@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/common/crypto/tlsgen"
+	"github.com/Chaguar/common/common/crypto/tlsgen"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

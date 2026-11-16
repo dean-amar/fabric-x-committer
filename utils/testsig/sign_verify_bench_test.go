@@ -10,16 +10,16 @@ import (
 	"crypto/sha256"
 	"testing"
 
+	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 var testedSchemes = append(signature.AllRealSchemes, workload.PolicySchemeMSP)

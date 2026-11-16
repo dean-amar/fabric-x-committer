@@ -76,20 +76,20 @@ jobs:
           make "release/${TARGET}/committer"
           # Hash the binaries before packing so the SHAs are independent of tarball metadata.
           (cd "release/${TARGET}" && \
-            sha256sum committer loadgen mock > "../fabric-x-committer-${TARGET}-${TAG#v}.sha256")
+            sha256sum committer loadgen mock > "../committer-${TARGET}-${TAG#v}.sha256")
           # Stage binaries + LICENSE for the archive; keeps release/<os>-<arch>/ clean for Docker image builds.
           stage="release/stage-${TARGET}"
           mkdir -p "${stage}"
           cp "release/${TARGET}"/{committer,loadgen,mock} LICENSE "${stage}/"
-          tar -czf "release/fabric-x-committer-${TARGET}-${TAG#v}.tar.gz" -C "${stage}" .
+          tar -czf "release/committer-${TARGET}-${TAG#v}.tar.gz" -C "${stage}" .
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fabric-x-committer-${{ matrix.os }}-${{ matrix.arch }}
+          name: committer-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            release/fabric-x-committer-*.tar.gz
-            release/fabric-x-committer-*.sha256
+            release/committer-*.tar.gz
+            release/committer-*.sha256
           if-no-files-found: error
 
   release:

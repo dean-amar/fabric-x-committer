@@ -10,13 +10,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/grpcerror"
 )
 
 // validatorCommitterAPI exposes the request/response API that any vcservice can serve.

@@ -14,7 +14,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/Chaguar/committer/utils/grpcerror"
 )
 
 // authorizedStream renews a stream's authorization from its bound token, so expiry and policy changes stay

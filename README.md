@@ -3,9 +3,9 @@ Copyright IBM Corp. All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 -->
-# Fabric-X Committer
+# Chaguar Committer
 
-[![Coverage Status](https://coveralls.io/repos/github/hyperledger/fabric-x-committer/badge.svg?branch=main)](https://coveralls.io/github/hyperledger/fabric-x-committer?branch=main)
+[![Coverage Status](https://coveralls.io/repos/github/Chaguar/committer/badge.svg?branch=main)](https://coveralls.io/github/Chaguar/committer?branch=main)
 
 ## Setup and Testing
 

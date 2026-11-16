@@ -9,12 +9,12 @@ package policy
 import (
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
+	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 // MakePolicy generates a policy item from a namespace policy.

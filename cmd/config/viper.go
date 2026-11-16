@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 var (

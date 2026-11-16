@@ -12,8 +12,8 @@
 package servicepb
 
 import (
-	applicationpb "github.com/hyperledger/fabric-x-common/api/applicationpb"
-	committerpb "github.com/hyperledger/fabric-x-common/api/committerpb"
+	applicationpb "github.com/Chaguar/common/api/applicationpb"
+	committerpb "github.com/Chaguar/common/api/committerpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -335,7 +335,7 @@ const file_api_servicepb_common_proto_rawDesc = "" +
 	"\x06Signal\x12\x16\n" +
 	"\x12SIGNAL_UNSPECIFIED\x10\x00\x12\b\n" +
 	"\x04HOLD\x10\x01\x12\b\n" +
-	"\x04HALT\x10\x02B9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"\x04HALT\x10\x02B,Z*github.com/Chaguar/committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_common_proto_rawDescOnce sync.Once

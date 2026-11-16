@@ -10,16 +10,16 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/loadgen/metrics"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 type (

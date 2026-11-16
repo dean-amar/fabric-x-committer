@@ -29,7 +29,7 @@ generate_doc() {
 
 # committer
 
-The `committer` command starts Fabric-X committer services, checks service health, and administers the state database.
+The `committer` command starts Chaguar Committer services, checks service health, and administers the state database.
 
 ## Environment Variables
 

@@ -25,8 +25,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 const (

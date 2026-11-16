@@ -13,14 +13,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/jackc/pgerrcode"
 	"github.com/yugabyte/pgx/v5/pgconn"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 const (

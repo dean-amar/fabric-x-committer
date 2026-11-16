@@ -9,7 +9,7 @@ package sidecar
 import (
 	"testing"
 
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 func TestMain(m *testing.M) {

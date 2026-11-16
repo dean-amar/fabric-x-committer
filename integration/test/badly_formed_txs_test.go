@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/service/sidecar"
+	"github.com/Chaguar/committer/integration/runner"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/service/sidecar"
 )
 
 func TestBadlyFormedTxs(t *testing.T) {

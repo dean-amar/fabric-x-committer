@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
 )
 
 // TestManagerMetricsSubsystem asserts on the exported series names rather than on the

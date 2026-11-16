@@ -18,14 +18,14 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
-	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/loadgen/adapters"
+	"github.com/Chaguar/committer/loadgen/metrics"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 type (

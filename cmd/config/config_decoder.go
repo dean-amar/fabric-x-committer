@@ -14,12 +14,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Chaguar/common/common/viperutil"
 	"github.com/cockroachdb/errors"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/hyperledger/fabric-x-common/common/viperutil"
 	"github.com/spf13/viper"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 // RFC 1123 hostname validation regex:

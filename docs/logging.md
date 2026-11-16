@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 -->
 # Logging
 
-The Fabric-X Committer uses [Hyperledger Fabric's flogging package](https://hyperledger-fabric.readthedocs.io/en/release-2.2/logging-control.html) for structured, high-performance logging. Each module declares its own named logger, enabling fine-grained per-module log level control.
+The Chaguar Committer uses [Hyperledger Fabric's flogging package](https://hyperledger-fabric.readthedocs.io/en/release-2.2/logging-control.html) for structured, high-performance logging. Each module declares its own named logger, enabling fine-grained per-module log level control.
 
 ## Log Levels
 

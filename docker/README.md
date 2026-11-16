@@ -50,12 +50,12 @@ By default, the test node image will run a full system: DB, mock-orderer, commit
 The `committer` op also starts the Auth Service, and the sidecar and query APIs require a token, so an
 external client must authenticate first (see [auth-service.md](../docs/auth-service.md)).
 ```shell
-docker run -it --rm icr.io/cbdc/committer-test-node:0.0.2
+docker run -it --rm ghcr.io/chaguar/committer-test-node:latest
 ```
 
 To control which parts of the system will run, you can use the `run` script as follows:
 ```shell
-docker run -it --rm icr.io/cbdc/committer-test-node:0.0.2 run [db] [init-db] [orderer] [committer] [loadgen]
+docker run -it --rm ghcr.io/chaguar/committer-test-node:latest run [db] [init-db] [orderer] [committer] [loadgen]
 ```
 The `db` op starts the embedded PostgreSQL instance and initializes its schema, so there is no need to
 pass `init-db` next to it; doing so simply repeats the initialization. Pass `init-db` on its own to
@@ -72,6 +72,6 @@ docker run -it --rm \
     -e SC_SIDECAR_ORDERER_IDENTITY_ROOT_CA_PATHS="/root/config/crypto/ca-certs.pem" \
     -e SC_SIDECAR_ORDERER_CHANNEL_ID="real-channel" \
     -e SC_SIDECAR_ORDERER_ENDPOINT="real-orderer.com:7050" \
-    icr.io/cbdc/committer-test-node:0.0.2 run db committer
+    ghcr.io/chaguar/committer-test-node:latest run db committer
 ```
 This mounts the MSP folder and root CA, and override teh config to use a real orderer address.

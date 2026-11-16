@@ -9,17 +9,17 @@ package policy
 import (
 	"regexp"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/msp"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 // maxNamespaceIDLength defines the maximum number of characters allowed for namespace IDs.

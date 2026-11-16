@@ -7,11 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package workload
 
 import (
+	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 // invalidSignatureBytes is the dummy signature stamped on transactions selected to be invalid.

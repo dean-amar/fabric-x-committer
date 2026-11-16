@@ -14,9 +14,9 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/deliver"
+	"github.com/Chaguar/committer/utils/acl"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/deliver"
 )
 
 // Parameters needed for deliver to run.

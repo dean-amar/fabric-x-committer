@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 var (

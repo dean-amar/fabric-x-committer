@@ -15,14 +15,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
-	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/cmd/cliutil"
+	"github.com/Chaguar/committer/cmd/config"
+	"github.com/Chaguar/committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 const (

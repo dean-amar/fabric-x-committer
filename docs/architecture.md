@@ -3,7 +3,7 @@ Copyright IBM Corp. All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 -->
-# Fabric-X Committer Architecture
+# Chaguar Committer Architecture
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## 1. Overview
 
-The Fabric-X Committer is built around seven core services, each designed with specific responsibilities in the transaction processing pipeline. The services are categorized into stateful and stateless components, with careful consideration given to scalability and fault tolerance.
+The Chaguar Committer is built around seven core services, each designed with specific responsibilities in the transaction processing pipeline. The services are categorized into stateful and stateless components, with careful consideration given to scalability and fault tolerance.
 
 These seven services are: **Sidecar**, **Coordinator**, **Verifier**, **Validator-Committer (VC)**, **Query Service**, **Snapshot Hasher**, and **Database Cluster**.
 
@@ -95,7 +95,7 @@ The **Snapshot Hasher** likewise sits outside the pipeline. It is driven by dura
 
 ### 3.1 Sidecar Middleware
 
-The Sidecar acts as the critical bridge between the Hyperledger Fabric-X Ordering Service and the Committer's internal processing pipeline. It is responsible for fetching blocks sequentially from the Ordering Service, performing initial transaction validation to filter out malformed transactions, and maintaining a durable local block store on the file system.
+The Sidecar acts as the critical bridge between the Chaguar Ordering Service and the Committer's internal processing pipeline. It is responsible for fetching blocks sequentially from the Ordering Service, performing initial transaction validation to filter out malformed transactions, and maintaining a durable local block store on the file system.
 
 Beyond block ingestion, the Sidecar serves as the delivery endpoint for clients, providing committed blocks to registered applications and offering two notification mechanisms: transaction ID subscription for tracking specific transactions, and an all-transactions stream for monitoring all blockchain activity with optional filtering. It also exposes query APIs that allow clients to fetch historical blocks and transactions directly from the block store.
 
@@ -213,7 +213,7 @@ The database cluster serves as the system's persistent storage layer, maintainin
 
 ## 4. State Management
 
-State management in Fabric-X Committer is carefully designed to minimize persistent state while ensuring correctness and enabling efficient recovery. The architecture distinguishes between persistent state that must survive service restarts and transient state that can be safely discarded.
+State management in Chaguar Committer is carefully designed to minimize persistent state while ensuring correctness and enabling efficient recovery. The architecture distinguishes between persistent state that must survive service restarts and transient state that can be safely discarded.
 
 **Persistent State** is maintained in only two locations. The Sidecar maintains a block store on the local file system, which serves as a durable record of all blocks received from the Ordering Service. While this block store can be reconstructed from the Ordering Service if lost, maintaining it locally enables fast query responses and reduces load on the Ordering Service. The Database cluster stores all committed world state (key-value pairs for each namespace), transaction statuses, namespace endorsement policies, and system configuration. This makes the database the authoritative source of truth for the entire system.
 

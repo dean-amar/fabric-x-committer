@@ -7,11 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package serialization
 
 import (
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 type (

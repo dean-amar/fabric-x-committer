@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 // TestClassifyStreamRecvError covers the retry decision both managers make on a receive error.

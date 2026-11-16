@@ -10,16 +10,16 @@ import (
 	"os"
 	"path"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/tools/cryptogen"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/serialization"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/serialization"
 )
 
 // CreateConfigTxFromConfigBlock creates a config TX.

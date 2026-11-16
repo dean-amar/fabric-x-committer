@@ -14,8 +14,8 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 func TestDBResiliencyYugabyteClusterController(t *testing.T) {

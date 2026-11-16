@@ -7,11 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package workload
 
 import (
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/Chaguar/committer/api/servicepb"
 )
 
 // MapToCoordinatorBatch creates a Coordinator batch.

@@ -9,12 +9,12 @@ package workload
 import (
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 // GenerateTransactions is used for benchmarking and tests.

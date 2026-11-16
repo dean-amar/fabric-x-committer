@@ -10,19 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/service/verifier/policy"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 // RequireNotifications verifies that the expected notification were received.

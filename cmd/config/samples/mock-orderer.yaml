@@ -4,7 +4,7 @@
 #
 ---
 # The gRPC endpoint where the mock orderer listens for broadcast and deliver
-# requests from clients, mimicking a Fabric-X orderer for testing purposes.
+# requests from clients, mimicking a Chaguar orderer for testing purposes.
 # Format: host:port or :port (binds to all interfaces).
 server:
   endpoint: :7050

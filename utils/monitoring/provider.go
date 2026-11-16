@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 const (

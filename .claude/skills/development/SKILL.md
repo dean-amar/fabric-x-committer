@@ -1,7 +1,7 @@
 ---
 name: development
 description: >-
-  Conventions for writing NEW Go code in the Fabric-X Committer repo: code
+  Conventions for writing NEW Go code in the Chaguar Committer repo: code
   organization/ordering, concurrency (errgroup + context-aware channels), Go
   1.27 idioms, error handling, logging, and service/config/metrics structure.
   Use this skill BEFORE writing or modifying any Go source in this repository —
@@ -11,7 +11,7 @@ description: >-
   PR use `pr-review`.
 ---
 
-# Developing in Fabric-X Committer
+# Developing in Chaguar Committer
 
 This skill tells you how to write new Go code that looks like it was already
 here. Follow it whenever you add or change production Go source.
@@ -104,9 +104,9 @@ block fixtures. Full picture is in the `tests` skill; the key helpers:
 |------|-----|---------|
 | In-process service / DB / mock harnesses | `test.RunServiceForTest`, `testdb.PrepareTestEnv`, `mock.*` | `utils/test`, `utils/testdb`, `mock/` (this repo) |
 | Proto assertions | `test.RequireProtoEqual` / `RequireProtoElementsMatch` | `utils/test` (this repo) |
-| MSP / identity / Fabric config-block fixtures | `testcrypto.CreateOrExtendConfigBlockWithCrypto`, `ConfigBlock`, `PrepareBlockHeaderAndMetadata`, `GetPeersIdentities` / `GetConsenterIdentities` / `GetSigningIdentities` / `GetPeersMspDirs` | `github.com/hyperledger/fabric-x-common/utils/testcrypto` |
-| Test TLS CAs & cert/key pairs | `tlsgen.NewCA()`, `CA`, `CertKeyPair` | `github.com/hyperledger/fabric-x-common/common/crypto/tlsgen` |
-| Generate crypto material | `cryptogen` | `github.com/hyperledger/fabric-x-common/tools/cryptogen` |
+| MSP / identity / Fabric config-block fixtures | `testcrypto.CreateOrExtendConfigBlockWithCrypto`, `ConfigBlock`, `PrepareBlockHeaderAndMetadata`, `GetPeersIdentities` / `GetConsenterIdentities` / `GetSigningIdentities` / `GetPeersMspDirs` | `github.com/Chaguar/common/utils/testcrypto` |
+| Test TLS CAs & cert/key pairs | `tlsgen.NewCA()`, `CA`, `CertKeyPair` | `github.com/Chaguar/common/common/crypto/tlsgen` |
+| Generate crypto material | `cryptogen` | `github.com/Chaguar/common/tools/cryptogen` |
 
 ## Code organization
 
@@ -201,7 +201,7 @@ Every `.go` file follows this order (model: `service/coordinator/coordinator.go`
 
 2. `package` clause.
 3. `import (...)` — three blank-line-separated groups: stdlib, third-party, then internal
-   `github.com/hyperledger/fabric-x-committer/...` (`goimports` local-prefixes enforces this).
+   `github.com/Chaguar/committer/...` (`goimports` local-prefixes enforces this).
 4. `var logger = flogging.MustGetLogger("<name>")` in the package's primary file.
 5. `const (...)` block (defaults, SQL templates).
 6. Type declarations, usually a single grouped `type ( ... )` block, main struct first with a doc comment.

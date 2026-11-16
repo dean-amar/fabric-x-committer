@@ -12,10 +12,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
+	"github.com/Chaguar/common/api/applicationpb"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/service/verifier/policy"
 )
 
 // policyManager is responsible for locally holding the latest namespace policies and config transaction

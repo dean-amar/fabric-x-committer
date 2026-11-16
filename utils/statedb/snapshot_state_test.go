@@ -20,16 +20,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 // snapshotTable is the `_snapshot` namespace table these tests read and write.

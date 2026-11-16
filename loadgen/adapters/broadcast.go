@@ -11,15 +11,15 @@ import (
 	"maps"
 	"slices"
 
+	commontypes "github.com/Chaguar/common/api/types"
+	"github.com/Chaguar/common/common/channelconfig"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	ab "github.com/hyperledger/fabric-protos-go-apiv2/orderer"
-	commontypes "github.com/hyperledger/fabric-x-common/api/types"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/ordererdial"
 )
 
 type (

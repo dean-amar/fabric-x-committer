@@ -11,8 +11,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
 )
 
 type (
@@ -183,6 +183,7 @@ func (m *SimpleManager) taskProcessing(ctx context.Context) {
 			promutil.SubFromGauge(m.metrics.dependentTxCount, len(depFree))
 		}
 		promutil.SetGauge(m.metrics.gdgWaitingTxCount, m.waitingTXs)
+		promutil.SetGauge(m.metrics.gdgDepFreeTxCount, len(pending))
 	}
 }
 

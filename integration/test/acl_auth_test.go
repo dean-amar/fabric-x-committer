@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/integration/runner"
+	"github.com/Chaguar/committer/utils/acl"
+	"github.com/Chaguar/committer/utils/grpcerror"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 const aclNamespace = "1"

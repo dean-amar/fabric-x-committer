@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/Chaguar/committer/api/servicepb"
 )
 
 func TestCheckpointValue(t *testing.T) {

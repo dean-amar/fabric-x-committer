@@ -12,7 +12,7 @@
 package servicepb
 
 import (
-	applicationpb "github.com/hyperledger/fabric-x-common/api/applicationpb"
+	applicationpb "github.com/Chaguar/common/api/applicationpb"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -211,7 +211,7 @@ const file_api_servicepb_loadgen_proto_rawDesc = "" +
 	"\x0eLoadGenService\x12@\n" +
 	"\vAppendBatch\x12\x17.servicepb.LoadGenBatch\x1a\x16.google.protobuf.Empty\"\x00\x12S\n" +
 	"\fGetRateLimit\x12\x16.google.protobuf.Empty\x1a\x14.servicepb.RateLimit\"\x15\x82\xd3\xe4\x93\x02\x0f\x12\r/getRateLimit\x12V\n" +
-	"\fSetRateLimit\x12\x14.servicepb.RateLimit\x1a\x16.google.protobuf.Empty\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/setRateLimitB9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"\fSetRateLimit\x12\x14.servicepb.RateLimit\x1a\x16.google.protobuf.Empty\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/setRateLimitB,Z*github.com/Chaguar/committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_loadgen_proto_rawDescOnce sync.Once

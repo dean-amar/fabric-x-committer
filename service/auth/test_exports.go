@@ -13,21 +13,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/tools/cryptogen"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/acl"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 // defaultTestChannelID is the channel NewAuthTestEnv builds a configuration for when it creates one.

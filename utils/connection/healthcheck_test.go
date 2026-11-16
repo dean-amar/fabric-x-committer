@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 func TestRunHealthCheck(t *testing.T) {

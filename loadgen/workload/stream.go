@@ -9,12 +9,12 @@ package workload
 import (
 	"context"
 
+	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/channel"
 )
 
 type (

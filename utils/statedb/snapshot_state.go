@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 const (

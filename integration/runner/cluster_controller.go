@@ -12,8 +12,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 // DBClusterController is a class that facilitates the manipulation of a DB cluster,

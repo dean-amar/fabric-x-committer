@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // GetContainerLogs and ExecuteCommand accept a [test.TestingT] so that a polling condition can

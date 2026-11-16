@@ -16,10 +16,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // stubService implements grpcservice.Service with a health check server.

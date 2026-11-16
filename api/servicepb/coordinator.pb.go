@@ -12,7 +12,7 @@
 package servicepb
 
 import (
-	committerpb "github.com/hyperledger/fabric-x-common/api/committerpb"
+	committerpb "github.com/Chaguar/common/api/committerpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -95,7 +95,7 @@ const file_api_servicepb_coordinator_proto_rawDesc = "" +
 	"\x1bSetLastCommittedBlockNumber\x12\x13.servicepb.BlockRef\x1a\x16.google.protobuf.Empty\"\x00\x12K\n" +
 	"\x1aGetNextBlockNumberToCommit\x12\x16.google.protobuf.Empty\x1a\x13.servicepb.BlockRef\"\x00\x12J\n" +
 	"\x15GetTransactionsStatus\x12\x17.committerpb.TxIDsBatch\x1a\x18.servicepb.TxStatusBatch\x12T\n" +
-	"\x1eNoPendingTransactionProcessing\x12\x16.google.protobuf.Empty\x1a\x1a.google.protobuf.BoolValueB9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"\x1eNoPendingTransactionProcessing\x12\x16.google.protobuf.Empty\x1a\x1a.google.protobuf.BoolValueB,Z*github.com/Chaguar/committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_coordinator_proto_rawDescOnce sync.Once

@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'pull_request' ||
-      github.repository != 'hyperledger/fabric-x-committer' ||
+      github.repository != 'Chaguar/committer' ||
       startsWith(github.ref, 'refs/heads/main') ||
       startsWith(github.ref, 'refs/heads/release')
     steps:

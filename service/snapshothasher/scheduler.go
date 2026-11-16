@@ -11,13 +11,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/statedb"
 )
 
 // ErrCorruptSnapshotState marks a durable `_snapshot` record that contradicts an

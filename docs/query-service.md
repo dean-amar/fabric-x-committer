@@ -28,7 +28,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## 1. Overview
 
-The Query Service is a component of the Fabric-X Committer architecture that provides efficient, consistent read-only access to the state database. It implements a view-based query mechanism that allows clients to retrieve data with specific isolation guarantees while optimizing database access through sophisticated batching techniques.
+The Query Service is a component of the Chaguar Committer architecture that provides efficient, consistent read-only access to the state database. It implements a view-based query mechanism that allows clients to retrieve data with specific isolation guarantees while optimizing database access through sophisticated batching techniques.
 
 ### Core Responsibilities
 

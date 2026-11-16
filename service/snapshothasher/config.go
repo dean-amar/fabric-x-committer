@@ -9,7 +9,7 @@ package snapshothasher
 import (
 	"time"
 
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/statedb"
 )
 
 // Config is the configuration for the snapshot service.

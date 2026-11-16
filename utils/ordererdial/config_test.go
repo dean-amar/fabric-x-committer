@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
+	"github.com/Chaguar/committer/utils/ordererdial"
 )
 
 func TestGetFaultToleranceLevel(t *testing.T) {

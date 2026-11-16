@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 ---
-name: Release Fabric-X Committer Docker Image
+name: Release Chaguar Committer Docker Image
 
 on:
   push:
@@ -65,15 +65,14 @@ jobs:
         run: make build-release
 
       - name: Set image build prefix and metadata
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           echo "CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
           echo "REVISION=$(git rev-parse HEAD)" >> $GITHUB_ENV
-          if [ "$GITHUB_REPOSITORY_OWNER" == "hyperledger" ]; then
-           echo "IMAGE_PREFIX=hyperledger" >> $GITHUB_ENV
-          else
-           echo "IMAGE_PREFIX=${{ secrets.DOCKERHUB_USERNAME }}" >> $GITHUB_ENV
-          fi
-           echo "GHCR_PREFIX=$GITHUB_REPOSITORY_OWNER" >> $GITHUB_ENV
+          # Registry namespaces must stay lowercase; registries reject uppercase image references.
+          echo "IMAGE_PREFIX=${DOCKERHUB_USERNAME,,}" >> $GITHUB_ENV
+          echo "GHCR_PREFIX=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Build and Push Multi-Platform Docker Image for Committer
         uses: docker/build-push-action@v6
@@ -83,10 +82,10 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/s390x
           push: true
           tags: |
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer:${{ env.VERSION }}
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer:latest
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-committer:${{ env.VERSION }}
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-committer:latest
+            docker.io/${{ env.IMAGE_PREFIX }}/committer:${{ env.VERSION }}
+            docker.io/${{ env.IMAGE_PREFIX }}/committer:latest
+            ghcr.io/${{ env.GHCR_PREFIX }}/committer:${{ env.VERSION }}
+            ghcr.io/${{ env.GHCR_PREFIX }}/committer:latest
           build-args: |
             BIN=committer
             SRC_BIN_PATH=release
@@ -94,8 +93,8 @@ jobs:
             VERSION=${{ env.VERSION }}
             CREATED=${{ env.CREATED }}
             REVISION=${{ env.REVISION }}
-          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer:buildcache
-          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer:buildcache,mode=max
+          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/committer:buildcache
+          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/committer:buildcache,mode=max
 
       - name: Build and Push Multi-Platform Docker Image for Loadgen
         uses: docker/build-push-action@v6
@@ -105,10 +104,10 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/s390x
           push: true
           tags: |
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-loadgen:${{ env.VERSION }}
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-loadgen:latest
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-loadgen:${{ env.VERSION }}
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-loadgen:latest
+            docker.io/${{ env.IMAGE_PREFIX }}/loadgen:${{ env.VERSION }}
+            docker.io/${{ env.IMAGE_PREFIX }}/loadgen:latest
+            ghcr.io/${{ env.GHCR_PREFIX }}/loadgen:${{ env.VERSION }}
+            ghcr.io/${{ env.GHCR_PREFIX }}/loadgen:latest
           build-args: |
             BIN=loadgen
             SRC_BIN_PATH=release
@@ -116,8 +115,8 @@ jobs:
             VERSION=${{ env.VERSION }}
             CREATED=${{ env.CREATED }}
             REVISION=${{ env.REVISION }}
-          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-loadgen:buildcache
-          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-loadgen:buildcache,mode=max
+          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/loadgen:buildcache
+          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/loadgen:buildcache,mode=max
 
       - name: Build and Push Multi-Platform Docker Image for Committer's Test Node
         uses: docker/build-push-action@v6
@@ -127,15 +126,15 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/s390x
           push: true
           tags: |
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer-test-node:${{ env.VERSION }}
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer-test-node:latest
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-committer-test-node:${{ env.VERSION }}
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-committer-test-node:latest
+            docker.io/${{ env.IMAGE_PREFIX }}/committer-test-node:${{ env.VERSION }}
+            docker.io/${{ env.IMAGE_PREFIX }}/committer-test-node:latest
+            ghcr.io/${{ env.GHCR_PREFIX }}/committer-test-node:${{ env.VERSION }}
+            ghcr.io/${{ env.GHCR_PREFIX }}/committer-test-node:latest
           build-args: |
             SRC_BIN_PATH=release
             VERSION=${{ env.VERSION }}
             CREATED=${{ env.CREATED }}
             REVISION=${{ env.REVISION }}
-          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer-test-node:buildcache
-          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-committer-test-node:buildcache,mode=max
+          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/committer-test-node:buildcache
+          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_PREFIX }}/committer-test-node:buildcache,mode=max
 
