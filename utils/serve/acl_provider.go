@@ -12,7 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
+	"github.com/Chaguar/committer/utils/acl"
 )
 
 // ACLProvider enforces ACL on a gRPC server once a service registers an enforcer with it. Every server

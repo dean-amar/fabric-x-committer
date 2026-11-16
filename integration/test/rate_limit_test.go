@@ -13,18 +13,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/integration/runner"
+	"github.com/Chaguar/committer/utils/acl"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 const numParallelRequests = 5

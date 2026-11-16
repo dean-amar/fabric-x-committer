@@ -14,11 +14,11 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
-	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/cmd/cliutil"
+	"github.com/Chaguar/committer/cmd/config"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 //nolint:paralleltest // Cannot parallelize due to logger.

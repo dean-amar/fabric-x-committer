@@ -25,10 +25,10 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // serverDownDuration is how long each restart leaves the server down before bringing it back: long

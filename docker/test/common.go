@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 const (
@@ -91,7 +91,7 @@ func (p startNodeParameters) dbDefaultDatabase() string {
 
 const (
 	monitoredMetric = "loadgen_transaction_committed_total"
-	testNodeImage   = "docker.io/hyperledger/committer-test-node:latest"
+	testNodeImage   = "docker.io/chaguar/committer-test-node:latest"
 	localhost       = "localhost"
 
 	// containerArtifactsPath is the path to the artifacts directory inside the container.

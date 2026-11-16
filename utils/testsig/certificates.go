@@ -15,7 +15,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 // SerializeVerificationKey encodes a ECDSA public key into a PEM file.

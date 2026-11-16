@@ -10,19 +10,19 @@ import (
 	"maps"
 	"os"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/common/policydsl"
+	"github.com/Chaguar/common/msp"
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/common/policydsl"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/ordererdial"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 var logger = flogging.MustGetLogger("load-gen-sign")

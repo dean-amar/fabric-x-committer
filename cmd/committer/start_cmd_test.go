@@ -14,9 +14,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
-	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/cmd/cliutil"
+	"github.com/Chaguar/committer/cmd/config"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 //nolint:paralleltest // Cannot parallelize due to logger.

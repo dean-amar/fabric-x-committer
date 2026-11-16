@@ -11,8 +11,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // TestTransactionRateLimitGauge covers the reason the gauge reads the stream instead of being

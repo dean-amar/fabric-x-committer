@@ -9,15 +9,15 @@ package deliverorderer
 import (
 	"context"
 
+	"github.com/Chaguar/common/api/types"
+	"github.com/Chaguar/common/common/channelconfig"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/orderer"
-	"github.com/hyperledger/fabric-x-common/api/types"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/deliver"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/deliver"
+	"github.com/Chaguar/committer/utils/ordererdial"
 )
 
 // NoFTParameters needed for deliver to run.

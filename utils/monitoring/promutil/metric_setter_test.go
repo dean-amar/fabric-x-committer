@@ -14,8 +14,8 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 func TestAddToCounter(t *testing.T) {

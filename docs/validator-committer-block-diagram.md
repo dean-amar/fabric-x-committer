@@ -27,7 +27,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## 1. Overview
 
-Validator-Committer (VC) service is the final stage in the Fabric-X transaction processing pipeline. It receives conflict-free transaction batches from the Coordinator, performs optimistic concurrency control through MVCC validation, and commits valid transactions to the state database.
+Validator-Committer (VC) service is the final stage in the Chaguar transaction processing pipeline. It receives conflict-free transaction batches from the Coordinator, performs optimistic concurrency control through MVCC validation, and commits valid transactions to the state database.
 
 Main responsibilities:
 

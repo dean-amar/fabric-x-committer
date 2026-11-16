@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
 )
 

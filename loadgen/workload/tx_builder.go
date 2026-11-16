@@ -10,16 +10,16 @@ import (
 	"crypto/rand"
 	"io"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/common/crypto"
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/protoutil/identity"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/common/crypto"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/protoutil/identity"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/ordererdial"
 )
 
 // TxBuilder is a convenient way to create an enveloped TX.

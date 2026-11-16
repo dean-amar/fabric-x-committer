@@ -1,12 +1,12 @@
 ---
 name: pr-review
-description: Review a GitHub pull request for the Fabric-X Committer project and post comment-only findings. Invoke with the PR URL.
+description: Review a GitHub pull request for the Chaguar Committer project and post comment-only findings. Invoke with the PR URL.
 argument-hint: <url to the pull request>
 ---
 
 # Bob PR Review Guidelines
 
-You are Bob, an AI PR reviewer for the Fabric-X Committer project. Follow these rules exactly.
+You are Bob, an AI PR reviewer for the Chaguar Committer project. Follow these rules exactly.
 
 ## Hard Rules (NEVER violate)
 
@@ -47,7 +47,7 @@ Before starting any review, read:
 - `@docs/core-concurrency-pattern.md` — required concurrency patterns
 - `@.claude/skills/development/SKILL.md` — the conventions for writing NEW code (code
   ordering/caller-before-callee, errgroup + context-aware channels, error handling, Go 1.27
-  idioms, and reuse of `utils/` + `fabric-x-common` helpers). New or changed code that
+  idioms, and reuse of `utils/` + `Chaguar/common` helpers). New or changed code that
   deviates from this skill is a review finding — cite the specific convention it breaks.
 - `@.claude/skills/tests/SKILL.md` — the testing conventions (table-driven + `t.Parallel`,
   `require` over `assert`, `require.Eventually`/`EventuallyWithT` over sleeps, `t.Helper`/
@@ -74,8 +74,8 @@ Ground every finding in evidence. Before posting any comment:
 ### 1. Fetch PR Information
 
 ```bash
-gh pr view <PR_NUMBER> --repo hyperledger/fabric-x-committer --json title,body,files,commits
-gh pr diff <PR_NUMBER> --repo hyperledger/fabric-x-committer
+gh pr view <PR_NUMBER> --repo Chaguar/committer --json title,body,files,commits
+gh pr diff <PR_NUMBER> --repo Chaguar/committer
 ```
 
 ### 2. Create Local Review Document
@@ -89,7 +89,7 @@ Present the review document to the user and ask: **"Ready to post this review to
 ### 4. Post Summary Comment
 
 ```bash
-gh pr review <PR_NUMBER> --repo hyperledger/fabric-x-committer --comment --body "<REVIEW_SUMMARY>"
+gh pr review <PR_NUMBER> --repo Chaguar/committer --comment --body "<REVIEW_SUMMARY>"
 ```
 
 ### 5. Post Inline Comments
@@ -99,7 +99,7 @@ gh pr review <PR_NUMBER> --repo hyperledger/fabric-x-committer --comment --body 
 For 1-2 short comments without special characters, use `--field`:
 
 ```bash
-gh api --method POST /repos/hyperledger/fabric-x-committer/pulls/<PR_NUMBER>/reviews \
+gh api --method POST /repos/Chaguar/committer/pulls/<PR_NUMBER>/reviews \
   --field event=COMMENT \
   --field body='<REVIEW_DESCRIPTION>' \
   --field 'comments[][path]=<FILE_PATH>' \
@@ -132,7 +132,7 @@ For 3+ comments, suggestion blocks, `<details>` tags, or special characters, wri
 ```
 
 ```bash
-gh api -X POST /repos/hyperledger/fabric-x-committer/pulls/<PR_NUMBER>/reviews --input /tmp/review_payload.json
+gh api -X POST /repos/Chaguar/committer/pulls/<PR_NUMBER>/reviews --input /tmp/review_payload.json
 ```
 
 ## Review Scope and Prioritization

@@ -9,9 +9,9 @@ package sidecar
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hyperledger/fabric-x-committer/utils/deliverorderer"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/utils/deliverorderer"
+	"github.com/Chaguar/committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 const (

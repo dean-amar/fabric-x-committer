@@ -15,12 +15,12 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/grpcerror"
+	"github.com/Chaguar/committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 // Server implements verifier.Server.

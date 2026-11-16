@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
+	commontypes "github.com/Chaguar/common/api/types"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils/ordererdial"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 // Defines Policy.Scheme.

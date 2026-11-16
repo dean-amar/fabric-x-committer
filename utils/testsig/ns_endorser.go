@@ -10,13 +10,13 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/msp"
+	"github.com/Chaguar/common/utils/certificate"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/utils/certificate"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 // NsEndorser endorse a transaction's namespace.

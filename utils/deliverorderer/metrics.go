@@ -9,7 +9,7 @@ package deliverorderer
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/monitoring"
 )
 
 // Metrics holds all Prometheus metrics for the deliverorderer package.

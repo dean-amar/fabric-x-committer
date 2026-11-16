@@ -17,9 +17,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"google.golang.org/grpc/peer"
 )
 

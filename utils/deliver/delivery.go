@@ -10,16 +10,16 @@ import (
 	"context"
 	"math"
 
+	"github.com/Chaguar/common/common/util"
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/protoutil/identity"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/hyperledger/fabric-protos-go-apiv2/orderer"
-	"github.com/hyperledger/fabric-x-common/common/util"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/protoutil/identity"
 
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

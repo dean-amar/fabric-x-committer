@@ -10,14 +10,14 @@ import (
 	"bytes"
 	"math"
 
+	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/common/policies"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
-	"github.com/hyperledger/fabric-x-common/common/policies"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/utils/deliver"
+	"github.com/Chaguar/committer/utils/deliver"
 )
 
 type (

@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/cmd/cliutil"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 // healthcheckCMD creates the "healthcheck" parent command with all service subcommands.

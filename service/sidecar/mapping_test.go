@@ -11,19 +11,19 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // testChannelID is a shared channel ID used by sidecar mapping/relay tests.
@@ -198,7 +198,7 @@ func TestBlockMappingInParallel(t *testing.T) {
 // ConfigEnvelope.LastUpdate. The outer TX ID is used only when there is no nested update at all, in
 // a bootstrap (genesis) config block: it never stands in for a nested update the TX ID cannot be
 // taken from, and the committer never computes an ID of its own, so either case fails the block.
-// See https://github.com/hyperledger/fabric-x-committer/issues/752.
+// See https://github.com/Chaguar/committer/issues/752.
 func TestConfigTxMapping(t *testing.T) {
 	t.Parallel()
 

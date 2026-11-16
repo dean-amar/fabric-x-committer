@@ -7,10 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 package auth
 
 import (
+	"github.com/Chaguar/common/api/msppb"
+	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/msp"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/msppb"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
-	"github.com/hyperledger/fabric-x-common/msp"
 )
 
 // policyReaders is the policy governing every resource the channel configuration's ACLs do not name.

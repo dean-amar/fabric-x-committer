@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/common/crypto/tlsgen"
+	"github.com/Chaguar/common/common/crypto/tlsgen"
 	"github.com/stretchr/testify/require"
 )
 

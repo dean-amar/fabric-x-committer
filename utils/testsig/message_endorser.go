@@ -10,12 +10,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/msppb"
+	"github.com/Chaguar/common/msp"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/msppb"
-	"github.com/hyperledger/fabric-x-common/msp"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 type (

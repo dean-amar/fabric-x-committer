@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/Shopify/toxiproxy/v2"
 	toxiclient "github.com/Shopify/toxiproxy/v2/client"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -29,10 +29,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/integration/runner"
+	"github.com/Chaguar/committer/utils/acl"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 const (

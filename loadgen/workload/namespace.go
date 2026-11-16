@@ -9,12 +9,12 @@ package workload
 import (
 	"slices"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/Chaguar/committer/api/servicepb"
 )
 
 // CreateLoadGenNamespacesTX creating the transaction containing the requested namespaces into the MetaNamespace.

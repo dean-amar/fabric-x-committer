@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/statedb"
 )
 
 const (

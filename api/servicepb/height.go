@@ -9,9 +9,9 @@ package servicepb
 import (
 	"fmt"
 
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/committerpb"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/Chaguar/committer/utils"
 )
 
 // Height represents the height of a transaction in blockchain.

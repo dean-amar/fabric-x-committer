@@ -17,6 +17,7 @@ import (
 const (
 	CommitterVersion = "0.0.2"
 	CommitterName    = "Committer"
+	ProductName      = "Chaguar"
 )
 
 // VersionCmd creates a version command.

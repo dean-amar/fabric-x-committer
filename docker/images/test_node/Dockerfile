@@ -76,13 +76,13 @@ EXPOSE 7050 4001 2114 7001 2117 2110 10001 2121
 
 # OCI metadata labels
 LABEL org.opencontainers.image.created="${CREATED}" \
-    org.opencontainers.image.description="Hyperledger Fabric-X Committer Test Node." \
+    org.opencontainers.image.description="Chaguar Committer Test Node." \
     org.opencontainers.image.licenses="Apache-2.0" \
     org.opencontainers.image.ref.name="postgres" \
     org.opencontainers.image.revision="${REVISION}" \
-    org.opencontainers.image.source="https://github.com/hyperledger/fabric-x-committer" \
-    org.opencontainers.image.title="fabric-x-committer-test-node" \
-    org.opencontainers.image.url="https://github.com/hyperledger/fabric-x-committer" \
+    org.opencontainers.image.source="https://github.com/Chaguar/committer" \
+    org.opencontainers.image.title="committer-test-node" \
+    org.opencontainers.image.url="https://github.com/Chaguar/committer" \
     org.opencontainers.image.version="${VERSION}"
 
 # Default CMD

@@ -17,12 +17,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 func TestNewNsVerifierFromKey(t *testing.T) {

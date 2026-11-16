@@ -5,7 +5,7 @@ description: Write and/or run unit and integration tests, ensuring high code cov
 
 # Testing Code Guidelines
 
-This document provides specific guidelines for writing and running tests in the fabric-x-committer project.
+This document provides specific guidelines for writing and running tests in the Chaguar Committer project.
 
 - **High Coverage Expected**: Strive for comprehensive test coverage, but focus on meaningful scenarios
 - **Minimize Mocks**: Use mocks sparingly; prefer testing with real dependencies when practical
@@ -47,9 +47,9 @@ Don't hand-roll crypto, TLS, config-block, or service/DB setup — reuse existin
 - **ACL (this repo):** `auth.NewAuthTestEnv` (`service/auth/test_exports.go`) runs a real AuthService — use `TestEnv.IssueToken` for a token and `TestEnv.Config` for the resource server's `auth:` section (`acl.Config{MultiClientConfig: *env.Config}`), then `acl.ContextWithToken` to authorize one RPC. `auth.NewAuthTestClient` does the same against an integration topology's instances. Don't stub the AuthService.
 - **Proto assertions (this repo):** `test.RequireProtoEqual` / `test.RequireProtoElementsMatch` (`utils/test/require_proto.go`) — never compare protos with `require.Equal`. Both accept `test.TestingT`, so they also work inside `require.EventuallyWithT`.
 - **Inside an `Eventually` condition, never touch the outer `t`** — not `require`, not `t.Fatalf`, not `t.Logf`. The condition runs on its own goroutine and may outlive the test, where asserting on the test's own `T` panics the *whole test binary* instead of failing one test; it also fails the test on the first transient error instead of retrying. Assert on the `ct`, and give any helper the condition calls a `test.TestingT` parameter (`require.TestingT` plus `Helper()`) so the `ct` can be passed down — see `test.GetIntMetricValue`, `testdb.DatabaseContainer.ExecuteCommand`. `testing.TB` cannot serve here: it is sealed, so an `assert.CollectT` can never satisfy it; reserve it for helpers needing `Cleanup`/`TempDir`/`Context` that no condition calls.
-- **MSP / identity / Fabric config blocks:** `github.com/hyperledger/fabric-x-common/utils/testcrypto` — `CreateOrExtendConfigBlockWithCrypto`, `ConfigBlock`, `PrepareBlockHeaderAndMetadata`, `GetPeersIdentities` / `GetConsenterIdentities` / `GetSigningIdentities` / `GetPeersMspDirs` / `GetConsenterMspDirs`.
-- **TLS test material:** `github.com/hyperledger/fabric-x-common/common/crypto/tlsgen` — `tlsgen.NewCA()`, `CA`, `CertKeyPair`.
-- **Generate crypto material:** `github.com/hyperledger/fabric-x-common/tools/cryptogen`.
+- **MSP / identity / Fabric config blocks:** `github.com/Chaguar/common/utils/testcrypto` — `CreateOrExtendConfigBlockWithCrypto`, `ConfigBlock`, `PrepareBlockHeaderAndMetadata`, `GetPeersIdentities` / `GetConsenterIdentities` / `GetSigningIdentities` / `GetPeersMspDirs` / `GetConsenterMspDirs`.
+- **TLS test material:** `github.com/Chaguar/common/common/crypto/tlsgen` — `tlsgen.NewCA()`, `CA`, `CertKeyPair`.
+- **Generate crypto material:** `github.com/Chaguar/common/tools/cryptogen`.
 
 For authoring the production code these tests cover, use the `development` skill.
 

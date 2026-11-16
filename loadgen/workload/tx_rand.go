@@ -10,7 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	"github.com/hyperledger/fabric-x-common/common/crypto"
+	"github.com/Chaguar/common/common/crypto"
 )
 
 // txRandomProcess is the deterministic content model behind the transaction stream. It derives every

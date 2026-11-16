@@ -12,8 +12,8 @@
 package servicepb
 
 import (
-	applicationpb "github.com/hyperledger/fabric-x-common/api/applicationpb"
-	committerpb "github.com/hyperledger/fabric-x-common/api/committerpb"
+	applicationpb "github.com/Chaguar/common/api/applicationpb"
+	committerpb "github.com/Chaguar/common/api/committerpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -153,7 +153,7 @@ const file_api_servicepb_vcservice_proto_rawDesc = "" +
 	"\x1aGetNextBlockNumberToCommit\x12\x16.google.protobuf.Empty\x1a\x13.servicepb.BlockRef\"\x00\x12L\n" +
 	"\x15GetTransactionsStatus\x12\x17.committerpb.TxIDsBatch\x1a\x18.servicepb.TxStatusBatch\"\x00\x12R\n" +
 	"\x14GetNamespacePolicies\x12\x16.google.protobuf.Empty\x1a .applicationpb.NamespacePolicies\"\x00\x12R\n" +
-	"\x14GetConfigTransaction\x12\x16.google.protobuf.Empty\x1a .applicationpb.ConfigTransaction\"\x00B9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"\x14GetConfigTransaction\x12\x16.google.protobuf.Empty\x1a .applicationpb.ConfigTransaction\"\x00B,Z*github.com/Chaguar/committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_vcservice_proto_rawDescOnce sync.Once

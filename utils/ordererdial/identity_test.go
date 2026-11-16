@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Chaguar/common/msp"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/ordererdial"
+	"github.com/Chaguar/committer/utils/ordererdial"
 )
 
 func TestNewIdentitySigner(t *testing.T) {

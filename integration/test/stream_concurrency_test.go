@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
+	"github.com/Chaguar/committer/integration/runner"
+	"github.com/Chaguar/committer/utils/acl"
 )
 
 func TestStreamConcurrencyLimit(t *testing.T) {

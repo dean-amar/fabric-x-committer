@@ -28,7 +28,7 @@ The service is composed of focused collaborators, each with one responsibility:
 
 ## RPCs
 
-The `AuthService` is defined in `fabric-x-common/api/committerpb` (`auth.proto`), next to the
+The `AuthService` is defined in `Chaguar/common/api/committerpb` (`auth.proto`), next to the
 `QueryService` and `SidecarService` it protects, so a client authenticates without importing this module.
 Only the persisted `TokenRecord` is internal, in `api/servicepb`.
 

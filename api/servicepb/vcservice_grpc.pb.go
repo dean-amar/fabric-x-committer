@@ -13,8 +13,8 @@ package servicepb
 
 import (
 	context "context"
-	applicationpb "github.com/hyperledger/fabric-x-common/api/applicationpb"
-	committerpb "github.com/hyperledger/fabric-x-common/api/committerpb"
+	applicationpb "github.com/Chaguar/common/api/applicationpb"
+	committerpb "github.com/Chaguar/common/api/committerpb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"

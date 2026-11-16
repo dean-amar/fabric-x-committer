@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/deliver"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/deliver"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 //go:generate mockgen -source=delivery.go -destination=streamer_mock_test.go -package=deliver_test

@@ -22,8 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/monitoring"
 )
 
 type (

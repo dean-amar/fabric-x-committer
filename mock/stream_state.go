@@ -14,9 +14,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	commonutils "github.com/hyperledger/fabric-x-common/common/util"
+	commonutils "github.com/Chaguar/common/common/util"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/Chaguar/committer/utils"
 )
 
 type (

@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
 )
 
 // viewParametersPermutations there is a constant number of view-parameter permutations.

@@ -34,7 +34,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## 1. Overview
 
-The Verification Service is a component in the Fabric-X Committer architecture responsible for validating transaction 
+The Verification Service is a component in the Chaguar Committer architecture responsible for validating transaction
 signatures against namespace policies.
 It ensures that only properly authorized transactions are committed to the state database by verifying
 signatures against the appropriate policies.
@@ -307,7 +307,7 @@ The Verification Service is implemented in the `service/verifier` package with t
 
 The `Server` struct (under `verifier_server.go`) implements the gRPC server interface and stream handling.
 
-From [fabric-x-committer/service/verifier/verifier_server.go](/service/verifier/verifier_server.go).
+From [Chaguar/committer/service/verifier/verifier_server.go](/service/verifier/verifier_server.go).
 ```go
 type Server struct {
     protosigverifierservice.UnimplementedVerifierServer
@@ -325,7 +325,7 @@ It provides the following methods:
 
 The `verifier` struct (under `verify.go`) contains the core verification logic.
 
-From [fabric-x-committer/service/verifier/verify.go](/service/verifier/verify.go).
+From [Chaguar/committer/service/verifier/verify.go](/service/verifier/verify.go).
 ```go
 type verifier struct {
     verifiers atomic.Pointer[map[string]*signature.NsVerifier]
@@ -341,7 +341,7 @@ It provides the following methods:
 
 The `parallelExecutor` struct (under `parallel_executor.go`) manages parallel processing of verification requests.
 
-From [fabric-x-committer/service/verifier/parallel_executor.go](/service/verifier/parallel_executor.go).
+From [Chaguar/committer/service/verifier/parallel_executor.go](/service/verifier/parallel_executor.go).
 ```go
 type parallelExecutor struct {
     inputCh        chan *protosigverifierservice.Request
@@ -390,7 +390,7 @@ The `handleInputs` method processes incoming verification requests.
 Policy updates are piggybacked over received batches, and applied before inserting the transactions to the queue.
 Full description of the policy management will follow.
 
-From [fabric-x-committer/service/verifier/verifier_server.go](/service/verifier/verifier_server.go).
+From [Chaguar/committer/service/verifier/verifier_server.go](/service/verifier/verifier_server.go).
 ```go
 func (s *Server) handleInputs(
     ctx context.Context,
@@ -418,7 +418,7 @@ func (s *Server) handleInputs(
 
 The `handleOutputs` method processes verification responses:
 
-From [fabric-x-committer/service/verifier/verifier_server.go](/service/verifier/verifier_server.go).
+From [Chaguar/committer/service/verifier/verifier_server.go](/service/verifier/verifier_server.go).
 ```go
 func (s *Server) handleOutputs(
     ctx context.Context,
@@ -448,7 +448,7 @@ func (s *Server) handleOutputs(
 
 The `handleCutoff` method implements response batching:
 
-From [fabric-x-committer/service/verifier/parallel_executor.go](/service/verifier/parallel_executor.go).
+From [Chaguar/committer/service/verifier/parallel_executor.go](/service/verifier/parallel_executor.go).
 ```go
 func (e *parallelExecutor) handleCutoff(ctx context.Context) {
     var outputBuffer []*protosigverifierservice.Response
@@ -483,7 +483,7 @@ This implementation balances throughput and latency by using both size-based and
 
 The service uses a fixed-size worker pool for parallel processing:
 
-From [fabric-x-committer/service/verifier/parallel_executor.go](/service/verifier/parallel_executor.go).
+From [Chaguar/committer/service/verifier/parallel_executor.go](/service/verifier/parallel_executor.go).
 ```go
 for range executor.config.Parallelism {
     g.Go(func() error {
@@ -501,7 +501,7 @@ Each worker processes requests independently.
 
 Policies are stored in an atomic map to allow lock-free updates:
 
-From [fabric-x-committer/service/verifier/verify.go](/service/verifier/verify.go).
+From [Chaguar/committer/service/verifier/verify.go](/service/verifier/verify.go).
 ```go
 type verifier struct {
     verifiers atomic.Pointer[map[string]*signature.NsVerifier]
@@ -516,7 +516,7 @@ The `updatePolicies` method handles policy updates.
 It may return error if it fails to parse the policy. This should never happen in a correct node because malformed
 policies are rejected beforehand. Thus, such error should fail the node.
 
-From [fabric-x-committer/service/verifier/verify.go](/service/verifier/verify.go).
+From [Chaguar/committer/service/verifier/verify.go](/service/verifier/verify.go).
 ```go
 func (v *verifier) updatePolicies(
     update *protosigverifierservice.Update,
@@ -548,7 +548,7 @@ func (v *verifier) updatePolicies(
 
 Policies can be derived from a config block (meta namespace policy), or from a namespace update (namespace policy).
 
-From [fabric-x-committer/service/verifier/verify.go](/service/verifier/verify.go).
+From [Chaguar/committer/service/verifier/verify.go](/service/verifier/verify.go).
 ```go
 func parsePolicies(update *protosigverifierservice.Update) (map[string]*signature.NsVerifier, error) {
     newPolicies := make(map[string]*signature.NsVerifier)
@@ -580,7 +580,7 @@ func parsePolicies(update *protosigverifierservice.Update) (map[string]*signatur
 
 The `verifyRequest` method verifies a transaction against namespace policies.
 
-From [fabric-x-committer/service/verifier/verify.go](/service/verifier/verify.go).
+From [Chaguar/committer/service/verifier/verify.go](/service/verifier/verify.go).
 ```go
 func (v *verifier) verifyRequest(request *protosigverifierservice.Request) *protosigverifierservice.Response {
     return &protosigverifierservice.Response{

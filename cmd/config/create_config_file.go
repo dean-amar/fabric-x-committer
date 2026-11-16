@@ -22,10 +22,10 @@ import (
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/statedb"
 )
 
 type (

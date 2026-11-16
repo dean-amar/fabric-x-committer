@@ -10,12 +10,12 @@ import (
 	"crypto/sha256"
 	"strings"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/common/cauthdsl"
+	"github.com/Chaguar/common/common/policies"
+	"github.com/Chaguar/common/msp"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/common/cauthdsl"
-	"github.com/hyperledger/fabric-x-common/common/policies"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 )
 
 // TODO: Move channelPolicyVerifier, mspPolicyVerifier, and keyVerifier to their own files.

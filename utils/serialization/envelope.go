@@ -13,7 +13,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/hyperledger/fabric-x-common/protoutil"
+	"github.com/Chaguar/common/protoutil"
 )
 
 // EnvelopeLite holds the minimal fields extracted from a protobuf Envelope.

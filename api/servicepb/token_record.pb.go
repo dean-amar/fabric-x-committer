@@ -12,7 +12,7 @@
 package servicepb
 
 import (
-	msppb "github.com/hyperledger/fabric-x-common/api/msppb"
+	msppb "github.com/Chaguar/common/api/msppb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -115,7 +115,7 @@ const file_api_servicepb_token_record_proto_rawDesc = "" +
 	"\x10cert_hash_sha256\x18\x02 \x01(\fR\x0ecertHashSha256\x12\x14\n" +
 	"\x05scope\x18\x03 \x03(\tR\x05scope\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\x03R\texpiresAtB9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"expires_at\x18\x04 \x01(\x03R\texpiresAtB,Z*github.com/Chaguar/committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_token_record_proto_rawDescOnce sync.Once

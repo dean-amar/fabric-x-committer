@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
 )
 
 type (

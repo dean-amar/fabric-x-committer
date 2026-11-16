@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package dependencygraph
 
 import (
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/monitoring"
 )
 
 // Parameters holds the configuration for the dependency graph manager.

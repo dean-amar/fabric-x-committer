@@ -7,9 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 package loadgen
 
 import (
-	"github.com/hyperledger/fabric-x-committer/loadgen/adapters"
-	"github.com/hyperledger/fabric-x-committer/loadgen/metrics"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
+	"github.com/Chaguar/committer/loadgen/adapters"
+	"github.com/Chaguar/committer/loadgen/metrics"
+	"github.com/Chaguar/committer/loadgen/workload"
 )
 
 type (

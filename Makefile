@@ -87,7 +87,7 @@ cmd            ?=
 # An error will occur if neither container engine is installed.
 docker_cmd ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || \
 							echo podman || { echo "Error: Neither Docker nor Podman is installed." >&2; exit 1; })
-image_namespace=docker.io/hyperledger
+image_namespace=docker.io/chaguar
 
 # Set these parameters to compile to a specific os/arch
 # E.g., make build-local os=linux arch=amd64
@@ -130,7 +130,7 @@ MAKEFLAGS += --jobs=16
 # Tests
 #########################
 
-ROOT_PKG_REGEXP = github.com/hyperledger/fabric-x-committer
+ROOT_PKG_REGEXP = github.com/Chaguar/committer
 CORE_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/service/(vc|query|sidecar|snapshothasher|auth)
 REQUIRES_DB_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(loadgen|cmd|utils/(testdb|statedb))
 HEAVY_PACKAGES_REGEXP = ${ROOT_PKG_REGEXP}/(docker|integration)
@@ -254,7 +254,7 @@ bench-deliver: FORCE
 # Code Generation
 #########################
 
-PROTO_COMMON_PATH="$(shell $(env) $(go_cmd) list -m -f '{{.Dir}}' github.com/hyperledger/fabric-x-common)"
+PROTO_COMMON_PATH="$(shell $(env) $(go_cmd) list -m -f '{{.Dir}}' github.com/Chaguar/common)"
 
 BUILD_DIR := .build
 

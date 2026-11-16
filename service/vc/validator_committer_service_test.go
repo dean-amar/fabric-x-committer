@@ -13,22 +13,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testapp"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/service/verifier/policy"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/grpcerror"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testapp"
 )
 
 type validatorAndCommitterServiceTestEnvWithClient struct {

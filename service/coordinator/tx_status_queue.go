@@ -10,7 +10,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
+	"github.com/Chaguar/committer/api/servicepb"
 )
 
 type txStatusQueue struct {

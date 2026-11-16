@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc/resolver/manual"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 const (
@@ -44,7 +44,7 @@ const (
 	// gives up; this applies to service reconnection only.
 	defaultGrpcMaxAttempts = 1024
 	// TODO: All services including the orderer must use the same default maximum message size.
-	//       Hence, we need to move this constant to fabric-x-common.
+	//       Hence, we need to move this constant to Chaguar/common.
 	// MaxMsgSize is set to 100MB.
 	MaxMsgSize       = 100 * 1024 * 1024
 	scResolverSchema = "sc.connection"
