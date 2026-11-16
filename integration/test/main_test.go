@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 func TestMain(m *testing.M) {

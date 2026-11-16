@@ -12,14 +12,14 @@ import (
 	"maps"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 // transactionCommitter is responsible for committing the transactions.

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
 
-	"github.com/hyperledger/fabric-x-committer/integration/runner"
+	"github.com/Chaguar/committer/integration/runner"
 )
 
 func TestMixOfValidAndInvalidSign(t *testing.T) { //nolint:gocognit

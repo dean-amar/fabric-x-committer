@@ -9,7 +9,7 @@ package query
 import (
 	"context"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/Chaguar/committer/utils"
 )
 
 // The following implementation is lock-free. It guarantees that for multiple parallel calls,

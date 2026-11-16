@@ -12,15 +12,15 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/cliutil"
-	"github.com/hyperledger/fabric-x-committer/service/auth"
-	"github.com/hyperledger/fabric-x-committer/service/coordinator"
-	"github.com/hyperledger/fabric-x-committer/service/query"
-	"github.com/hyperledger/fabric-x-committer/service/sidecar"
-	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
-	"github.com/hyperledger/fabric-x-committer/service/vc"
-	"github.com/hyperledger/fabric-x-committer/service/verifier"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/cmd/cliutil"
+	"github.com/Chaguar/committer/service/auth"
+	"github.com/Chaguar/committer/service/coordinator"
+	"github.com/Chaguar/committer/service/query"
+	"github.com/Chaguar/committer/service/sidecar"
+	"github.com/Chaguar/committer/service/snapshothasher"
+	"github.com/Chaguar/committer/service/vc"
+	"github.com/Chaguar/committer/service/verifier"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 func startCMD() *cobra.Command {

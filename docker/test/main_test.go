@@ -10,7 +10,7 @@ import (
 	"log"
 	"testing"
 
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 func TestMain(m *testing.M) {

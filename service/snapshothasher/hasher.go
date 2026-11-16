@@ -13,14 +13,14 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/statedb"
 )
 
 // txStatusPageSQL pages tx_status in primary-key order for hashing, encoding the

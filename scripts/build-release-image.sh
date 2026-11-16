@@ -18,7 +18,7 @@ function build_image() {
   local image_name=$1
   local bin=$2
   local service_ports=$3
-  local manifest_name=${namespace}/fabric-x-${image_name}:${version}
+  local manifest_name=${namespace}/${image_name}:${version}
   local cmd=(
     "${docker_cmd}" build
     -f "${dockerfile_release_dir}/Dockerfile"

@@ -2,11 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-module github.com/hyperledger/fabric-x-committer
+module github.com/Chaguar/committer
 
 go 1.27.3
 
 require (
+	github.com/Chaguar/common v0.2.14-0.20261116132701-96c6b26ee4a2
 	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/cockroachdb/errors v1.14.0
@@ -21,7 +22,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/hyperledger/fabric-lib-go v1.1.5
 	github.com/hyperledger/fabric-protos-go-apiv2 v0.3.7
-	github.com/hyperledger/fabric-x-common v0.2.13-0.20261102124848-7e8d3746c19c
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/jackc/puddle/v2 v2.2.2
 	github.com/moby/moby/api v1.55.0

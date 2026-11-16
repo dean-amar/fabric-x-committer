@@ -12,22 +12,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/common/policydsl"
-	"github.com/hyperledger/fabric-x-common/protoutil"
-	"github.com/hyperledger/fabric-x-common/utils/testcrypto"
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/common/policydsl"
+	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/service/verifier/policy"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 const (
@@ -224,8 +224,8 @@ func TestSignatureRule(t *testing.T) {
 		})
 	}
 
-	// Update the config block to have SampleFabricX profile instead of
-	// the default TwoOrgsSampleFabricX.
+	// Update the config block to have SampleChaguar profile instead of
+	// the default TwoOrgsSampleChaguar.
 	configBlock, err := testcrypto.CreateOrExtendConfigBlockWithCrypto(t.TempDir(), &testcrypto.ConfigBlock{})
 	require.NoError(t, err)
 	update = &servicepb.VerifierUpdates{

@@ -12,7 +12,7 @@
 package servicepb
 
 import (
-	applicationpb "github.com/hyperledger/fabric-x-common/api/applicationpb"
+	applicationpb "github.com/Chaguar/common/api/applicationpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -146,7 +146,7 @@ const file_api_servicepb_verifier_proto_rawDesc = "" +
 	"\a_configB\x15\n" +
 	"\x13_namespace_policies2Q\n" +
 	"\bVerifier\x12E\n" +
-	"\vStartStream\x12\x18.servicepb.VerifierBatch\x1a\x18.servicepb.TxStatusBatch(\x010\x01B9Z7github.com/hyperledger/fabric-x-committer/api/servicepbb\x06proto3"
+	"\vStartStream\x12\x18.servicepb.VerifierBatch\x1a\x18.servicepb.TxStatusBatch(\x010\x01B,Z*github.com/Chaguar/committer/api/servicepbb\x06proto3"
 
 var (
 	file_api_servicepb_verifier_proto_rawDescOnce sync.Once

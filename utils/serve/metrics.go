@@ -9,7 +9,7 @@ package serve
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/monitoring"
 )
 
 // ServerMetrics holds the server-side connection and RPC metrics a service records. The RPC

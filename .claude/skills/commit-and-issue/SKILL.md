@@ -1,6 +1,6 @@
 ---
 name: commit-and-issue
-description: Write a commit message (which becomes the GitHub PR description verbatim) or open a GitHub issue for the Fabric-X Committer repo, following the repo's PR template and conventions. Use whenever the user wants to commit staged changes, write or fix a commit/PR message, prepare a PR description, or open/file/create a GitHub issue for this project — even for terse asks like "commit this", "write the PR description", or "file an issue for this bug".
+description: Write a commit message (which becomes the GitHub PR description verbatim) or open a GitHub issue for the Chaguar Committer repo, following the repo's PR template and conventions. Use whenever the user wants to commit staged changes, write or fix a commit/PR message, prepare a PR description, or open/file/create a GitHub issue for this project — even for terse asks like "commit this", "write the PR description", or "file an issue for this bug".
 ---
 
 # Commit messages and GitHub issues
@@ -11,8 +11,8 @@ description, reviewed as-is. Write it to the PR template and keep the exact word
 user approves.
 
 The upstream repo for all `gh` operations (issues, and PRs via `--repo`) is
-**`hyperledger/fabric-x-committer`**. PRs, however, are pushed from and opened off **your
-fork** (`<your-user>/fabric-x-committer`), not upstream — see
+**`Chaguar/committer`**. PRs, however, are pushed from and opened off **your
+fork** (`<your-user>/<fork-repo>`), not upstream — see
 [Push to your fork, then open the PR against upstream](#5-push-to-your-fork-then-open-the-pr-against-upstream).
 
 Pick the workflow that matches the request:
@@ -169,31 +169,31 @@ which re-strips the headers; if you must edit interactively, add `--cleanup=whit
 
 ### 5. Push to your fork, then open the PR against upstream
 
-Contributors don't have push access to `hyperledger/fabric-x-committer`, so the branch must
+Contributors don't have push access to `Chaguar/committer`, so the branch must
 live on **your fork**, and the PR is opened from `your-fork:branch` into
-`hyperledger:main`. Never push feature branches to the upstream remote.
+`Chaguar:main`. Never push feature branches to the upstream remote.
 
-Inspect the remotes and pick the fork (the one that is *not* `hyperledger/...`):
+Inspect the remotes and pick the fork (the one that is *not* `Chaguar/committer`):
 
 ```bash
 git remote -v
 ```
 
-By GitHub convention, `origin` points at your fork (`<your-user>/fabric-x-committer`) and
-`upstream` points at `hyperledger/fabric-x-committer` — but don't assume the names match;
+By GitHub convention, `origin` points at your fork (`<your-user>/<fork-repo>`) and
+`upstream` points at `Chaguar/committer` — but don't assume the names match;
 read the URLs from `git remote -v` and pick by URL, not by name (this repo's own clone may
 name them differently). Confirm your fork's owner rather than hardcoding a name:
 
 ```bash
 FORK_OWNER=$(gh api user -q .login)          # your GitHub login
-FORK_REMOTE=$(git remote -v | awk -v u="$FORK_OWNER/fabric-x-committer" '$2 ~ u {print $1; exit}')
+FORK_REMOTE=$(git remote -v | awk -v u="$FORK_OWNER/" 'index($2, u) {print $1; exit}')
 ```
 
 Push the branch to the fork and open the PR with an explicit cross-repo `--head`:
 
 ```bash
 git push -u "$FORK_REMOTE" <branch>
-gh pr create --repo hyperledger/fabric-x-committer \
+gh pr create --repo Chaguar/committer \
   --base main --head "$FORK_OWNER:<branch>" \
   --title "[component] Short description" \
   --body-file /tmp/pr-body.md
@@ -208,9 +208,9 @@ the fork (`git branch --set-upstream-to=$FORK_REMOTE/<branch>`).
 
 The PR body is the commit message body verbatim (subject line and the `Signed-off-by:`
 trailer removed). If a PR already exists or you're updating one, reuse the same body with
-`gh pr edit --repo hyperledger/fabric-x-committer <num> --body-file /tmp/pr-body.md`. Apply
+`gh pr edit --repo Chaguar/committer <num> --body-file /tmp/pr-body.md`. Apply
 any labels to the PR through `gh` when applicable (e.g.
-`gh pr edit --repo hyperledger/fabric-x-committer <num> --add-label vc,bug`) — never in the
+`gh pr edit --repo Chaguar/committer <num> --add-label vc,bug`) — never in the
 message body.
 
 ## Opening a GitHub issue
@@ -253,7 +253,7 @@ or more **component** labels plus a **type** label:
   `performance`, `task`, `flaky-test`, `race-condition`, `security`, `breaking`,
   `code-hygiene`, `good-first-issue`, `help-wanted`.
 
-Labels evolve — run `gh label list --repo hyperledger/fabric-x-committer` to confirm current
+Labels evolve — run `gh label list --repo Chaguar/committer` to confirm current
 names before applying, and don't invent labels that don't exist. Labels are applied through
 the `gh` command (`--label` below), never written into the issue body.
 
@@ -261,7 +261,7 @@ Show the proposed `gh issue create` command (title, body, labels) for approval, 
 with `--body-file` so the multi-line body is preserved:
 
 ```bash
-gh issue create --repo hyperledger/fabric-x-committer \
+gh issue create --repo Chaguar/committer \
   --title "[component] Short description" \
   --body-file /tmp/issue-body.md \
   --label enhancement --label coordinator

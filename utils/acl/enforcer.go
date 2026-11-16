@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/common/util"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/common/util"
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/grpcerror"
 )
 
 var logger = flogging.MustGetLogger("acl")

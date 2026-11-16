@@ -3,7 +3,7 @@ Copyright IBM Corp. All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 -->
-# Deployment Guide for Fabric-X Committer
+# Deployment Guide for Chaguar Committer
 
 ## Table of Contents
 

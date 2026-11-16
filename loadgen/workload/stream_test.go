@@ -14,17 +14,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/msp"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/msp"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/serialization"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/serialization"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 func defaultStreamOptions() *StreamOptions {

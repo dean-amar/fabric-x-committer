@@ -10,7 +10,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/Chaguar/committer/utils"
 )
 
 // CheckpointAbortValue is the value used to abort a snapshot instead of confirming its digest.

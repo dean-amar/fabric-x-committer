@@ -15,19 +15,19 @@ import (
 	"testing"
 	"time"
 
+	commontypes "github.com/Chaguar/common/api/types"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
-	commontypes "github.com/hyperledger/fabric-x-common/api/types"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/mock"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/cmd/config"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/mock"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serve"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // CommandTest is a struct that represents a CMD unit test.

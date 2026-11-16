@@ -11,16 +11,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/common/channelconfig"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"github.com/jackc/puddle/v2"
 
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring/promutil"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/monitoring/promutil"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/statedb"
 )
 
 // errConfigUnavailable is returned before any channel-configuration bundle has loaded, so nothing can be

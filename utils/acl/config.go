@@ -9,7 +9,7 @@ package acl
 import (
 	"time"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 // Config configures a resource server's connection to the AuthService. Enforcement is on only when it lists

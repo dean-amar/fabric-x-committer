@@ -446,6 +446,9 @@ metric labels because they could create too many distinct time series.
 
 ### Task 3. Persisting Committed Block in the File System
 
+The persisted ledger ID is `committer`, with block files stored under `<ledger path>/chains/committer`.
+Existing block stores using another ledger ID are not migrated or reopened automatically.
+
 The following code runs *Task 3* which reads blocks present in the `committedBlocks`
 queue and store the block in the file system.
 

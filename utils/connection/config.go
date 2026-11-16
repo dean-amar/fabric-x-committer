@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/grpc/credentials"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

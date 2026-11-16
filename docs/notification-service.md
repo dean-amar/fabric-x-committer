@@ -27,7 +27,7 @@ For internal architecture details, see [sidecar.md — Section 6](sidecar.md#6-n
 The notification RPCs live on the sidecar's unified `SidecarService`, alongside its
 block-query and snapshot-administration RPCs.
 
-From [fabric-x-common/api/committerpb](https://github.com/hyperledger/fabric-x-common)
+From [Chaguar/common/api/committerpb](https://github.com/Chaguar/common/tree/main/api/committerpb)
 
 ```protobuf
 service SidecarService {

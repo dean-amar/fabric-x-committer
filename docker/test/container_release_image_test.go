@@ -20,17 +20,17 @@ import (
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/statedb"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
-	"github.com/hyperledger/fabric-x-committer/utils/testdb"
+	"github.com/Chaguar/committer/cmd/config"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/statedb"
+	"github.com/Chaguar/committer/utils/test"
+	"github.com/Chaguar/committer/utils/testdb"
 )
 
 const (
-	committerReleaseImage = "docker.io/hyperledger/fabric-x-committer:latest"
-	loadgenReleaseImage   = "docker.io/hyperledger/fabric-x-loadgen:latest"
+	committerReleaseImage = "docker.io/chaguar/committer:latest"
+	loadgenReleaseImage   = "docker.io/chaguar/loadgen:latest"
 	networkPrefixName     = test.DockerNamesPrefix + "_network"
 	// containerConfigPath is the path to the config directory inside the container.
 	containerConfigPath = "/root/config"

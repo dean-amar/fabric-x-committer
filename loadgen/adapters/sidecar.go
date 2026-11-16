@@ -13,8 +13,8 @@ import (
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/hyperledger/fabric-x-committer/loadgen/workload"
-	"github.com/hyperledger/fabric-x-committer/mock"
+	"github.com/Chaguar/committer/loadgen/workload"
+	"github.com/Chaguar/committer/mock"
 )
 
 type (

@@ -13,16 +13,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/common/ledger/blkstorage"
+	"github.com/Chaguar/common/common/ledger/blockledger"
+	"github.com/Chaguar/common/common/util"
+	"github.com/Chaguar/common/protoutil"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	ab "github.com/hyperledger/fabric-protos-go-apiv2/orderer"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
-	"github.com/hyperledger/fabric-x-common/common/ledger/blkstorage"
-	"github.com/hyperledger/fabric-x-common/common/ledger/blockledger"
-	"github.com/hyperledger/fabric-x-common/common/util"
-	"github.com/hyperledger/fabric-x-common/protoutil"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -31,18 +31,18 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/hyperledger/fabric-x-committer/utils/grpcerror"
+	"github.com/Chaguar/committer/utils/grpcerror"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/acl"
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/deliverorderer"
-	"github.com/hyperledger/fabric-x-committer/utils/monitoring"
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
-	"github.com/hyperledger/fabric-x-committer/utils/serialization"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/acl"
+	"github.com/Chaguar/committer/utils/channel"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/deliverorderer"
+	"github.com/Chaguar/committer/utils/monitoring"
+	"github.com/Chaguar/committer/utils/retry"
+	"github.com/Chaguar/committer/utils/serialization"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 var logger = flogging.MustGetLogger("sidecar")
@@ -557,7 +557,7 @@ func (s *Service) Deliver(srv peer.Deliver_DeliverServer) error {
 // DeliverFiltered implements an API in peer.DeliverServer.
 //
 // Deprecated: this method is implemented to have compatibility with Fabric so that the fabric smart client
-// can easily integrate with both FabricX and Fabric. Eventually, this method will be removed.
+// can easily integrate with both Chaguar and Fabric. Eventually, this method will be removed.
 func (*Service) DeliverFiltered(peer.Deliver_DeliverFilteredServer) error {
 	return grpcerror.WrapUnimplemented(errors.New("method is deprecated"))
 }
@@ -565,7 +565,7 @@ func (*Service) DeliverFiltered(peer.Deliver_DeliverFilteredServer) error {
 // DeliverWithPrivateData implements an API in peer.DeliverServer.
 //
 // Deprecated: this method is implemented to have compatibility with Fabric so that the fabric smart client
-// can easily integrate with both FabricX and Fabric. Eventually, this method will be removed.
+// can easily integrate with both Chaguar and Fabric. Eventually, this method will be removed.
 func (*Service) DeliverWithPrivateData(peer.Deliver_DeliverWithPrivateDataServer) error {
 	return grpcerror.WrapUnimplemented(errors.New("method is deprecated"))
 }

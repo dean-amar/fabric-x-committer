@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/channel"
+	"github.com/Chaguar/committer/utils/channel"
 )
 
 func TestWaitForReady(t *testing.T) {

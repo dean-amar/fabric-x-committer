@@ -2,7 +2,7 @@ This file provides guidance to agents when working with code in this repository.
 
 ## Project Overview
 
-**Fabric-X Committer** is a high-performance transaction validation and commitment system for Hyperledger Fabric blockchain networks. It implements a distributed, pipelined architecture that processes transactions through multiple stages: signature verification, dependency analysis, MVCC validation, and database commitment.
+**Chaguar Committer** is a high-performance transaction validation and commitment system for Hyperledger Fabric blockchain networks. It implements a distributed, pipelined architecture that processes transactions through multiple stages: signature verification, dependency analysis, MVCC validation, and database commitment.
 
 ### Core Architecture
 
@@ -65,7 +65,7 @@ authoritative, detailed source for these conventions and keeps them in one place
   `utils/grpcerror` at gRPC edges.
 - **Code organization** — collate a struct's methods together; place a method above the
   functions it calls (caller before callee).
-- **Reuse `utils/` and `fabric-x-common` helpers**; run `make lint` (or `make lint-go`).
+- **Reuse `utils/` and `Chaguar/common` helpers**; run `make lint` (or `make lint-go`).
 
 See the skill for concurrency (`errgroup` + `utils/channel`), Go 1.27 idioms,
 service/config/metrics structure, and the full linter cheat sheet.

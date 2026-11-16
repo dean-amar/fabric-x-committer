@@ -17,7 +17,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 type digestSigner interface {

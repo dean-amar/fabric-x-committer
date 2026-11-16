@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package coordinator
 
 import (
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 // Config is the configuration for coordinator service. It contains configurations for all managers.

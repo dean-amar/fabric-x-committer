@@ -10,17 +10,17 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/api/applicationpb"
-	"github.com/hyperledger/fabric-x-common/api/msppb"
-	"github.com/hyperledger/fabric-x-common/common/cauthdsl"
-	"github.com/hyperledger/fabric-x-common/common/policydsl"
-	"github.com/hyperledger/fabric-x-common/msp"
+	"github.com/Chaguar/common/api/applicationpb"
+	"github.com/Chaguar/common/api/msppb"
+	"github.com/Chaguar/common/common/cauthdsl"
+	"github.com/Chaguar/common/common/policydsl"
+	"github.com/Chaguar/common/msp"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/hyperledger/fabric-x-committer/service/verifier/policy"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
-	"github.com/hyperledger/fabric-x-committer/utils/testsig"
+	"github.com/Chaguar/committer/service/verifier/policy"
+	"github.com/Chaguar/committer/utils/signature"
+	"github.com/Chaguar/committer/utils/testsig"
 )
 
 const fakeTxID = "fake-id"

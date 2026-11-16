@@ -8,7 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 
 1. [Overview](#1-overview)
     - [What Are Namespace Policies?](#what-are-namespace-policies)
-    - [Fabric vs Fabric-X Comparison](#fabric-vs-fabric-x-comparison)
+    - [Fabric vs Chaguar Comparison](#fabric-vs-chaguar-comparison)
 2. [Endorsement Structure](#2-endorsement-structure)
 3. [Threshold Rules](#3-threshold-rules)
     - [Supported Signature Schemes](#supported-signature-schemes)
@@ -28,21 +28,21 @@ SPDX-License-Identifier: Apache-2.0
 
 ### What Are Namespace Policies?
 
-A namespace in Fabric-X is the unit of state isolation — analogous to a chaincode in Hyperledger Fabric.
+A namespace in Chaguar is the unit of state isolation — analogous to a chaincode in Hyperledger Fabric.
 Every namespace must have a **namespace policy** that defines which identities are authorized to endorse
 state changes within that namespace. No transaction can modify a namespace's state without satisfying its policy.
 
 Namespace policies serve the same role as **endorsement policies** in Fabric: they specify the set of
 signatures required for a transaction to be considered valid at commit time.
 
-Fabric-X supports two types of namespace policies:
+Chaguar supports two types of namespace policies:
 
 1. **Threshold Rule** — A single signer identified by a raw public key. Fast, lightweight, no MSP infrastructure required.
 2. **MSP Rule** — A fine-grained policy using AND/OR/NOutOf combinators over MSP principals. Compatible with Fabric's `SignaturePolicyEnvelope`.
 
-### Fabric vs Fabric-X Comparison
+### Fabric vs Chaguar Comparison
 
-| Concept                | Hyperledger Fabric                                         | Fabric-X                                              |
+| Concept                | Hyperledger Fabric                                         | Chaguar                                               |
 |------------------------|------------------------------------------------------------|-------------------------------------------------------|
 | State isolation unit   | Chaincode                                                  | Namespace                                             |
 | Policy binding         | Per chaincode, per collection, or per key                  | Per namespace                                         |
@@ -53,7 +53,7 @@ Fabric-X supports two types of namespace policies:
 | Policy location        | Chaincode definition or key-level metadata                 | `_meta` namespace transactions                        |
 
 **Key difference:** Fabric requires the full MSP infrastructure even for single-signer namespaces.
-Fabric-X adds the **Threshold Rule** as a lightweight alternative — a raw public key is sufficient,
+Chaguar adds the **Threshold Rule** as a lightweight alternative — a raw public key is sufficient,
 bypassing certificate parsing, MSP deserialization, and policy evaluation entirely.
 
 ## 2. Endorsement Structure
@@ -137,8 +137,8 @@ Creating a namespace policy with an ECDSA threshold rule:
 
 ```go
 import (
-    "github.com/hyperledger/fabric-x-common/api/applicationpb"
-    "github.com/hyperledger/fabric-x-committer/utils/signature"
+    "github.com/Chaguar/common/api/applicationpb"
+    "github.com/Chaguar/committer/utils/signature"
 )
 
 policy := &applicationpb.NamespacePolicy{

@@ -7,11 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package ordererdial
 
 import (
+	"github.com/Chaguar/common/msp"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
-	"github.com/hyperledger/fabric-x-common/msp"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
+	"github.com/Chaguar/committer/utils"
 )
 
 var logger = flogging.MustGetLogger("orderer-connection")

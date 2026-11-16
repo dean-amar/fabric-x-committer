@@ -9,7 +9,7 @@ package deliverorderer
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/hyperledger/fabric-x-committer/utils/retry"
+	"github.com/Chaguar/committer/utils/retry"
 )
 
 var (

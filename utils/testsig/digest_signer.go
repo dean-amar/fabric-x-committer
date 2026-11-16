@@ -18,7 +18,7 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 	cryptobyteasn1 "golang.org/x/crypto/cryptobyte/asn1"
 
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 type (

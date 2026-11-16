@@ -25,8 +25,8 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/signature"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/signature"
 )
 
 // NewKeyPair generate private and public keys.

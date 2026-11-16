@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	commontypes "github.com/hyperledger/fabric-x-common/api/types"
+	commontypes "github.com/Chaguar/common/api/types"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
+	"github.com/Chaguar/committer/utils/connection"
 )
 
 const config = `

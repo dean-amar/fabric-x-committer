@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
+	deliver "github.com/Chaguar/committer/utils/deliver"
 	common "github.com/hyperledger/fabric-protos-go-apiv2/common"
-	deliver "github.com/hyperledger/fabric-x-committer/utils/deliver"
 	gomock "go.uber.org/mock/gomock"
 )
 

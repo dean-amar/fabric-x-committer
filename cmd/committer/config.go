@@ -9,8 +9,8 @@ package main
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/hyperledger/fabric-x-committer/cmd/config"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/cmd/config"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 const (

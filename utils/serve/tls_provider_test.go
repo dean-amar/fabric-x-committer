@@ -13,14 +13,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hyperledger/fabric-x-common/api/types"
-	"github.com/hyperledger/fabric-x-common/common/crypto/tlsgen"
-	"github.com/hyperledger/fabric-x-common/tools/configtxgen"
-	"github.com/hyperledger/fabric-x-common/tools/cryptogen"
+	"github.com/Chaguar/common/api/types"
+	"github.com/Chaguar/common/common/crypto/tlsgen"
+	"github.com/Chaguar/common/tools/configtxgen"
+	"github.com/Chaguar/common/tools/cryptogen"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/utils/connection"
-	"github.com/hyperledger/fabric-x-committer/utils/serialization"
+	"github.com/Chaguar/committer/utils/connection"
+	"github.com/Chaguar/committer/utils/serialization"
 )
 
 const localHost = "localhost"
@@ -108,7 +108,7 @@ func TestExtractAppTLSCAsFromEnvelope(t *testing.T) {
 
 	block, err := cryptogen.CreateOrExtendConfigBlockWithCrypto(cryptogen.ConfigBlockParameters{
 		TargetPath:  targetPath,
-		BaseProfile: configtxgen.SampleFabricX,
+		BaseProfile: configtxgen.SampleChaguar,
 		ChannelID:   "test-channel",
 		Organizations: []cryptogen.OrganizationParameters{
 			{

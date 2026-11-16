@@ -3,9 +3,9 @@ Copyright IBM Corp. All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 -->
-# Fabric-X Committer
+# Chaguar Committer
 
-The Fabric-X Committer implements the validation and commit stage of the Hyperledger Fabric-X transaction lifecycle. It receives ordered blocks of transactions, verifies endorsement signatures, performs MVCC (Multi-Version Concurrency Control) validation against the state database, and commits valid transactions — all through a pipelined architecture designed for high throughput.
+The Chaguar Committer implements the validation and commit stage of the Chaguar transaction lifecycle. It receives ordered blocks of transactions, verifies endorsement signatures, performs MVCC (Multi-Version Concurrency Control) validation against the state database, and commits valid transactions — all through a pipelined architecture designed for high throughput.
 
 ## Architecture at a Glance
 

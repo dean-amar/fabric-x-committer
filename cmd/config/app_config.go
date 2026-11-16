@@ -19,17 +19,17 @@ import (
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/spf13/viper"
 
-	"github.com/hyperledger/fabric-x-committer/loadgen"
-	"github.com/hyperledger/fabric-x-committer/mock"
-	"github.com/hyperledger/fabric-x-committer/service/auth"
-	"github.com/hyperledger/fabric-x-committer/service/coordinator"
-	"github.com/hyperledger/fabric-x-committer/service/query"
-	"github.com/hyperledger/fabric-x-committer/service/sidecar"
-	"github.com/hyperledger/fabric-x-committer/service/snapshothasher"
-	"github.com/hyperledger/fabric-x-committer/service/vc"
-	"github.com/hyperledger/fabric-x-committer/service/verifier"
-	"github.com/hyperledger/fabric-x-committer/utils"
-	"github.com/hyperledger/fabric-x-committer/utils/serve"
+	"github.com/Chaguar/committer/loadgen"
+	"github.com/Chaguar/committer/mock"
+	"github.com/Chaguar/committer/service/auth"
+	"github.com/Chaguar/committer/service/coordinator"
+	"github.com/Chaguar/committer/service/query"
+	"github.com/Chaguar/committer/service/sidecar"
+	"github.com/Chaguar/committer/service/snapshothasher"
+	"github.com/Chaguar/committer/service/vc"
+	"github.com/Chaguar/committer/service/verifier"
+	"github.com/Chaguar/committer/utils"
+	"github.com/Chaguar/committer/utils/serve"
 )
 
 type loggingConfig struct {

@@ -9,12 +9,12 @@ package sidecar
 import (
 	"testing"
 
+	"github.com/Chaguar/common/api/committerpb"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
-	"github.com/hyperledger/fabric-x-common/api/committerpb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hyperledger/fabric-x-committer/api/servicepb"
-	"github.com/hyperledger/fabric-x-committer/utils/test"
+	"github.com/Chaguar/committer/api/servicepb"
+	"github.com/Chaguar/committer/utils/test"
 )
 
 // TestQueueSizeMetricsAreWired fills each queue and asserts the gauge that reports it follows.
