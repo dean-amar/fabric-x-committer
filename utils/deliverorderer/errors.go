@@ -7,9 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package deliverorderer
 
 import (
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
-
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 var (

@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5"
 
 	"github.com/Chaguar/committer/api/servicepb"
 	"github.com/Chaguar/committer/utils/connection"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/serve"
 	"github.com/Chaguar/committer/utils/statedb"
 	"github.com/Chaguar/committer/utils/test"
@@ -306,7 +306,7 @@ SELECT _key, _value, _version
 FROM UNNEST($1::bytea[], $2::bytea[], $3::bigint[]) AS t(_key, _value, _version);
 `
 		query := statedb.FmtNsID(insertQuery, nsID)
-		require.NoError(t, retry.ExecuteSQL(
+		require.NoError(t, statedb.ExecuteSQL(
 			t.Context(), env.DB.retryProfile, env.DB.pool, query,
 			writes.keys, writes.values, writes.versions,
 		))
@@ -568,7 +568,7 @@ func (env *DatabaseTestEnv) SeedState(t *testing.T, f StateFixture) {
 func (env *DatabaseTestEnv) InsertRowDirectly(t *testing.T, nsID string, row KeyValue) {
 	t.Helper()
 	query := statedb.FmtNsID("INSERT INTO ns_${NAMESPACE_ID} (key, value, version) VALUES ($1, $2, 0)", nsID)
-	require.NoError(t, retry.ExecuteSQL(
+	require.NoError(t, statedb.ExecuteSQL(
 		t.Context(), env.DB.retryProfile, env.DB.pool, query, row.Key, row.Value,
 	))
 }

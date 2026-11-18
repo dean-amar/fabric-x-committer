@@ -92,7 +92,7 @@ most common review rejection:
 | Create/originate/wrap errors | `errors.New/Newf/Wrap/Wrapf` | `github.com/cockroachdb/errors` |
 | Convert error → gRPC status | `grpcerror.Wrap*` | `utils/grpcerror` |
 | Dial gRPC peers | `connection.NewSingleConnection` / `NewLoadBalancedConnection` / `NewConnectionPerEndpoint` | `utils/connection` |
-| Retry / keep a loop alive | `retry.Sustain`, `retry.WaitForCondition` | `utils/retry` |
+| Retry / keep a loop alive | `retry.Sustain`, `retry.WaitForCondition` | `github.com/Chaguar/common/utils/retry` |
 | Run a service + gRPC/HTTP servers | `serve.StartAndServe` | `utils/serve` |
 | Prometheus metrics | `monitoring.Provider` + `promutil.*` | `utils/monitoring` |
 | Enforce/attach gRPC ACL | `acl.Enforcer` (server interceptors), `acl.Credentials` (renewing per-RPC client credentials), `acl.IssueToken` + `acl.ContextWithToken` (one-off token) | `utils/acl` |

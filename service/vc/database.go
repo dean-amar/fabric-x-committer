@@ -14,13 +14,13 @@ import (
 
 	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
 	"github.com/Chaguar/committer/api/servicepb"
 	"github.com/Chaguar/committer/utils/monitoring/promutil"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 )
 
@@ -197,7 +197,7 @@ func (d *database) setLastCommittedBlockNumber(ctx context.Context, bInfo *servi
 	//       and standard comparison operators.
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, bInfo.Number)
-	return retry.ExecuteSQL(ctx, d.retryProfile, d.pool, setMetadataPrepSQLStmt, lastCommittedBlockNumberKey, v)
+	return statedb.ExecuteSQL(ctx, d.retryProfile, d.pool, setMetadataPrepSQLStmt, lastCommittedBlockNumberKey, v)
 }
 
 // commit commits the writes to the database.

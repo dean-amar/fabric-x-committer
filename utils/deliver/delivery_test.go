@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/Chaguar/committer/utils/channel"
 	"github.com/Chaguar/committer/utils/deliver"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 //go:generate mockgen -source=delivery.go -destination=streamer_mock_test.go -package=deliver_test

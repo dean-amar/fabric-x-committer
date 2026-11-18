@@ -16,12 +16,12 @@ import (
 	commontypes "github.com/Chaguar/common/api/types"
 	"github.com/Chaguar/common/common/channelconfig"
 	"github.com/Chaguar/common/tools/cryptogen"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Chaguar/committer/utils/connection"
 	"github.com/Chaguar/committer/utils/ordererdial"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 func TestOrdererConnectionMaterial(t *testing.T) {

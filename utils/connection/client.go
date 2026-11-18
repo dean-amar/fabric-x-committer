@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"google.golang.org/grpc"
@@ -27,8 +28,6 @@ import (
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/resolver/manual"
 	"google.golang.org/grpc/status"
-
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 const (

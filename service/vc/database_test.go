@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/require"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 )
 

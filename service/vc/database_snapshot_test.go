@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/jackc/pgerrcode"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,6 @@ import (
 
 	"github.com/Chaguar/committer/api/servicepb"
 	"github.com/Chaguar/committer/utils/channel"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 	"github.com/Chaguar/committer/utils/testdb"
 )

@@ -22,12 +22,11 @@ import (
 	"slices"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/yugabyte/pgx/v5"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 const (
