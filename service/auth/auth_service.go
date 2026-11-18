@@ -164,15 +164,15 @@ func (s *Service) IssueNonce(
 	if err := s.allowChallenge(); err != nil {
 		return nil, grpcerror.WrapResourceExhaustedOrCancelled(ctx, err)
 	}
-	expiresAt := time.Now().Add(s.config.NonceTTL)
-	nonce, err := s.db.insertNonce(ctx, expiresAt)
+	expireTime := time.Now().Add(s.config.NonceTTL)
+	nonce, err := s.db.insertNonce(ctx, expireTime)
 	if err != nil {
 		logger.Errorf("Failed to persist nonce: %+v", err)
 		return nil, grpcerror.WrapInternalError(errors.New("failed to issue a nonce"))
 	}
 	return &committerpb.IssueNonceResponse{
-		Nonce:     nonce,
-		ExpiresAt: expiresAt.Unix(),
+		Nonce:      nonce,
+		ExpireTime: timestamppb.New(expireTime),
 	}, nil
 }
 
@@ -223,7 +223,7 @@ func (s *Service) AuthenticateIdentity(
 		Identity:       identity,
 		CertHashSha256: certHash,
 		Scope:          scope,
-		ExpiresAt:      now.Add(s.config.TokenTTL).Unix(),
+		ExpireTime:     timestamppb.New(now.Add(s.config.TokenTTL)),
 	}
 	token, err := s.db.insertToken(ctx, rec)
 	if err != nil {
@@ -232,8 +232,8 @@ func (s *Service) AuthenticateIdentity(
 	}
 
 	return &committerpb.AuthenticateIdentityResponse{
-		Token:     token,
-		ExpiresAt: rec.GetExpiresAt(),
+		Token:      token,
+		ExpireTime: rec.GetExpireTime(),
 	}, nil
 }
 
@@ -256,8 +256,7 @@ func (s *Service) AuthorizeIdentity(
 		logger.Errorf("Failed to read token record: %+v", err)
 		return nil, grpcerror.WrapInternalError(errors.New("failed to read the token record"))
 	}
-
-	if tokenRecord.GetExpiresAt() <= time.Now().Unix() {
+	if !time.Now().Before(tokenRecord.GetExpireTime().AsTime()) {
 		return nil, grpcerror.WrapUnauthenticated(errors.New("token has expired"))
 	}
 
@@ -280,7 +279,7 @@ func (s *Service) AuthorizeIdentity(
 	}
 
 	return &committerpb.AuthorizeIdentityResponse{
-		TokenExpiresAt: tokenRecord.GetExpiresAt(),
+		TokenExpireTime: tokenRecord.GetExpireTime(),
 	}, nil
 }
 

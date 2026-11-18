@@ -14,6 +14,7 @@ import (
 	"github.com/Chaguar/common/api/committerpb"
 	"github.com/Chaguar/common/api/msppb"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/Chaguar/committer/api/servicepb"
 	"github.com/Chaguar/committer/utils/statedb"
@@ -95,11 +96,11 @@ func newDatabaseForTest(t *testing.T) *database {
 }
 
 // testRecord builds a token record with the given expiry.
-func testRecord(expiresAt time.Time) *servicepb.TokenRecord {
+func testRecord(expireTime time.Time) *servicepb.TokenRecord {
 	return &servicepb.TokenRecord{
 		Identity:       &msppb.Identity{MspId: "Org1MSP"},
 		CertHashSha256: []byte{0x01, 0x02, 0x03},
 		Scope:          []string{committerpb.QueryService_GetRows_FullMethodName},
-		ExpiresAt:      expiresAt.Unix(),
+		ExpireTime:     timestamppb.New(expireTime),
 	}
 }
