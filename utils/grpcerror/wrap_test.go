@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
 	"github.com/Chaguar/committer/utils/grpcerror"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/test"
 )
 

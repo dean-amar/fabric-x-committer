@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Chaguar/common/api/types"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
@@ -28,7 +29,6 @@ import (
 	"github.com/Chaguar/committer/utils/deliver"
 	"github.com/Chaguar/committer/utils/monitoring"
 	"github.com/Chaguar/committer/utils/ordererdial"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	commontypes "github.com/Chaguar/common/api/types"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,6 @@ import (
 	"github.com/Chaguar/committer/utils/acl"
 	"github.com/Chaguar/committer/utils/connection"
 	"github.com/Chaguar/committer/utils/ordererdial"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/serve"
 	"github.com/Chaguar/committer/utils/signature"
 	"github.com/Chaguar/committer/utils/statedb"

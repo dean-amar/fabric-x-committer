@@ -11,12 +11,11 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
-
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 var (

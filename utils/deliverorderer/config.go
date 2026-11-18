@@ -11,13 +11,13 @@ import (
 
 	"github.com/Chaguar/common/protoutil"
 	"github.com/Chaguar/common/protoutil/identity"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 
 	"github.com/Chaguar/committer/utils/connection"
 	"github.com/Chaguar/committer/utils/deliver"
 	"github.com/Chaguar/committer/utils/ordererdial"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Chaguar/committer/api/servicepb"
 	"github.com/Chaguar/committer/utils/channel"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 )
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"golang.org/x/sync/errgroup"
@@ -22,7 +23,6 @@ import (
 	"github.com/Chaguar/committer/utils"
 	"github.com/Chaguar/committer/utils/channel"
 	"github.com/Chaguar/committer/utils/monitoring/promutil"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

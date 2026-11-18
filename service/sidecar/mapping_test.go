@@ -14,6 +14,7 @@ import (
 	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/Chaguar/common/api/committerpb"
 	"github.com/Chaguar/common/protoutil"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/Chaguar/committer/api/servicepb"
 	"github.com/Chaguar/committer/loadgen/workload"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/signature"
 	"github.com/Chaguar/committer/utils/test"
 )

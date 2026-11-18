@@ -9,9 +9,8 @@ package connection
 import (
 	"crypto/tls"
 
+	"github.com/Chaguar/common/utils/retry"
 	"google.golang.org/grpc/credentials"
-
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (
