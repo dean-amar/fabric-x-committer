@@ -129,11 +129,11 @@ func (e *Enforcer) StreamInterceptor(
 	// cancelling on handler return also releases the stream's resources.
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
-	// A reported expiry of zero means the AuthService knows of no bound, not "expired at the epoch":
+	// A missing expiry means the AuthService knows of no bound, not "expired at the epoch":
 	// leaving it as the zero time is what checkBoundToken reads as "no local bound".
 	var tokenExpiresAt time.Time
-	if expiry := resp.GetTokenExpiresAt(); expiry > 0 {
-		tokenExpiresAt = time.Unix(expiry, 0)
+	if expiry := resp.GetTokenExpireTime(); expiry != nil {
+		tokenExpiresAt = expiry.AsTime()
 	}
 	stream := &authorizedStream{
 		ServerStream:    ss,
