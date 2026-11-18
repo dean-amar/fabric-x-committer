@@ -113,7 +113,7 @@ func TestAuthAuthorizeIdentityCases(t *testing.T) {
 			})
 			require.NoError(t, err)
 			// The resource server bounds its cached decision for a stream by the token's own expiry.
-			require.Greater(t, resp.GetTokenExpiresAt(), time.Now().Unix())
+			require.True(t, resp.GetTokenExpireTime().AsTime().After(time.Now()))
 		})
 	}
 
@@ -187,17 +187,23 @@ func TestAuthAuthorizeIdentityCases(t *testing.T) {
 	}
 }
 
-// TestAuthorizeIdentityRejectsExpiredToken verifies that the auth service rejects tokens that have expired,
-// even if they were valid when issued.
+// TestAuthorizeIdentityRejectsExpiredToken verifies that the auth service accepts a token until it expires and
+// rejects it afterward. The sub-second TTL guards the expiry's precision: rounded to whole seconds, such a
+// token would usually be expired already when issued.
 func TestAuthorizeIdentityRejectsExpiredToken(t *testing.T) {
 	t.Parallel()
-	env := newAuthTestEnvWithMutualTLS(t, TestEnvParams{TokenTTL: time.Second})
-	token := env.IssueToken(t)
+	env := newAuthTestEnvWithMutualTLS(t, TestEnvParams{TokenTTL: 500 * time.Millisecond})
+	req := &committerpb.AuthorizeIdentityRequest{
+		Token:       env.IssueToken(t),
+		Resource:    committerpb.QueryService_GetRows_FullMethodName,
+		TlsCertHash: env.TLSCertHash,
+	}
+
+	_, err := env.Client.AuthorizeIdentity(t.Context(), req)
+	require.NoError(t, err)
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		_, err := env.Client.AuthorizeIdentity(t.Context(), &committerpb.AuthorizeIdentityRequest{
-			Token: token, Resource: committerpb.QueryService_GetRows_FullMethodName, TlsCertHash: env.TLSCertHash,
-		})
+		_, err := env.Client.AuthorizeIdentity(t.Context(), req)
 		require.Equal(ct, codes.Unauthenticated, grpcerror.GetCode(err))
 		require.ErrorContains(ct, err, "token has expired")
 	}, 10*time.Second, 200*time.Millisecond)
@@ -234,7 +240,7 @@ func TestAuthAuthenticateIdentityCases(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NotEmpty(t, resp.GetToken())
-			require.Greater(t, resp.GetExpiresAt(), time.Now().Unix())
+			require.True(t, resp.GetExpireTime().AsTime().After(time.Now()))
 		})
 	}
 

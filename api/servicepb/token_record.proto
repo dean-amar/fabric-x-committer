@@ -11,6 +11,7 @@ option go_package = "github.com/Chaguar/committer/api/servicepb";
 package servicepb;
 
 import "api/msppb/msp.proto";
+import "google/protobuf/timestamp.proto";
 
 // TokenRecord is the persisted token-to-identity binding, stored proto-serialized in the auth service's
 // token store under the token's SHA-256. The token itself is never stored, so a read of the store yields
@@ -25,6 +26,6 @@ message TokenRecord {
     bytes cert_hash_sha256 = 2;
     // scope is the set of resources the token may reach, as gRPC full-method names. Empty reaches nothing.
     repeated string scope = 3;
-    // expires_at is the token expiry in unix seconds.
-    int64 expires_at = 4;
+    // expire_time is the time the token expires.
+    google.protobuf.Timestamp expire_time = 4;
 }

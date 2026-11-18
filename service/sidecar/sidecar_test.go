@@ -858,7 +858,7 @@ func TestConstructStatuses(t *testing.T) {
 	for _, skippedIdx := range []int{0, 2, 4} {
 		actualFinalStatuses[skippedIdx] = committerpb.Status_COMMITTED
 	}
-	require.NoError(t, fillStatuses(actualFinalStatuses, statuses, expectedHeight))
+	require.NoError(t, fillStatuses(actualFinalStatuses, servicepb.NewTxResults(statuses), expectedHeight))
 	require.Equal(t, expectedFinalStatuses, actualFinalStatuses)
 }
 

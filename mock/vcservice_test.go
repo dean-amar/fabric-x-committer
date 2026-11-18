@@ -77,9 +77,10 @@ func (e *mockVCTestEnv) requireSendBatch(t *testing.T, batch *servicepb.VcBatch,
 
 	statusBatch, err := e.streams[0].Recv()
 	require.NoError(t, err)
-	require.Len(t, statusBatch.Status, len(batch.Transactions))
+	require.Len(t, statusBatch.TxResult, len(batch.Transactions))
 	require.Len(t, expectedStatus, len(batch.Transactions))
-	for i, s := range statusBatch.Status {
+	for i, result := range statusBatch.TxResult {
+		s := result.Status
 		txRef := batch.Transactions[i].Ref
 		require.EqualExportedValues(t, txRef, s.Ref)
 		expected := expectedStatus[i] //nolint:gosec // false positive - slice index out of range.
@@ -285,14 +286,14 @@ func TestVcServiceGetTransactionsStatus(t *testing.T) {
 	require.NotNil(t, statusBatch)
 
 	// We only get the existing TX IDs.
-	require.Len(t, statusBatch.Status, 2)
-	require.NotNil(t, statusBatch.Status[0])
-	require.Equal(t, "status-tx-1", statusBatch.Status[0].Ref.TxId)
-	require.Equal(t, committerpb.Status_COMMITTED, statusBatch.Status[0].Status)
+	require.Len(t, statusBatch.TxResult, 2)
+	require.NotNil(t, statusBatch.TxResult[0].Status)
+	require.Equal(t, "status-tx-1", statusBatch.TxResult[0].Status.Ref.TxId)
+	require.Equal(t, committerpb.Status_COMMITTED, statusBatch.TxResult[0].Status.Status)
 
-	require.NotNil(t, statusBatch.Status[1])
-	require.Equal(t, "status-tx-2", statusBatch.Status[1].Ref.TxId)
-	require.Equal(t, committerpb.Status_COMMITTED, statusBatch.Status[1].Status)
+	require.NotNil(t, statusBatch.TxResult[1].Status)
+	require.Equal(t, "status-tx-2", statusBatch.TxResult[1].Status.Ref.TxId)
+	require.Equal(t, committerpb.Status_COMMITTED, statusBatch.TxResult[1].Status.Status)
 }
 
 // TestVcServiceMultipleStreams tests multiple concurrent streams.
@@ -320,8 +321,8 @@ func TestVcServiceMultipleStreams(t *testing.T) {
 
 		statusBatch, err := stream.Recv()
 		require.NoError(t, err)
-		require.Len(t, statusBatch.Status, 1)
-		require.Equal(t, committerpb.Status_COMMITTED, statusBatch.Status[0].Status)
+		require.Len(t, statusBatch.TxResult, 1)
+		require.Equal(t, committerpb.Status_COMMITTED, statusBatch.TxResult[0].Status.Status)
 	}
 }
 
@@ -361,8 +362,8 @@ func TestVcServiceGetReceivedTxOrder(t *testing.T) {
 	require.NoError(t, e.streams[0].Send(batch3))
 	statusBatch, err := e.streams[0].Recv()
 	require.NoError(t, err)
-	require.Len(t, statusBatch.Status, 1)
-	require.Equal(t, "order-tx-4", statusBatch.Status[0].Ref.TxId)
+	require.Len(t, statusBatch.TxResult, 1)
+	require.Equal(t, "order-tx-4", statusBatch.TxResult[0].Status.Ref.TxId)
 
 	require.Equal(t, []string{"order-tx-1", "order-tx-2", "order-tx-3", "order-tx-4"}, e.vc.GetReceivedTxOrder())
 }
@@ -410,7 +411,7 @@ func TestVcServiceFaultyNodeSimulation(t *testing.T) {
 	// Should only receive status for last 2 transactions
 	statusBatch, err := e.streams[0].Recv()
 	require.NoError(t, err)
-	require.Len(t, statusBatch.Status, 2)
-	require.Equal(t, "faulty-tx-3", statusBatch.Status[0].Ref.TxId)
-	require.Equal(t, "faulty-tx-4", statusBatch.Status[1].Ref.TxId)
+	require.Len(t, statusBatch.TxResult, 2)
+	require.Equal(t, "faulty-tx-3", statusBatch.TxResult[0].Status.Ref.TxId)
+	require.Equal(t, "faulty-tx-4", statusBatch.TxResult[1].Status.Ref.TxId)
 }

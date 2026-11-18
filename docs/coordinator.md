@@ -217,3 +217,12 @@ The system is designed to be resilient to Coordinator failures.
 services before the failure. This is handled gracefully because the `Validator-Committer` services are designed to be idempotent. 
 When a transaction is resubmitted, the service checks if a status for that txID, block number, and transaction index already exists. 
 If so, it returns the existing status without re-committing the transaction, ensuring data consistency.
+
+
+## Combined live transaction results
+
+Verifier and VC feedback use `servicepb.TxStatusBatch.tx_result`. Each `TxResult` contains the shared `TxStatus` plus optional blind-write versions. Verifier results and status-only lookup adapters have no version payload.
+
+Managers track transactions by block number and transaction position. Dropping an untracked/duplicate response removes its entire result, including versions. Accounting counts result entries plus checkpoint feedback, never version keys.
+
+Results are queued before dependency nodes are released. Pending Coordinator resubmissions retain this ordering.
