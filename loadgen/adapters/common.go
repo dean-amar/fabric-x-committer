@@ -10,7 +10,6 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/Chaguar/common/api/committerpb"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
@@ -185,10 +184,10 @@ func getTXsIDs(txs []*servicepb.LoadGenTx) []string {
 	return txIDs
 }
 
-func toMetricsStatus(txStatus []*committerpb.TxStatus) []metrics.TxStatus {
+func toMetricsStatus(txStatus []*servicepb.TxResult) []metrics.TxStatus {
 	statusBatch := make([]metrics.TxStatus, len(txStatus))
 	for i, status := range txStatus {
-		statusBatch[i] = metrics.TxStatus{TxID: status.Ref.TxId, Status: status.Status}
+		statusBatch[i] = metrics.TxStatus{TxID: status.Status.Ref.TxId, Status: status.Status.Status}
 	}
 	return statusBatch
 }

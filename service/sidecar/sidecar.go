@@ -476,7 +476,7 @@ func appendMissingBlock(
 		return logAndWrapCoordinatorError(err, "failed to get transaction status from coordinator")
 	}
 
-	if err := fillStatuses(mappedBlock.withStatus.txStatus, txsStatus.Status, expectedHeight); err != nil {
+	if err := fillStatuses(mappedBlock.withStatus.txStatus, txsStatus.TxResult, expectedHeight); err != nil {
 		return err
 	}
 
@@ -751,12 +751,13 @@ func waitForIdleCoordinator(ctx context.Context, client servicepb.CoordinatorCli
 
 func fillStatuses(
 	finalStatuses []committerpb.Status,
-	statuses []*committerpb.TxStatus,
+	results []*servicepb.TxResult,
 	expectedHeight []*committerpb.TxRef,
 ) error {
 	// This copy to a map has a negligible performance impact is fine as this is a rare case.
-	statusMap := make(map[string]*committerpb.TxStatus, len(statuses))
-	for _, s := range statuses {
+	statusMap := make(map[string]*committerpb.TxStatus, len(results))
+	for _, result := range results {
+		s := result.Status
 		statusMap[s.Ref.TxId] = s
 	}
 	for _, ref := range expectedHeight {

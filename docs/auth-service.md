@@ -32,16 +32,16 @@ The `AuthService` is defined in `Chaguar/common/api/committerpb` (`auth.proto`),
 `QueryService` and `SidecarService` it protects, so a client authenticates without importing this module.
 Only the persisted `TokenRecord` is internal, in `api/servicepb`.
 
-- `AuthenticateIdentity(signed_envelope, requested_scope) -> token, expires_at` — verifies the envelope
+- `AuthenticateIdentity(signed_envelope, requested_scope) -> token, expire_time` — verifies the envelope
   (channel and empty-payload scope, timestamp freshness, TLS certificate binding, MSP identity
   resolution, signature), issues a random opaque token, and writes its hash and the token-to-identity binding
   to the store. `requested_scope` lists the resources the token may reach, and the token reaches nothing
   else: a token issued with an empty scope is denied every resource. Each entry is the gRPC full-method name
   of a Query, Sidecar or Deliver RPC (e.g. `/committerpb.QueryService/GetRows`); entries are trimmed and
   de-duplicated. The scope never adds authority: the identity's policy still decides each resource it names.
-- `IssueNonce() -> nonce, expires_at` — issues the single-use challenge a client must sign into its
+- `IssueNonce() -> nonce, expire_time` — issues the single-use challenge a client must sign into its
   envelope. It is the mandatory first step of authentication.
-- `AuthorizeIdentity(token, resource, tls_cert_hash) -> token_expires_at` — resolves the token's record from the
+- `AuthorizeIdentity(token, resource, tls_cert_hash) -> token_expire_time` — resolves the token's record from the
   store, checks its expiry, certificate binding and resource scope, validates the bound identity,
   evaluates the resource's policy against the latest configuration, and returns the
   token's expiry. A resource server calls it for every unary RPC and, for a stream, whenever its cached
@@ -163,11 +163,11 @@ the section names none (`policy.go`).
 - **`AuthorizeIdentity` is callable directly.** It is not restricted to resource servers, so a caller holding a
   token can learn whether it is valid. That reveals nothing a token holder could not learn by using it,
   and a token cannot be guessed; mTLS is what restricts who reaches the service.
-- **No revocation.** A token is valid until its `expires_at`, and `token-ttl` is the only lever on how long a
+- **No revocation.** A token is valid until its `expire_time`, and `token-ttl` is the only lever on how long a
   compromised token or a withdrawn authority remains usable. No RPC deletes a record, though with every
   lookup reading the store, a delete would take effect on all instances at once - so revocation is cheap
   to add later (it would stop being so if a token cache is introduced). `AuthorizeIdentity` checks the record's
-  `expires_at` on every call rather than relying on the sweep.
+  `expire_time` on every call rather than relying on the sweep.
 - **Namespace scope is deferred.** Restricting a token to particular namespaces is future work, not part
   of this iteration. Only `GetRows` and `StreamBlocks` name the namespaces they touch; block
   query and block delivery return whole blocks spanning every namespace, and a block cannot be filtered

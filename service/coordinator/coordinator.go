@@ -437,11 +437,11 @@ func (c *Service) sendTxStatus(
 			return errors.Wrap(err, "failed to send transaction status batch to the sidecar")
 		}
 
-		logger.Debugf("Batch with %d TX statuses forwarded to output stream.", len(txStatus.Status))
+		logger.Debugf("Batch with %d TX statuses forwarded to output stream.", len(txStatus.TxResult))
 
 		statusCount := make(map[committerpb.Status]int)
-		for _, s := range txStatus.Status {
-			statusCount[s.Status]++
+		for _, result := range txStatus.TxResult {
+			statusCount[result.Status.Status]++
 		}
 		m := c.metrics
 		for status, count := range statusCount {

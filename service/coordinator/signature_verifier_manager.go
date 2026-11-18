@@ -281,7 +281,7 @@ func (sv *signatureVerifier) receiveStatusAndForwardToOutput(
 			return classifyStreamRecvError(err)
 		}
 
-		logger.Debugf("New batch came from sv to sv manager, contains %d items", len(response.Status))
+		logger.Debugf("New batch came from sv to sv manager, contains %d items", len(response.TxResult))
 
 		validatedTxs := sv.fetchAndDeleteTxBeingValidated(response)
 		if len(validatedTxs) > 0 && !outputValidatedTxs.Write(validatedTxs) {
@@ -292,18 +292,19 @@ func (sv *signatureVerifier) receiveStatusAndForwardToOutput(
 			return errors.Wrap(outputValidatedTxs.Context().Err(), "context ended")
 		}
 
-		promutil.AddToCounter(sv.metrics.verifiers.processedTotal, len(response.Status))
+		promutil.AddToCounter(sv.metrics.verifiers.processedTotal, len(response.TxResult))
 	}
 }
 
 func (sv *signatureVerifier) fetchAndDeleteTxBeingValidated(
 	response *servicepb.TxStatusBatch,
 ) dependencygraph.TxNodeBatch {
-	validatedTxs := dependencygraph.TxNodeBatch(make([]*dependencygraph.TransactionNode, 0, len(response.Status)))
+	validatedTxs := dependencygraph.TxNodeBatch(make([]*dependencygraph.TransactionNode, 0, len(response.TxResult)))
 	// TODO: introduce metrics to measure the lock wait/holding duration.
 	sv.txMu.Lock()
 	defer sv.txMu.Unlock()
-	for _, resp := range response.Status {
+	for _, result := range response.TxResult {
+		resp := result.Status
 		k := *servicepb.NewHeightFromTxRef(resp.Ref)
 		txNode, ok := sv.txBeingValidated[k]
 		if !ok {

@@ -136,7 +136,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 
 		outTxsStatus := env.readOutputTxsStatus(t)
 
-		test.RequireProtoElementsMatch(t, expectedTxsStatus, outTxsStatus.Status)
+		test.RequireProtoElementsMatch(t, servicepb.NewTxResults(expectedTxsStatus), outTxsStatus.TxResult)
 
 		test.EventuallyIntMetric(
 			t, 5, env.validatorCommitterManager.config.metrics.vcs.processedTotal,
@@ -165,10 +165,10 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 
 		outTxsStatus = env.readOutputTxsStatus(t)
 		status := env.readOutputTxsStatus(t)
-		outTxsStatus.Status = append(outTxsStatus.Status, status.Status...)
+		outTxsStatus.TxResult = append(outTxsStatus.TxResult, status.TxResult...)
 		status = env.readOutputTxsStatus(t)
-		outTxsStatus.Status = append(outTxsStatus.Status, status.Status...)
-		test.RequireProtoElementsMatch(t, expectedTxsStatus, outTxsStatus.Status)
+		outTxsStatus.TxResult = append(outTxsStatus.TxResult, status.TxResult...)
+		test.RequireProtoElementsMatch(t, servicepb.NewTxResults(expectedTxsStatus), outTxsStatus.TxResult)
 
 		test.EventuallyIntMetric(
 			t, 5+totalBlocks*txPerBlock,
@@ -188,7 +188,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 		first, firstStatus := createInputTxsNodeForTest(t, 2, 0, 1)
 		env.inputTxs <- first
 		require.ElementsMatch(t, first, <-env.outputTxs)
-		test.RequireProtoElementsMatch(t, firstStatus, env.readOutputTxsStatus(t).Status)
+		test.RequireProtoElementsMatch(t, servicepb.NewTxResults(firstStatus), env.readOutputTxsStatus(t).TxResult)
 		require.Equal(t, uint32(1), env.mockVcService.NumBatchesReceived.Load())
 
 		// An empty batch reaches the manager when every status in a verifier response was
@@ -200,7 +200,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 		second, secondStatus := createInputTxsNodeForTest(t, 3, 0, 2)
 		env.inputTxs <- second
 		require.ElementsMatch(t, second, <-env.outputTxs)
-		test.RequireProtoElementsMatch(t, secondStatus, env.readOutputTxsStatus(t).Status)
+		test.RequireProtoElementsMatch(t, servicepb.NewTxResults(secondStatus), env.readOutputTxsStatus(t).TxResult)
 
 		require.Equal(t, uint32(2), env.mockVcService.NumBatchesReceived.Load())
 		ensureZeroWaitingTxs(env)
@@ -231,8 +231,8 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 
 			test.RequireProtoElementsMatch(
 				t,
-				append(expectedTxsStatus1, expectedTxsStatus2...),
-				append(outTxsStatus1.Status, outTxsStatus2.Status...),
+				servicepb.NewTxResults(append(expectedTxsStatus1, expectedTxsStatus2...)),
+				append(outTxsStatus1.TxResult, outTxsStatus2.TxResult...),
 			)
 
 			return env.mockVcService.NumBatchesReceived.Load() != 0
@@ -286,11 +286,11 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 
 		outTxsStatus := env.readOutputTxsStatus(t)
 
-		require.Len(t, outTxsStatus.Status, 2)
+		require.Len(t, outTxsStatus.TxResult, 2)
 		expectedConfig := committerpb.NewTxStatus(committerpb.Status_COMMITTED, "create config", 100, 63)
-		testapp.RequireStatus(t, expectedConfig, outTxsStatus.Status)
+		testapp.RequireStatus(t, expectedConfig, outTxsStatus.TxResult)
 		expectedMeta := committerpb.NewTxStatus(committerpb.Status_COMMITTED, "create ns 1", 100, 64)
-		testapp.RequireStatus(t, expectedMeta, outTxsStatus.Status)
+		testapp.RequireStatus(t, expectedMeta, outTxsStatus.TxResult)
 
 		require.ElementsMatch(t, txBatch, <-env.outputTxs)
 
@@ -345,8 +345,10 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 
 	actualTxsStatus := make([]*committerpb.TxStatus, 0, numTxs)
 	for range 2 {
-		result := env.readOutputTxsStatus(t)
-		actualTxsStatus = append(actualTxsStatus, result.Status...)
+		batch := env.readOutputTxsStatus(t)
+		for _, result := range batch.TxResult {
+			actualTxsStatus = append(actualTxsStatus, result.Status)
+		}
 	}
 	test.RequireProtoElementsMatch(t, expectedTxsStatus, actualTxsStatus)
 
@@ -412,7 +414,7 @@ func TestValidatorCommitterForwardsHeldCheckpoint(t *testing.T) {
 
 	// The feedback reaches the sidecar even though the batch carries no status.
 	held := env.readOutputTxsStatus(t)
-	require.Empty(t, held.Status)
+	require.Empty(t, held.TxResult)
 	require.NotNil(t, held.CheckpointFeedback)
 	require.Equal(t, servicepb.CheckpointFeedback_HOLD, held.CheckpointFeedback.Signal)
 	require.Equal(t, cpRef.TxId, held.CheckpointFeedback.Ref.GetTxId())
@@ -430,9 +432,9 @@ func TestValidatorCommitterForwardsHeldCheckpoint(t *testing.T) {
 
 	committed := env.readOutputTxsStatus(t)
 	require.Nil(t, committed.CheckpointFeedback)
-	require.Len(t, committed.Status, 1)
-	require.Equal(t, committerpb.Status_COMMITTED, committed.Status[0].Status)
-	require.Equal(t, cpRef.TxId, committed.Status[0].Ref.TxId)
+	require.Len(t, committed.TxResult, 1)
+	require.Equal(t, committerpb.Status_COMMITTED, committed.TxResult[0].Status.Status)
+	require.Equal(t, cpRef.TxId, committed.TxResult[0].Status.Ref.TxId)
 	require.ElementsMatch(t, dependencygraph.TxNodeBatch{resubmitted}, <-env.outputTxs)
 	require.Zero(t, env.validatorCommitterManager.validatorCommitter[0].txBeingValidated.Count())
 }
@@ -460,7 +462,7 @@ func TestValidatorCommitterDropsEmptyStatusBatch(t *testing.T) {
 
 	forwarded := env.readOutputTxsStatus(t)
 	require.Nil(t, forwarded.CheckpointFeedback)
-	test.RequireProtoElementsMatch(t, expectedStatus, forwarded.Status)
+	test.RequireProtoElementsMatch(t, servicepb.NewTxResults(expectedStatus), forwarded.TxResult)
 }
 
 func (e *vcMgrTestEnv) readOutputTxsStatus(t *testing.T) *servicepb.TxStatusBatch {

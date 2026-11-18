@@ -63,13 +63,16 @@ func (db *database) insertToken(ctx context.Context, rec *servicepb.TokenRecord)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to marshal token record")
 	}
+	// Whole seconds suffice for the column: only the sweep compares it, while AuthorizeIdentity checks the
+	// record's full-precision expiry.
+	expireUnix := rec.GetExpireTime().AsTime().Unix()
 	return retry.ExecuteWithResult(ctx, db.retry, func() (string, error) {
 		b, randErr := randomBytes()
 		if randErr != nil {
 			return "", randErr
 		}
 		token := base64.RawURLEncoding.EncodeToString(b)
-		if _, execErr := db.pool.Exec(ctx, sqlInsertToken, hashToken(token), data, rec.GetExpiresAt()); execErr != nil {
+		if _, execErr := db.pool.Exec(ctx, sqlInsertToken, hashToken(token), data, expireUnix); execErr != nil {
 			return "", errors.Wrap(execErr, "failed to persist token record")
 		}
 		return token, nil
@@ -101,13 +104,13 @@ func (db *database) readToken(ctx context.Context, token string) (*servicepb.Tok
 }
 
 // insertNonce generates a nonce and records it with its expiry. As with tokens, each attempt draws a fresh one.
-func (db *database) insertNonce(ctx context.Context, expiresAt time.Time) ([]byte, error) {
+func (db *database) insertNonce(ctx context.Context, expireTime time.Time) ([]byte, error) {
 	return retry.ExecuteWithResult(ctx, db.retry, func() ([]byte, error) {
 		nonce, randErr := randomBytes()
 		if randErr != nil {
 			return nil, randErr
 		}
-		if _, execErr := db.pool.Exec(ctx, sqlInsertNonce, nonce, expiresAt.Unix()); execErr != nil {
+		if _, execErr := db.pool.Exec(ctx, sqlInsertNonce, nonce, expireTime.Unix()); execErr != nil {
 			return nil, errors.Wrap(execErr, "failed to persist nonce")
 		}
 		return nonce, nil

@@ -120,8 +120,8 @@ func (c *VerifierAdapter) receiveStatus(
 			return errors.Wrap(connection.FilterStreamRPCError(err), "failed receiving verification status")
 		}
 
-		logger.Debugf("Received SV batch with %d responses", len(responseBatch.Status))
-		c.res.Metrics.OnReceiveBatch(toMetricsStatus(responseBatch.Status))
+		logger.Debugf("Received SV batch with %d responses", len(responseBatch.TxResult))
+		c.res.Metrics.OnReceiveBatch(toMetricsStatus(responseBatch.TxResult))
 		if c.res.isReceiveLimit() {
 			return nil
 		}

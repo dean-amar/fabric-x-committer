@@ -235,8 +235,10 @@ func (e *coordinatorTestEnv) createNamespaces(t *testing.T, blkNum int, nsIDs ..
 			txStatus, receiveErr := e.csStream.Recv()
 			require.NoError(t, receiveErr)
 			require.NotNil(t, txStatus)
-			require.NotNil(t, txStatus.Status)
-			status = append(status, txStatus.Status...)
+			require.NotNil(t, txStatus.TxResult)
+			for _, result := range txStatus.TxResult {
+				status = append(status, result.Status)
+			}
 			return len(status) == len(b.Txs)
 		}, 2*time.Minute, 10*time.Millisecond)
 
@@ -352,17 +354,17 @@ func TestNoPendingTransactionProcessing(t *testing.T) {
 	env.coordinator.numTxsInProgress.Store(7)
 
 	require.True(t, env.coordinator.queues.vcServiceToCoordinatorTxStatus.write(t.Context(), &servicepb.TxStatusBatch{
-		Status: []*committerpb.TxStatus{
+		TxResult: servicepb.NewTxResults([]*committerpb.TxStatus{
 			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-1", 2, 0),
 			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-2", 2, 1),
-		},
+		}),
 	}))
 	require.True(t, env.coordinator.queues.vcServiceToCoordinatorTxStatus.write(t.Context(), &servicepb.TxStatusBatch{
-		Status: []*committerpb.TxStatus{
+		TxResult: servicepb.NewTxResults([]*committerpb.TxStatus{
 			committerpb.NewTxStatus(committerpb.Status_MALFORMED_UNSUPPORTED_ENVELOPE_PAYLOAD, "queued-rejected", 2, 2),
 			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-4", 2, 3),
 			committerpb.NewTxStatus(committerpb.Status_COMMITTED, "queued-5", 2, 4),
-		},
+		}),
 	}))
 
 	// The stream is inactive, so the call drains and discards the 5 queued statuses,
@@ -866,7 +868,7 @@ func statusExistsForNonDuplicateTxID(t *testing.T, vc *mock.VcService, expectedS
 		TxIds: persistedTxIDs,
 	})
 	require.NoError(t, err)
-	test.RequireProtoElementsMatch(t, persistedExpectedStatuses, actualStatuses.Status)
+	test.RequireProtoElementsMatch(t, servicepb.NewTxResults(persistedExpectedStatuses), actualStatuses.TxResult)
 }
 
 func TestCoordinatorStreamFailureWithSidecar(t *testing.T) {
@@ -963,7 +965,9 @@ func (e *coordinatorTestEnv) receiveStatus(t *testing.T, count int) []*committer
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		txStatus, err := e.csStream.Recv()
 		require.NoError(c, err)
-		status = append(status, txStatus.Status...)
+		for _, result := range txStatus.TxResult {
+			status = append(status, result.Status)
+		}
 		require.Len(c, status, count)
 	}, time.Minute, 500*time.Millisecond)
 	return status
@@ -1132,7 +1136,7 @@ func TestWaitingTxsCountReturnsToZeroForHeldCheckpoint(t *testing.T) {
 	// The feedback arrives carrying no per-TX status.
 	held, err := env.csStream.Recv()
 	require.NoError(t, err)
-	require.Empty(t, held.Status)
+	require.Empty(t, held.TxResult)
 	require.NotNil(t, held.CheckpointFeedback)
 	require.Equal(t, servicepb.CheckpointFeedback_HOLD, held.CheckpointFeedback.Signal)
 	require.Equal(t, cpRef.TxId, held.CheckpointFeedback.Ref.GetTxId())
@@ -1158,7 +1162,9 @@ func readTxStatus(t *testing.T, stream servicepb.Coordinator_BlockProcessingClie
 	for len(actualTxsStatus) < count {
 		txStatus, err := stream.Recv()
 		require.NoError(t, err)
-		actualTxsStatus = append(actualTxsStatus, txStatus.Status...)
+		for _, result := range txStatus.TxResult {
+			actualTxsStatus = append(actualTxsStatus, result.Status)
+		}
 	}
 	return actualTxsStatus
 }

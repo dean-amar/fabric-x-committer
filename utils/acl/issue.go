@@ -66,7 +66,7 @@ func (c *Credentials) GetRequestMetadata(ctx context.Context, _ ...string) (map[
 			return nil, err
 		}
 		c.token = resp.GetToken()
-		c.renewAt = now.Add(time.Unix(resp.GetExpiresAt(), 0).Sub(now) / 2)
+		c.renewAt = now.Add(resp.GetExpireTime().AsTime().Sub(now) / 2)
 	}
 	return map[string]string{TokenMetadataKey: c.token}, nil
 }
