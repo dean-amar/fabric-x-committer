@@ -18,8 +18,9 @@ import (
 	"github.com/hyperledger/fabric-lib-go/bccsp/factory"
 	"github.com/jackc/puddle/v2"
 
+	"github.com/Chaguar/common/utils/retry"
+
 	"github.com/Chaguar/committer/utils/monitoring/promutil"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 )
 

@@ -10,13 +10,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 
 	"github.com/Chaguar/committer/utils"
 	"github.com/Chaguar/committer/utils/connection"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 )
 
@@ -142,5 +142,5 @@ func (c *Connection) execute(ctx context.Context, stmt string) error {
 		return err
 	}
 	defer pool.Close()
-	return retry.ExecuteSQL(ctx, DefaultRetry, pool, stmt)
+	return statedb.ExecuteSQL(ctx, DefaultRetry, pool, stmt)
 }

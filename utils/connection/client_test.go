@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
@@ -26,7 +27,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/Chaguar/committer/utils/connection"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/serve"
 	"github.com/Chaguar/committer/utils/test"
 )

@@ -12,6 +12,7 @@ import (
 	"slices"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -22,7 +23,6 @@ import (
 	"github.com/Chaguar/committer/utils/channel"
 	"github.com/Chaguar/committer/utils/connection"
 	"github.com/Chaguar/committer/utils/monitoring/promutil"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 const streamEndErrWrap = "sending to stream ended with an error"

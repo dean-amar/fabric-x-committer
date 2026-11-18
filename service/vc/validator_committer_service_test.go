@@ -15,6 +15,7 @@ import (
 
 	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -25,7 +26,6 @@ import (
 	"github.com/Chaguar/committer/utils"
 	"github.com/Chaguar/committer/utils/connection"
 	"github.com/Chaguar/committer/utils/grpcerror"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/statedb"
 	"github.com/Chaguar/committer/utils/test"
 	"github.com/Chaguar/committer/utils/testapp"

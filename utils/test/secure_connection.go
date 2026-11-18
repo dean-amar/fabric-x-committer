@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/Chaguar/common/common/crypto/tlsgen"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/Chaguar/committer/utils/connection"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (

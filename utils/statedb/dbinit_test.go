@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Chaguar/committer/utils/connection"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 func TestFmtSplitIntoTablets(t *testing.T) {

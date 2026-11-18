@@ -14,6 +14,7 @@ import (
 
 	"github.com/Chaguar/common/api/applicationpb"
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/Chaguar/common/utils/testcrypto"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,6 @@ import (
 	"github.com/Chaguar/committer/utils/channel"
 	"github.com/Chaguar/committer/utils/connection"
 	"github.com/Chaguar/committer/utils/monitoring/promutil"
-	"github.com/Chaguar/committer/utils/retry"
 	"github.com/Chaguar/committer/utils/test"
 )
 

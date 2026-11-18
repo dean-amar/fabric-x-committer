@@ -14,13 +14,13 @@ import (
 	"strings"
 
 	"github.com/Chaguar/common/api/committerpb"
+	"github.com/Chaguar/common/utils/retry"
 	"github.com/cockroachdb/errors"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/puddle/v2"
 	"github.com/yugabyte/pgx/v5/pgconn"
 	"github.com/yugabyte/pgx/v5/pgxpool"
-
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 const (
@@ -118,22 +118,29 @@ func SetupSystemTablesAndNamespaces(
 	}
 
 	logger.Info("Creating tx status, metadata, auth service tables, and their methods.")
-	if execErr := retry.ExecuteSQL(ctx, config.Retry, pool,
-		fmtSplitIntoTablets(dbInitSQLStmt, tablePreSplitTablets)); execErr != nil {
+	initQuery := fmtSplitIntoTablets(dbInitSQLStmt, tablePreSplitTablets)
+	if execErr := ExecuteSQL(ctx, config.Retry, pool, initQuery); execErr != nil {
 		return fmt.Errorf("failed to create system tables and functions: %w", execErr)
 	}
 
 	for _, nsID := range committerpb.SystemNamespaces() {
 		query := MakeNsTablesQuery(nsID, tablePreSplitTablets)
-		if execErr := retry.ExecuteSQL(ctx, config.Retry, pool, query); execErr != nil {
-			return errors.Wrapf(
-				execErr,
-				"failed to create table and functions for namespace [%s] with query [%s]", nsID, query,
-			)
+		if execErr := ExecuteSQL(ctx, config.Retry, pool, query); execErr != nil {
+			return fmt.Errorf("failed to create table and functions for namespace [%s]: %w", nsID, execErr)
 		}
 		logger.Infof("namespace %s: created table and its methods.", nsID)
 	}
 	return nil
+}
+
+// ExecuteSQL executes a SQL statement with retry; a closed pool is terminal.
+//
+//nolint:revive // we allow 5 parameters here since one of them is optional.
+func ExecuteSQL(ctx context.Context, p *retry.Profile, pool *pgxpool.Pool, stmt string, args ...any) error {
+	return retry.Execute(ctx, p, func() error {
+		_, err := pool.Exec(ctx, stmt, args...)
+		return errors.Wrapf(err, "failed to execute the SQL statement [%s]", stmt)
+	}, puddle.ErrClosedPool)
 }
 
 // MakeNsTablesQuery returns the query to create the table and functions for a namespace.

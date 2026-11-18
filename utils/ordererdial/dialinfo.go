@@ -10,9 +10,9 @@ import (
 	"math/rand/v2"
 
 	"github.com/Chaguar/common/common/channelconfig"
+	"github.com/Chaguar/common/utils/retry"
 
 	"github.com/Chaguar/committer/utils/connection"
-	"github.com/Chaguar/committer/utils/retry"
 )
 
 type (
