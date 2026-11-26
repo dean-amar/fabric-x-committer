@@ -206,10 +206,10 @@ func MustGetTLSConfig(t *testing.T, tlsConfig *connection.TLSConfig) *tls.Config
 }
 
 // NewPreAllocatedLocalHostServerConfig create a localhost server config with a pre allocated listener and port.
-func NewPreAllocatedLocalHostServerConfig(t *testing.T, tlsConfig connection.TLSConfig) *serve.Config {
-	t.Helper()
+func NewPreAllocatedLocalHostServerConfig(tb testing.TB, tlsConfig connection.TLSConfig) *serve.Config {
+	tb.Helper()
 	serverConfig := NewLocalHostServiceConfig(tlsConfig)
-	serve.PreAllocateListener(t, &serverConfig.GRPC)
+	serve.PreAllocateListener(tb, &serverConfig.GRPC)
 	return serverConfig
 }
 

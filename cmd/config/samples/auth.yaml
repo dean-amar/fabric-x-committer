@@ -124,7 +124,7 @@ database:
     # Default: 10m
     max-elapsed-time: 15m
 
-# Lifetime of an issued token.
+# Maximum lifetime of an issued token; a token never outlives the client's certificate.
 # Past it the resource server rejects the token and the client must authenticate again.
 # It also bounds how long an open stream lives,
 # since a stream cannot outlive the token that established it. Default: 5m

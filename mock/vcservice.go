@@ -32,7 +32,7 @@ type (
 	// VcService is a mock implementation of servicepb.ValidationAndCommitServiceServer.
 	// It is used for testing the client which is the coordinator service.
 	VcService struct {
-		servicepb.ValidationAndCommitServiceServer
+		servicepb.UnimplementedValidationAndCommitServiceServer
 		streamStateManager[VCStreamState]
 		nextBlock atomic.Pointer[servicepb.BlockRef]
 		txsStatus *fifoCache[*committerpb.TxStatus]
@@ -52,7 +52,8 @@ type (
 		// NumBatchesReceived is the number of batches received by VcService.
 		NumBatchesReceived atomic.Uint32
 		// MockFaultyNodeDropSize allows mocking a faulty node by dropping some TXs.
-		MockFaultyNodeDropSize int
+		// It is atomic so a test can change it while streams are processing batches.
+		MockFaultyNodeDropSize atomic.Int64
 	}
 
 	// VCStreamState holds the stream's batch queue.
@@ -83,8 +84,8 @@ func (v *VcService) SetLastCommittedBlockNumber(
 	_ context.Context,
 	lastBlock *servicepb.BlockRef,
 ) (*emptypb.Empty, error) {
-	lastBlock.Number++
-	v.nextBlock.Store(lastBlock)
+	// A fresh message: an in-process caller still holds lastBlock.
+	v.nextBlock.Store(&servicepb.BlockRef{Number: lastBlock.Number + 1})
 	return nil, nil
 }
 
@@ -93,6 +94,7 @@ func (v *VcService) GetNextBlockNumberToCommit(
 	context.Context,
 	*emptypb.Empty,
 ) (*servicepb.BlockRef, error) {
+	// Before the first commit this is nil, which reaches the client as block 0.
 	return v.nextBlock.Load(), nil
 }
 
@@ -238,7 +240,7 @@ func (v *VcService) process(txs []*servicepb.VcTx) (
 	var feedback *servicepb.CheckpointFeedback
 
 	// We simulate a faulty node by not responding to the first X TXs.
-	skip := max(0, min(v.MockFaultyNodeDropSize, len(txs)))
+	skip := int(min(max(0, v.MockFaultyNodeDropSize.Load()), int64(len(txs))))
 
 	v.txsStatusMu.Lock()
 	defer v.txsStatusMu.Unlock()

@@ -38,6 +38,8 @@ type (
 	TestEnv struct {
 		*acl.IssueParams
 		Config *connection.MultiClientConfig
+		// dbConf is the database the instances share. Set only by NewAuthTestEnv, which starts them.
+		dbConf *statedb.Config
 	}
 
 	// TestEnvParams describes the AuthService NewAuthTestEnv should start.
@@ -82,7 +84,7 @@ func NewAuthTestEnv(t *testing.T, params *TestEnvParams) *TestEnv {
 	require.NoError(t, err)
 
 	dbConf := prepareTestDatabase(t)
-	seedConfigTransaction(t, dbConf, configBlock)
+	seedConfigTransaction(t, dbConf, configBlock, 0)
 
 	endpoints := make([]*connection.Endpoint, max(params.Instances, 1))
 	for i := range endpoints {
@@ -104,6 +106,7 @@ func NewAuthTestEnv(t *testing.T, params *TestEnvParams) *TestEnv {
 	env := NewAuthClientTestEnv(
 		t, test.NewTLSMultiClientConfig(params.ClientTLS, endpoints...), params.ArtifactsPath, channelID,
 	)
+	env.dbConf = dbConf
 	env.IssueToken(t)
 	return env
 }
@@ -170,9 +173,9 @@ func prepareTestDatabase(t *testing.T) *statedb.Config {
 	return dbConf
 }
 
-// seedConfigTransaction writes the block's configuration envelope where the service reads it, standing in
-// for the committer that would otherwise have to commit it first.
-func seedConfigTransaction(t *testing.T, dbConf *statedb.Config, block *common.Block) {
+// seedConfigTransaction writes the block's configuration envelope at the given version where the service
+// reads it, standing in for the committer that would otherwise have to commit it first.
+func seedConfigTransaction(t *testing.T, dbConf *statedb.Config, block *common.Block, version uint64) {
 	t.Helper()
 	envelope, err := protoutil.ExtractEnvelope(block, 0)
 	require.NoError(t, err)
@@ -182,8 +185,8 @@ func seedConfigTransaction(t *testing.T, dbConf *statedb.Config, block *common.B
 	pool, err := statedb.NewPool(t.Context(), dbConf)
 	require.NoError(t, err)
 	defer pool.Close()
-	_, err = pool.Exec(t.Context(),
-		"INSERT INTO "+statedb.TableName(committerpb.ConfigNamespaceID)+" (key, value, version) VALUES ($1, $2, 0)",
-		[]byte(committerpb.ConfigKey), envelopeBytes)
-	require.NoError(t, err)
+	require.NoError(t, statedb.ExecuteSQL(t.Context(), dbConf.Retry, pool,
+		"INSERT INTO "+statedb.TableName(committerpb.ConfigNamespaceID)+" (key, value, version) VALUES ($1, $2, $3) "+
+			"ON CONFLICT (key) DO UPDATE SET value = excluded.value, version = excluded.version",
+		[]byte(committerpb.ConfigKey), envelopeBytes, version))
 }

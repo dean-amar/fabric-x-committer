@@ -13,15 +13,3 @@
 {{ include "rateLimit" . | indent 2 }}
 
 {{ include "database" . | indent 0 }}
-
-{{- if .AuthConfigRefreshInterval }}
-config-refresh-interval: {{ .AuthConfigRefreshInterval }}
-{{- end }}
-
-{{- if .AuthTokenTTL }}
-token-ttl: {{ .AuthTokenTTL }}
-{{- end }}
-
-{{- if .AuthNonceTTL }}
-nonce-ttl: {{ .AuthNonceTTL }}
-{{- end }}

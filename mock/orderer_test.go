@@ -9,6 +9,7 @@ package mock
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"sync"
 	"testing"
@@ -578,6 +579,193 @@ func startStream(t *testing.T, endpoint connection.Endpoint, contentType ab.Seek
 	}
 }
 
+func TestBlockCacheWaitsForSlowestReader(t *testing.T) {
+	t.Parallel()
+	c := newBlockCache(2)
+	ctx := releaseCacheAfterTimeout(t.Context(), t, c, 3*time.Minute)
+	for i := range 2 {
+		require.Truef(t, c.addBlock(ctx, makeBlockNumber(i)), "insert %d", i)
+	}
+
+	t.Log("Step 1: a fast reader reads both blocks while a slow one has read none")
+	c.setReaderPosition(1, 0)
+	c.setReaderPosition(2, 0)
+	for i := range uint64(2) {
+		_, err := c.getBlock(ctx, i)
+		require.NoError(t, err)
+		c.setReaderPosition(1, i+1)
+	}
+	waitCtx := releaseCacheAfterTimeout(ctx, t, c, time.Second)
+	require.False(t, c.addBlock(waitCtx, makeBlockNumber(2)), "block 0 is still unread by the slow reader")
+
+	t.Log("Step 2: the slow reader reads block 0, which frees its slot")
+	c.setReaderPosition(2, 1)
+	require.True(t, c.addBlock(ctx, makeBlockNumber(2)))
+
+	t.Log("Step 3: closing the slow reader frees block 1's slot")
+	waitCtx = releaseCacheAfterTimeout(ctx, t, c, time.Second)
+	require.False(t, c.addBlock(waitCtx, makeBlockNumber(3)), "block 1 is still unread by the slow reader")
+	c.removeReader(2)
+	require.True(t, c.addBlock(ctx, makeBlockNumber(3)))
+}
+
+func TestOrdererDeliverSeek(t *testing.T) {
+	t.Parallel()
+	oldest := &ab.SeekPosition{Type: &ab.SeekPosition_Oldest{Oldest: &ab.SeekOldest{}}}
+	newest := &ab.SeekPosition{Type: &ab.SeekPosition_Newest{Newest: &ab.SeekNewest{}}}
+	nextCommit := &ab.SeekPosition{Type: &ab.SeekPosition_NextCommit{NextCommit: &ab.SeekNextCommit{}}}
+	for _, tc := range []struct {
+		name string
+		// capacity is the number of blocks the orderer's cache holds.
+		capacity int
+		// submitBefore blocks are submitted before the seek, then readBefore are fetched
+		// with GetBlock, which also waits for them to be added.
+		submitBefore int
+		readBefore   []uint64
+		start, stop  *ab.SeekPosition
+		// submitAfter blocks are submitted once the stream is open.
+		submitAfter int
+		expected    []uint64
+	}{
+		{
+			name:         "specified range",
+			capacity:     10,
+			submitBefore: 5,
+			start:        seekPosition(1),
+			stop:         seekPosition(3),
+			expected:     []uint64{1, 2, 3},
+		},
+		{
+			name:         "oldest start",
+			capacity:     10,
+			submitBefore: 5,
+			start:        oldest,
+			stop:         seekPosition(1),
+			expected:     []uint64{0, 1},
+		},
+		{
+			name:         "oldest stop means the start",
+			capacity:     10,
+			submitBefore: 4,
+			start:        seekPosition(2),
+			stop:         oldest,
+			expected:     []uint64{2},
+		},
+		{
+			name:         "newest start and stop",
+			capacity:     10,
+			submitBefore: 5,
+			readBefore:   []uint64{4},
+			start:        newest,
+			stop:         newest,
+			expected:     []uint64{4},
+		},
+		{
+			name:         "next commit start waits for the next block",
+			capacity:     10,
+			submitBefore: 5,
+			readBefore:   []uint64{4},
+			start:        nextCommit,
+			stop:         seekPosition(5),
+			submitAfter:  1,
+			expected:     []uint64{5},
+		},
+		{
+			name:         "reader ahead of a full cache does not deadlock",
+			capacity:     2,
+			submitBefore: 2,
+			start:        seekPosition(3),
+			stop:         seekPosition(3),
+			submitAfter:  2,
+			expected:     []uint64{3},
+		},
+		{
+			name:         "lost first block keeps the requested number",
+			capacity:     2,
+			submitBefore: 4,
+			readBefore:   []uint64{0, 1, 2, 3},
+			start:        seekPosition(1),
+			stop:         seekPosition(1),
+			expected:     []uint64{1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			t.Cleanup(cancel)
+			o, err := NewMockOrderer(&OrdererConfig{BlockSize: 1, OutBlockCapacity: tc.capacity})
+			require.NoError(t, err)
+			test.RunServiceForTest(ctx, t, func(ctx context.Context) error {
+				return connection.FilterStreamRPCError(o.Run(ctx))
+			}, o.WaitForReady)
+			sc := test.ServeManyForTest(ctx, t, test.StartServerParameters{NumService: 1}, o)
+
+			submitBlocks(ctx, t, o, tc.submitBefore)
+			for _, n := range tc.readBefore {
+				_, err = o.GetBlock(ctx, n)
+				require.NoError(t, err)
+			}
+
+			conn := test.NewInsecureConnection(t, &sc.Configs[0].GRPC.Endpoint)
+			stream, err := ab.NewAtomicBroadcastClient(conn).Deliver(ctx)
+			require.NoError(t, err)
+			seekEnv, err := protoutil.CreateSignedEnvelope(
+				common.HeaderType_DELIVER_SEEK_INFO, "", nil, &ab.SeekInfo{
+					Start:    tc.start,
+					Stop:     tc.stop,
+					Behavior: ab.SeekInfo_BLOCK_UNTIL_READY,
+				}, 0, 0,
+			)
+			require.NoError(t, err)
+			require.NoError(t, stream.Send(seekEnv))
+			if tc.submitAfter > 0 {
+				// The seek is resolved before the stream registers, and the stream stays
+				// open for the blocks still to come.
+				RequireStreams(t, o, 1)
+				submitBlocks(ctx, t, o, tc.submitAfter)
+			}
+
+			for _, n := range tc.expected {
+				res, recvErr := stream.Recv()
+				require.NoError(t, recvErr)
+				require.NotNil(t, res.GetBlock())
+				require.Equal(t, n, res.GetBlock().Header.Number)
+			}
+			res, err := stream.Recv()
+			require.NoError(t, err)
+			require.Equal(t, common.Status_SUCCESS, res.GetStatus())
+			_, err = stream.Recv()
+			require.ErrorIs(t, err, io.EOF)
+		})
+	}
+}
+
+func TestNewMockOrdererDefaults(t *testing.T) {
+	t.Parallel()
+	conf := &OrdererConfig{
+		BlockSize:        -1,
+		BlockTimeout:     -time.Second,
+		OutBlockCapacity: -1,
+		PayloadCacheSize: -1,
+	}
+	given := *conf
+	o, err := NewMockOrderer(conf)
+	require.NoError(t, err)
+	require.Equal(t, given, *conf, "the caller's config must not change")
+
+	test.RunServiceForTest(t.Context(), t, func(ctx context.Context) error {
+		return connection.FilterStreamRPCError(o.Run(ctx))
+	}, o.WaitForReady)
+
+	t.Log("A lone envelope is cut by the default block timeout")
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	t.Cleanup(cancel)
+	require.True(t, o.SubmitEnv(ctx, makeEnvelopePayload(1)))
+	b, err := o.GetBlock(ctx, 0)
+	require.NoError(t, err)
+	require.Len(t, b.Data.Data, 1)
+}
+
 func seekPosition(i uint64) *ab.SeekPosition {
 	return &ab.SeekPosition{Type: &ab.SeekPosition_Specified{Specified: &ab.SeekSpecified{
 		Number: i,
@@ -856,5 +1044,12 @@ func TestOrdererConfigPaths(t *testing.T) {
 			require.Error(t, err)
 			require.Nil(t, orderer)
 		})
+	}
+}
+
+func submitBlocks(ctx context.Context, t *testing.T, o *Orderer, count int) {
+	t.Helper()
+	for i := range count {
+		require.NoError(t, o.SubmitBlock(ctx, makeBlockData(uint64(i))))
 	}
 }

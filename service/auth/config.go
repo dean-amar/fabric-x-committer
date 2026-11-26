@@ -18,7 +18,7 @@ type Config struct {
 	// Database is the state database the service reads the channel configuration from and persists its
 	// token and nonce records in.
 	Database *statedb.Config `mapstructure:"database" validate:"required"`
-	// TokenTTL is the lifetime of an issued token.
+	// TokenTTL is the maximum lifetime of an issued token; a token never outlives the client's certificate.
 	TokenTTL time.Duration `mapstructure:"token-ttl" default:"5m" validate:"gt=0"`
 	// NonceTTL is how long an issued nonce stays redeemable.
 	NonceTTL time.Duration `mapstructure:"nonce-ttl" default:"1m" validate:"gt=0"`

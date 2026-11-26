@@ -19,7 +19,8 @@ This guide explains how each configuration parameter affects system performance 
 8. [Snapshot Hasher](#8-snapshot-hasher)
 9. [Database](#9-database)
 10. [Co-location Impact](#10-co-location-impact)
-11. [Benchmarking](#11-benchmarking)
+11. [A Starting Point for Large Deployments](#11-a-starting-point-for-large-deployments)
+12. [Benchmarking](#12-benchmarking)
 
 ## 1. Pipeline Flow Control
 
@@ -71,7 +72,9 @@ Monitor queue length gauges to find the bottleneck. A growing queue means the do
 
 Maximum number of transactions the Sidecar has sent to the Coordinator and is awaiting status for. The Sidecar acquires one slot per transaction before sending a block, including the transactions it rejects itself. A slot is released when the Coordinator returns the transaction's final status, or, for a held or halted checkpoint, its checkpoint feedback. When all slots are occupied, the Sidecar blocks on slot acquisition, which causes the internal block channel to fill up, and eventually the Sidecar stops pulling blocks from the ordering service.
 
-This value directly controls how many transactions can be in-flight across the entire pipeline. With a low value (e.g., 100), the Sidecar sends 100 transactions and blocks until all complete — the pipeline runs in lock-step and throughput drops dramatically. With a very high value, more transactions queue across the pipeline, increasing memory and queuing latency. Config blocks trigger a full drain regardless of this value. Default: 20,000,000.
+This value directly controls how many transactions can be in-flight across the entire pipeline. With a low value (e.g., 100), the Sidecar sends 100 transactions and blocks until all complete — the pipeline runs in lock-step and throughput drops dramatically. With a very high value, more transactions queue across the pipeline, increasing memory and queuing latency. Config blocks trigger a full drain regardless of this value. Default: 100,000 (the sample configuration sets 20,000,000).
+
+Keep this at or above the Coordinator's `dependency-graph.waiting-txs-limit`. Below it, the Sidecar's limit replaces the Coordinator's as the pipeline's in-flight window, and since throughput is the in-flight count divided by latency, a smaller window lowers throughput, not only latency.
 
 ### `ledger.sync-interval`
 
@@ -127,19 +130,39 @@ Maximum concurrent streaming RPCs (Deliver + Notification) per client connection
 
 Too low limits client concurrency and can cause connection failures under load. Default: 10.
 
+### What limits the Sidecar
+
+`BenchmarkSidecarEndToEnd` (`service/sidecar/sidecar_bench_test.go`) runs the whole Sidecar on one machine. It receives blocks over Deliver, verifies their consenter signatures, parses them, sends them to a stub Coordinator over gRPC, collects the statuses, and appends the blocks to an on-disk ledger. It shows three limits. Each one hides the next, so deal with them in this order:
+
+1. **Block size.** Two of the Sidecar's costs are per block, not per transaction: verifying the block's consenter signatures, and one `fsync` every `ledger.sync-interval` blocks. Below about 1,000 transactions per block, the Sidecar cannot reach half its throughput whatever else is set. Block verification alone (`BenchmarkVerifyBlock` in `utils/deliverorderer`) runs 7.58 times faster per transaction at 10,000 transactions per block than at 100.
+2. **Garbage collection.** The Sidecar is limited by how fast it allocates, not by CPU. At the default `GOGC=100`, the collector runs almost all the time while most cores sit idle, and throughput follows the allocation rate closely. Raising `GOGC` and removing allocations buy the same thing, so their gains do not add up. If you raise `GOGC`, also set `GOMEMLIMIT` as a backstop, sized from the Sidecar's live heap, which `waiting-txs-limit` bounds.
+3. **Parsing.** More `max-workers-for-tx-parsing` makes parsing several times faster (`BenchmarkMapBlockSize`), but adds nothing end to end while the ledger append is the slowest stage. Turn on `ledger.disable-tx-id-index` first if the deployment allows it; once the append is cheap, parallel parsing pays off.
+
+A saturated Sidecar can look idle. Most of its per-block stages run on a single goroutine, and one busy core out of 64 is under 2% of the machine. Compare each stage's time per block with the budget instead: the block size divided by the target rate. At 10,000 transactions per block and 450,000 tx/s, the budget is 22.2 ms. On a nineteen-machine deployment, `sidecar_ledger_append_block_seconds` sat at that budget while the Sidecar used 18% of its cores. The stage histograms are `sidecar_ledger_append_block_seconds`, `sidecar_relay_block_mapping_seconds`, `sidecar_relay_mapped_block_processing_seconds` and `sidecar_delivery_block_verification_seconds`.
+
 ## 4. Coordinator
 
 ### `dependency-graph.num-of-local-dep-constructors`
 
 Number of goroutines that process transaction batches in parallel to construct batch-level dependency graphs. Each worker processes one batch at a time, and output is serialized in FIFO order.
 
-Increasing this parallelizes the CPU work of building dependency graphs. However, since output order is enforced via a condition variable, gains diminish beyond 2-4 workers. Default: 1.
+Increasing this parallelizes the CPU work of building dependency graphs. However, since output order is enforced via a condition variable, gains diminish beyond 2-4 workers. On some setups, more constructors bring no gain at all. `BenchmarkDependencyGraph` on a 32-core machine, with no dependencies between transactions, shows no trend from 1 to 32 constructors. There, the default manager is bound by its single graph goroutine and its single validated-batch goroutine, which more constructors do not widen. Raise this only if a profile shows the constructors themselves saturated. Default: 1.
+
+### `dependency-graph.use-simple-manager`
+
+Selects the simple dependency graph manager. The default manager splits the work between a pool of local dependency constructors and a global graph guarded by one mutex. The simple manager keeps the whole waiting set in one map, owned by one goroutine and fed by channels, with no lock. `num-of-local-dep-constructors` has no effect when it is on.
+
+To see whether the lock is the problem, compare `coordinator_global_dependency_graph_validated_tx_batch_processing_seconds` with `coordinator_global_dependency_graph_validated_tx_batch_processor_wait_for_lock_seconds` and `coordinator_global_dependency_graph_constructor_wait_for_lock_seconds`. The wait metrics show how much of the graph's busy time is spent waiting for the mutex rather than working. On a nineteen-machine deployment, about 40% of each stage's busy time was lock wait, while no thread on the 64-core machine was above 20%.
+
+Removing the contention does not raise throughput by itself. The released pressure moves to the next stage, so check what is behind the graph after switching: database commit latency, and the validator-committers' CPU. In that deployment, the simple manager committed 47.6% more than the default manager under the same configuration. Under the default manager the database was starved: its batch commits took 62 ms instead of 140 ms, and the commit machines were less busy, while the graph was full. That measurement had no key conflicts between transactions, which is the case that favors one goroutine. Default: false.
 
 ### `dependency-graph.waiting-txs-limit`
 
 Maximum number of transactions in the global dependency graph. The Coordinator acquires one slot per transaction before adding it to the graph. Slots are released when the VC returns validation results. When exhausted, the dependency graph construction blocks, channels fill up, and the Sidecar stops pulling blocks.
 
 The dependency graph is what enables parallel dispatch to Verifier and VC services. A small graph (e.g., 100) means once transactions are dispatched, no new ones enter until results return — creating idle gaps and reducing throughput. A very large graph increases memory for dependency tracking state and queuing latency. Incoming blocks are chunked into batches of `min(waiting-txs-limit, 500)` to prevent a single block from consuming all slots. Default: 100,000.
+
+Oversizing it costs latency and memory without adding throughput. On a nineteen-machine deployment, lowering it from 20,000,000 to 500,000 kept the committed rate at about 500,000 tx/s, while mean latency fell from 2.48 s to 691 ms and the Coordinator's resident memory fell from 79 GB to 786 MB, about 4 KB per waiting transaction. Transactions beyond those needed to keep the validator-committers busy only wait, and by Little's law that waiting is latency. Size it from the in-flight count the pipeline needs, the rate times the pipeline's latency, not from what the machine can hold.
 
 ### `per-channel-buffer-size-per-goroutine`
 
@@ -299,6 +322,17 @@ When the database is PostgreSQL, this setting is automatically ignored.
 | = tserver count | Even distribution from the start; predictable latency |
 | 2x tserver count | Finer distribution; slightly more per-tablet overhead |
 
+More tablets than tablet servers is a trade-off between writes and reads. A tablet is the unit of write concurrency, so more tablets raise insert throughput. But YugabyteDB batches a multi-key lookup such as `WHERE key = ANY($1)` only while the number of tablets times the number of keys stays below about 32,768. Above that, it sends one storage read per key. Measured on the same rows with 1,200 keys, 120 tablets issued 1,200 storage reads and took 7.80 s; the default split issued 2 and took 12.5 ms. The query plan is the same in both cases, so only `Storage Read Requests` from `EXPLAIN (ANALYZE, DIST)` shows it.
+
+An insert-only workload never runs a multi-key lookup, so it does not show this. The validator-committer's blind-write path (`queryVersionsIfPresent`), read validation and the query service all do. On a nineteen-machine deployment with 12 tablet servers:
+
+| Tablets | Insert-only workload | Workload with a multi-key read |
+|---------|----------------------|--------------------------------|
+| 120 | 487,000 tx/s | 13,200 tx/s |
+| 12 | 360,000 tx/s | 314,000 tx/s |
+
+The threshold also tightens over time. YugabyteDB splits tablets automatically as a table grows, so this setting is a starting count, not a ceiling: a table created with 120 tablets held 288 after eleven hours of load. The lasting lever is the number of keys per lookup, which the size of the validator-committer's batches sets. If you raise the tablet count for write throughput, measure a multi-key read before and after. The threshold above was found against YugabyteDB 2025.2.1.0; test it on your version.
+
 ### `database.retry`
 
 Exponential backoff retry strategy for database operations. Required for YugabyteDB to handle retryable transaction conflicts (e.g., serialization failures from concurrent MVCC operations).
@@ -429,7 +463,40 @@ MVCC validation requires multiple database round-trips per transaction — read 
 
 Co-location is most impactful for the VC service because it performs the most database operations per transaction. The Query Service benefits less because its read-only queries are less latency-sensitive.
 
-## 11. Benchmarking
+## 11. A Starting Point for Large Deployments
+
+The settings below sustained 500,000 tx/s, at about 392 ms mean end-to-end latency, on a nineteen-machine deployment. Use them as a starting point for a deployment of similar size, then tune with the sections above. They are not proposed as defaults: they fit one class of hardware and one workload shape.
+
+**The deployment.** One Sidecar, one Coordinator, three Verifiers and six Validator-Committers, with YugabyteDB on 12 tablet servers and 3 masters. Each machine had 64 hardware threads and 156 GB of memory. Each Validator-Committer shared a machine with a tablet server, and the Sidecar, the Coordinator and each Verifier had a machine of their own. Blocks held 10,000 transactions. Each transaction had two read-write keys of 32 bytes with 32-byte values, and no two transactions touched the same key. At this rate the database was the limit, at 83% CPU and 88% disk busy, and every committer stage had headroom.
+
+| Service | Setting | Value | Default | Why |
+|---------|---------|-------|---------|-----|
+| Sidecar | `ledger.disable-tx-id-index` | `true` | `false` | The index's compaction was the Sidecar's largest cost. Only if no client needs `GetBlockByTxID` or `GetTxByID`, and only on an empty ledger. |
+| Sidecar | `channel-buffer-size` | 5 | 100 | A deep buffer only holds blocks waiting for their statuses. Mean latency fell from 6.36 s to 1.16 s at the same throughput. |
+| Sidecar | `waiting-txs-limit` | 500,000 | 100,000 | At least the Coordinator's limit. |
+| Sidecar | `max-workers-for-tx-parsing` | 16 | 1 | One goroutine caps parsing at one core. |
+| Coordinator | `dependency-graph.use-simple-manager` | `true` | `false` | Removes the graph's lock contention. See its section: this workload had no key conflicts. |
+| Coordinator | `dependency-graph.waiting-txs-limit` | 500,000 | 100,000 | Enough in flight to keep the six Validator-Committers busy at this rate. |
+| VC | `resource-limits.max-workers-for-preparer` | 16 | 1 | Cheap stages; 16 keeps them idle. |
+| VC | `resource-limits.max-workers-for-validator` | 16 | 1 | Same. |
+| VC | `resource-limits.max-workers-for-committer` | 64 | 20 | The concurrency into the database: 6 × 64 = 384 batches. 40 workers committed 14.7% less. |
+| VC | `database.max-connections` | 128 | 20 | Above the validator and committer workers together, so workers wait on the database, not on the pool. |
+| VC | `database.min-connections` | 16 | 1 | Avoids opening connections during the ramp. |
+| VC | `database.load-balance` | `true` | `false` | Spreads connections across the tablet servers. Every node must be in every database certificate's SANs, or all connections stay on one node. |
+| VC | `database.table-pre-split-tablets` | 120 | none | Ten per tablet server, for write throughput. Use one per tablet server if the workload performs multi-key reads; see [`database.table-pre-split-tablets`](#databasetable-pre-split-tablets). |
+| YugabyteDB | `--ysql_max_connections` | 500 | 300 | Six Validator-Committers × 128 connections, with headroom. |
+| YugabyteDB | data directories | two per tablet server, on separate devices | | Disk is what limits the database at this rate. |
+
+Everything else was left at its default. That includes gRPC flow control, whose defaults are the sizes from [Pipeline Flow Control](#1-pipeline-flow-control), and `GOGC` on the committer services.
+
+To adapt it:
+
+- **Block size is set by the ordering service.** Use at least about 1,000 transactions per block; below that, the Sidecar's per-block costs bind first. Larger blocks raise the Sidecar's ceiling and add latency.
+- **Scale the Validator-Committers with the database.** Commit concurrency, the number of Validator-Committers times `max-workers-for-committer`, is what drives the database. Raise it only while the database has headroom.
+- **Size the in-flight windows from the target rate.** Set the Coordinator's `dependency-graph.waiting-txs-limit` to about the target rate times the pipeline's latency, and the Sidecar's `waiting-txs-limit` at or above it.
+- **Check the workload assumptions.** With no key conflicts, the dependency graph never holds a transaction back and MVCC validation never aborts one. Both the simple manager's gain and the pre-split's gain may be smaller under contention. Write contention at a back-reference rate of 0.5 cost about 19% in the same deployment, with 12 tablets.
+
+## 12. Benchmarking
 
 The tuning recommendations in this guide are starting points, not guarantees. Real performance depends on factors specific to your deployment:
 

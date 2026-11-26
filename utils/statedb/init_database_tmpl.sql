@@ -66,8 +66,10 @@ CREATE TABLE IF NOT EXISTS auth_nonces
 )${SPLIT_INTO_TABLETS};
 
 -- Indexes are created during initialization, before services start.
+-- ASC makes them range-sharded on YugabyteDB, which HASH-shards an index's first column by default, so the
+-- sweep's "expires_at < $1" can use them. On PostgreSQL ASC is already the default.
 CREATE INDEX IF NOT EXISTS auth_tokens_expires_at -- noqa: PG01
-    ON auth_tokens (expires_at);
+    ON auth_tokens (expires_at ASC);
 
 CREATE INDEX IF NOT EXISTS auth_nonces_expires_at -- noqa: PG01
-    ON auth_nonces (expires_at);
+    ON auth_nonces (expires_at ASC);
