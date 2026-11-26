@@ -21,7 +21,7 @@ const policyReaders = "/Channel/Application/Readers"
 var errNoPolicyForResource = errors.New("no policy defined for resource")
 
 // evaluateResourcePolicy re-resolves the record's identity against the latest bundle, which is what makes
-// a removed organization or rotated MSP take effect immediately, then evaluates the resource's policy.
+// a removed organization or rotated MSP take effect at the next config refresh, then evaluates the policy.
 func evaluateResourcePolicy(
 	bundle *channelconfig.Bundle, resource string, clientIdentity *msppb.Identity,
 ) error {

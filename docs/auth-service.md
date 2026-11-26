@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 # Authentication & Authorization Service (ACL)
 
 The `auth` service is a central Authentication & Authorization Service (`AuthService`) that guards the
-gRPC APIs exposed by Committer-X. It authenticates a client once and issues a short-lived,
+gRPC APIs exposed by the Chaguar Committer. It authenticates a client once and issues a short-lived,
 certificate-bound opaque token; resource servers (Query, Sidecar) then authorize each RPC by
 delegating to the `AuthService`. This decouples the one-time, expensive signature verification from
 the many cheap per-call authorization checks, and works behind client-side load balancing because the
@@ -23,8 +23,9 @@ The service is composed of focused collaborators, each with one responsibility:
   keyed by each token's SHA-256 (with the client's MSP identity, certificate binding, scope, and expiry),
   and the unredeemed nonces in the `auth_nonces` table.
 - **`Service`** (`auth_service.go`) — owns the above and exposes the gRPC handlers: `AuthenticateIdentity`
-  verifies a signed envelope (scope, freshness, certificate binding, MSP identity, signature) and issues a
-  token, and `AuthorizeIdentity` answers authorization decisions, with `policy.go` resolving the resource policy.
+  verifies a signed envelope (scope, freshness, certificate binding, MSP identity and its expiry, signature)
+  and issues a token, and `AuthorizeIdentity` answers authorization decisions, with `policy.go` resolving the
+  resource policy.
 
 ## RPCs
 
@@ -34,9 +35,11 @@ Only the persisted `TokenRecord` is internal, in `api/servicepb`.
 
 - `AuthenticateIdentity(signed_envelope, requested_scope) -> token, expire_time` — verifies the envelope
   (channel and empty-payload scope, timestamp freshness, TLS certificate binding, MSP identity
-  resolution, signature), issues a random opaque token, and writes its hash and the token-to-identity binding
-  to the store. `requested_scope` lists the resources the token may reach, and the token reaches nothing
-  else: a token issued with an empty scope is denied every resource. Each entry is the gRPC full-method name
+  resolution and expiry, signature), issues a random opaque token, and writes its hash and the
+  token-to-identity binding to the store. The token expires after `token-ttl` or when the identity's
+  certificate does, whichever comes first, so a token never outlives the identity it stands for.
+  `requested_scope` lists the resources the token may reach, and the token reaches nothing else; an empty
+  scope is refused before the nonce is spent. Each entry is the gRPC full-method name
   of a Query, Sidecar or Deliver RPC (e.g. `/committerpb.QueryService/GetRows`); entries are trimmed and
   de-duplicated. The scope never adds authority: the identity's policy still decides each resource it names.
 - `IssueNonce() -> nonce, expire_time` — issues the single-use challenge a client must sign into its
@@ -49,7 +52,7 @@ Only the persisted `TokenRecord` is internal, in `api/servicepb`.
 
 Every non-authorized outcome is a gRPC status error, which the enforcer returns with its exact code:
 `Unauthenticated` (invalid/expired/unknown token or certificate mismatch, or a failed authentication),
-`PermissionDenied` (scope or policy denial), `InvalidArgument` (no signed envelope, or a scope naming an unknown RPC), `ResourceExhausted`
+`PermissionDenied` (scope or policy denial), `InvalidArgument` (no signed envelope, or a scope that is empty or names an unknown RPC), `ResourceExhausted`
 (the challenge rate limit), `Unavailable` (before the configuration is loaded, or AuthService
 unreachable), or `Internal` (a token or nonce operation fails).
 
@@ -163,11 +166,13 @@ the section names none (`policy.go`).
 - **`AuthorizeIdentity` is callable directly.** It is not restricted to resource servers, so a caller holding a
   token can learn whether it is valid. That reveals nothing a token holder could not learn by using it,
   and a token cannot be guessed; mTLS is what restricts who reaches the service.
-- **No revocation.** A token is valid until its `expire_time`, and `token-ttl` is the only lever on how long a
-  compromised token or a withdrawn authority remains usable. No RPC deletes a record, though with every
-  lookup reading the store, a delete would take effect on all instances at once - so revocation is cheap
-  to add later (it would stop being so if a token cache is introduced). `AuthorizeIdentity` checks the record's
-  `expire_time` on every call rather than relying on the sweep.
+- **No revocation.** A token is valid until its `expire_time` - at most `token-ttl`, and never past its
+  identity's certificate expiry - so `token-ttl` is the only lever on how long a compromised token remains
+  usable; a withdrawn authority (a removed organization or rotated MSP) takes effect at the next configuration
+  refresh. No RPC deletes a record, though with every lookup reading the store, a delete would take effect
+  on all instances at once - so revocation is cheap to add later (it would stop being so if a token cache is
+  introduced). `AuthorizeIdentity` checks the record's `expire_time` on every call rather than relying on the
+  sweep.
 - **Namespace scope is deferred.** Restricting a token to particular namespaces is future work, not part
   of this iteration. Only `GetRows` and `StreamBlocks` name the namespaces they touch; block
   query and block delivery return whole blocks spanning every namespace, and a block cannot be filtered

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Chaguar/common/protoutil"
 	"github.com/Chaguar/common/utils/testcrypto"
+	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/common"
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +29,7 @@ import (
 // Both block sizes are measured because the trade is between them: the same per-block cost is spread
 // over twenty times as many transactions in a 10,000-transaction block.
 func BenchmarkOrdererBlockRate(b *testing.B) {
+	flogging.ActivateSpec("fatal")
 	// The crypto material is generated once and shared: generating it per case costs far more than the
 	// measurement, and it is identical for all of them. The orderer needs only the consenter signing
 	// identities from it, since nothing here serves gRPC.

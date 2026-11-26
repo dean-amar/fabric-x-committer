@@ -316,7 +316,7 @@ func TestValidatorCommitterManagerX(t *testing.T) {
 func TestValidatorCommitterManagerRecovery(t *testing.T) {
 	t.Parallel()
 	env := newVcMgrTestEnv(t, 1)
-	env.mockVcService.MockFaultyNodeDropSize = 4
+	env.mockVcService.MockFaultyNodeDropSize.Store(4)
 
 	env.requireConnectionMetrics(t, 0, connection.Connected, 0)
 	env.requireRetriedTxsTotal(t, 0)
@@ -334,7 +334,7 @@ func TestValidatorCommitterManagerRecovery(t *testing.T) {
 	test.CheckServerStopped(t, env.mockVCGrpcServers.Configs[0].GRPC.Endpoint.Address())
 	env.requireConnectionMetrics(t, 0, connection.Disconnected, 1)
 
-	env.mockVcService.MockFaultyNodeDropSize = 0
+	env.mockVcService.MockFaultyNodeDropSize.Store(0)
 	env.mockVCGrpcServers = mock.StartMockVCServiceFromServerConfig(
 		t,
 		env.mockVcService,

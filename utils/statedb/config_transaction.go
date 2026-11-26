@@ -21,6 +21,35 @@ var selectConfigTransaction = fmt.Sprintf(
 	"SELECT value, version FROM %s WHERE key = $1", TableName(committerpb.ConfigNamespaceID),
 )
 
+// ConfigVersionTracker reads the committed config transaction and returns it only while its version is newer
+// than the last one the caller accepted. Not safe for concurrent use.
+type ConfigVersionTracker struct {
+	lastVersion uint64
+	accepted    bool
+}
+
+// ReadIfNewer returns the committed config transaction, or nil when none is committed yet or its version is
+// not newer than the last accepted one.
+func (t *ConfigVersionTracker) ReadIfNewer(
+	ctx context.Context, pool *pgxpool.Pool,
+) (*applicationpb.ConfigTransaction, error) {
+	configTX, err := ReadConfigTransaction(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	if len(configTX.GetEnvelope()) == 0 || (t.accepted && configTX.GetVersion() <= t.lastVersion) {
+		return nil, nil //nolint:nilnil // nil means there is nothing new to apply.
+	}
+	return configTX, nil
+}
+
+// Accept records configTX as applied. Callers accept only after applying it, so a version that failed to apply
+// is read again on the next poll.
+func (t *ConfigVersionTracker) Accept(configTX *applicationpb.ConfigTransaction) {
+	t.lastVersion = configTX.GetVersion()
+	t.accepted = true
+}
+
 // ReadConfigTransaction reads the latest committed channel-configuration transaction, returning a nil
 // envelope - not an error - during bootstrap. Shared, so no two readers disagree on the authoritative row.
 func ReadConfigTransaction(ctx context.Context, pool *pgxpool.Pool) (*applicationpb.ConfigTransaction, error) {

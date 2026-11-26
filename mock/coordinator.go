@@ -30,20 +30,22 @@ import (
 
 // Coordinator is a mock implementation of servicepb.CoordinatorServer.
 type Coordinator struct {
-	servicepb.CoordinatorServer
-	lastCommittedBlock atomic.Pointer[servicepb.BlockRef]
-	nextBlock          atomic.Uint64
-	streamActive       atomic.Bool
-	numTxsInProgress   atomic.Int32
-	txsStatus          *fifoCache[*committerpb.TxStatus]
-	txsStatusMu        sync.Mutex
-	latency            atomic.Pointer[time.Duration]
-	healthcheck        *health.Server
+	servicepb.UnimplementedCoordinatorServer
+	nextBlock        atomic.Uint64
+	streamActive     atomic.Bool
+	numTxsInProgress atomic.Int32
+	txsStatus        *fifoCache[*committerpb.TxStatus]
+	txsStatusMu      sync.Mutex
+	latency          atomic.Pointer[time.Duration]
+	healthcheck      *health.Server
 }
 
 // We don't want to utilize unlimited memory for storing the transactions status.
 // A value of 100,000 TXs is adequate for most of the unit-test.
 var defaultTxStatusStorageSize = 100_000
+
+// ErrStreamAlreadyActive is returned when a second block-processing stream is opened.
+var ErrStreamAlreadyActive = errors.New("stream is already active. Only one stream is allowed")
 
 // NewMockCoordinator creates a new mock coordinator.
 func NewMockCoordinator() *Coordinator {
@@ -59,11 +61,12 @@ func (c *Coordinator) RegisterService(s serve.Servers) {
 	healthgrpc.RegisterHealthServer(s.GRPC, c.healthcheck)
 }
 
-// SetLastCommittedBlockNumber sets the last committed block number.
+// SetLastCommittedBlockNumber sets the last committed block number, so the next
+// GetNextBlockNumberToCommit reports the block that follows it.
 func (c *Coordinator) SetLastCommittedBlockNumber(
 	_ context.Context, lastBlock *servicepb.BlockRef,
 ) (*emptypb.Empty, error) {
-	c.lastCommittedBlock.Store(lastBlock)
+	c.nextBlock.Store(lastBlock.Number + 1)
 	return nil, nil
 }
 
@@ -80,12 +83,14 @@ func (c *Coordinator) GetTransactionsStatus(
 	_ context.Context,
 	q *committerpb.TxIDsBatch,
 ) (*servicepb.TxStatusBatch, error) {
-	status := make([]*committerpb.TxStatus, len(q.TxIds))
+	status := make([]*committerpb.TxStatus, 0, len(q.TxIds))
 	c.txsStatusMu.Lock()
 	defer c.txsStatusMu.Unlock()
-	for i, txID := range q.TxIds {
-		v, _ := c.txsStatus.get(txID)
-		status[i] = v
+	for _, txID := range q.TxIds {
+		// Omitted, not nil: a nil element marshals as a zero-valued, genuine-looking status.
+		if v, ok := c.txsStatus.get(txID); ok {
+			status = append(status, v)
+		}
 	}
 	return &servicepb.TxStatusBatch{TxResult: servicepb.NewTxResults(status)}, nil
 }
@@ -107,7 +112,7 @@ func (c *Coordinator) IsStreamActive() bool {
 // BlockProcessing processes a block.
 func (c *Coordinator) BlockProcessing(stream servicepb.Coordinator_BlockProcessingServer) error {
 	if !c.streamActive.CompareAndSwap(false, true) {
-		return errors.New("stream is already active. Only one stream is allowed")
+		return grpcerror.WrapFailedPrecondition(ErrStreamAlreadyActive)
 	}
 	defer c.streamActive.CompareAndSwap(true, false)
 	logger.Info("Starting block processing stream")
@@ -135,17 +140,21 @@ func (c *Coordinator) receiveBlocks(
 			return errors.Wrap(err, "receive block failed")
 		}
 
-		maxBlock := uint64(0)
+		// A batch never moves the counter backwards, and an empty batch (a block without
+		// data) carries no block number. SetLastCommittedBlockNumber may still lower it,
+		// as the real coordinator reports the committed block, not the received one.
+		next := c.nextBlock.Load()
 		if len(block.Txs) > 0 {
-			maxBlock = max(maxBlock, block.Txs[len(block.Txs)-1].Ref.BlockNum)
+			next = max(next, block.Txs[len(block.Txs)-1].Ref.BlockNum+1)
 		}
 		if len(block.Rejected) > 0 {
-			maxBlock = max(maxBlock, block.Rejected[len(block.Rejected)-1].Ref.BlockNum)
+			next = max(next, block.Rejected[len(block.Rejected)-1].Ref.BlockNum+1)
 		}
-		c.nextBlock.Store(maxBlock + 1)
+		c.nextBlock.Store(next)
 
 		logger.Debugf("Received batch with %d transactions", len(block.Txs))
-		c.numTxsInProgress.Add(int32(len(block.Txs))) //nolint:gosec
+		// Rejected TXs too: sendTxsStatusChunk decrements by every status it sends.
+		c.numTxsInProgress.Add(int32(len(block.Txs) + len(block.Rejected))) //nolint:gosec
 
 		// send to the validation
 		blockQueue.Write(block)
@@ -164,17 +173,17 @@ func (c *Coordinator) sendTxsValidationStatus(
 			break
 		}
 
-		latency := c.latency.Load()
-		if latency != nil {
-			tc := time.NewTicker(*latency)
+		if latency := c.latency.Load(); latency != nil {
 			select {
 			case <-ctx.Done():
 				return errors.Wrap(ctx.Err(), "context cancelled")
-			case <-tc.C:
+			case <-time.After(*latency):
 			}
 		}
 
-		info := scBlock.Rejected
+		// A fresh slice, so the shuffle below does not reorder scBlock.Rejected itself.
+		info := make([]*committerpb.TxStatus, 0, len(scBlock.Rejected)+len(scBlock.Txs))
+		info = append(info, scBlock.Rejected...)
 		for _, tx := range scBlock.Txs {
 			info = append(info, &committerpb.TxStatus{
 				Ref:    tx.Ref,

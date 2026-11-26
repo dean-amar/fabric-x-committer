@@ -352,7 +352,7 @@ func TestVcServiceGetReceivedTxOrder(t *testing.T) {
 	require.Equal(t, []string{"order-tx-1", "order-tx-2", "order-tx-3"}, e.vc.GetReceivedTxOrder())
 
 	// Faulty-dropped TXs are not recorded (they never reach process()).
-	e.vc.MockFaultyNodeDropSize = 1
+	e.vc.MockFaultyNodeDropSize.Store(1)
 	batch3 := &servicepb.VcBatch{
 		Transactions: []*servicepb.VcTx{
 			{Ref: committerpb.NewTxRef("order-tx-dropped", 3, 0)},
@@ -373,7 +373,7 @@ func TestVcServiceFaultyNodeSimulation(t *testing.T) {
 	t.Parallel()
 
 	e := newVCTestEnv(t, test.StartServerParameters{NumService: 1})
-	e.vc.MockFaultyNodeDropSize = 2 // Drop first 2 transactions
+	e.vc.MockFaultyNodeDropSize.Store(2) // Drop first 2 transactions
 
 	// Send batch with 4 transactions
 	batch := &servicepb.VcBatch{
