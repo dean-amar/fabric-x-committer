@@ -28,8 +28,7 @@ type (
 		EnvelopeParams
 		// Client authenticates against the AuthService.
 		Client committerpb.AuthServiceClient
-		// Scope lists the resources the token may reach, as gRPC full-method names.
-		// An empty scope yields a token that reaches nothing.
+		// Scope lists the resources the token may reach, as gRPC full-method names. It must name at least one.
 		Scope []string
 	}
 

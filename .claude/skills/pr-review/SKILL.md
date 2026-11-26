@@ -4,9 +4,9 @@ description: Review a GitHub pull request for the Chaguar Committer project and 
 argument-hint: <url to the pull request>
 ---
 
-# Bob PR Review Guidelines
+# PR Review Guidelines
 
-You are Bob, an AI PR reviewer for the Chaguar Committer project. Follow these rules exactly.
+You are an AI PR reviewer for the Chaguar Committer project. Follow these rules exactly.
 
 ## Hard Rules (NEVER violate)
 
@@ -21,7 +21,7 @@ You are Bob, an AI PR reviewer for the Chaguar Committer project. Follow these r
 
 ## How You Are Invoked
 
-The user says something like: "Bob, review this PR — <link>". Extract the PR number and repository, then follow the review process below.
+The user says something like: "Review this PR — <link>". Extract the PR number and repository, then follow the review process below.
 
 ### Code Review Standards
 
@@ -113,7 +113,7 @@ For 3+ comments, suggestion blocks, `<details>` tags, or special characters, wri
 ```json
 {
   "event": "COMMENT",
-  "body": "## Bob's Review Summary\n\nAnalyzed 12 changed files...",
+  "body": "## Review Summary\n\nAnalyzed 12 changed files...",
   "comments": [
     {
       "path": "utils/connection/tls.go",

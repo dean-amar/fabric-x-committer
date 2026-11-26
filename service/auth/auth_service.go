@@ -88,6 +88,9 @@ var (
 	errNoEnvelope = errors.New("signed envelope is required")
 	// errUnknownScope is returned when a requested scope names an RPC the resource servers do not protect.
 	errUnknownScope = errors.New("requested scope names an unknown RPC")
+	// errEmptyScope is returned when a requested scope names no RPC: such a token could reach nothing, so it is
+	// refused before the nonce is spent.
+	errEmptyScope = errors.New("requested scope names no RPC")
 )
 
 // NewAuthService creates a new AuthService from a configuration.
@@ -213,17 +216,21 @@ func (s *Service) AuthenticateIdentity(
 	}
 
 	certHash := util.ExtractCertificateHashFromContext(ctx)
-	identity, err := s.verifyEnvelope(parsed, bundle, certHash, now)
+	identity, identityExpiresAt, err := s.verifyEnvelope(parsed, bundle, certHash, now)
 	if err != nil {
 		logger.Debugf("Envelope verification failed: %v", err)
 		return nil, grpcerror.WrapUnauthenticated(errors.New("authentication failed"))
 	}
 
+	expireTime := now.Add(s.config.TokenTTL)
+	if !identityExpiresAt.IsZero() && identityExpiresAt.Before(expireTime) {
+		expireTime = identityExpiresAt // A token never outlives the identity it stands for.
+	}
 	rec := &servicepb.TokenRecord{
 		Identity:       identity,
 		CertHashSha256: certHash,
 		Scope:          scope,
-		ExpireTime:     timestamppb.New(now.Add(s.config.TokenTTL)),
+		ExpireTime:     timestamppb.New(expireTime),
 	}
 	token, err := s.db.insertToken(ctx, rec)
 	if err != nil {
@@ -266,7 +273,7 @@ func (s *Service) AuthorizeIdentity(
 		return nil, grpcerror.WrapUnauthenticated(errors.New("token is not bound to this certificate"))
 	}
 
-	// A token reaches only the methods its scope names, so a token issued without a scope reaches none.
+	// A token reaches only the methods its scope names.
 	if !slices.Contains(tokenRecord.GetScope(), req.GetResource()) {
 		return nil, grpcerror.WrapPermissionDenied(
 			errors.Newf("resource %s is outside the token scope", req.GetResource()),
@@ -295,7 +302,7 @@ func (s *Service) sweepExpiredRecords(ctx context.Context) error {
 		case <-ticker.C:
 			deletedTokens, deletedNonces, err := s.db.deleteExpired(ctx, time.Now())
 			if err != nil {
-				logger.Errorf("Sweeping expired records failed: %v", err)
+				logger.Errorf("Sweeping expired records failed: %+v", err)
 			} else if deletedTokens+deletedNonces > 0 {
 				logger.Infof("Swept %d expired tokens and %d expired nonces", deletedTokens, deletedNonces)
 			}
@@ -310,46 +317,53 @@ func (s *Service) allowChallenge() error {
 	return errors.New("rate limit exceeded")
 }
 
-// verifyEnvelope checks scoping, freshness, certificate binding, MSP resolution and the signature, then
-// returns the identity. Redeeming the nonce stays in AuthenticateIdentity: it is the one stateful step.
+// verifyEnvelope checks scoping, freshness, certificate binding, MSP resolution, expiry and the signature, then
+// returns the identity and when it expires (zero if it never does). Redeeming the nonce stays in
+// AuthenticateIdentity: it is the one stateful step.
 func (s *Service) verifyEnvelope(
 	parsed *parsedEnvelope, bundle *channelconfig.Bundle, certHash []byte, now time.Time,
-) (*msppb.Identity, error) {
+) (*msppb.Identity, time.Time, error) {
 	chdr := parsed.chdr
 	if chdr.GetType() != authEnvelopeType {
-		return nil, errors.Wrapf(errEnvelopeScope, "unexpected header type %d", chdr.GetType())
+		return nil, time.Time{}, errors.Wrapf(errEnvelopeScope, "unexpected header type %d", chdr.GetType())
 	}
 	if expected := bundle.ConfigtxValidator().ChannelID(); chdr.GetChannelId() != expected {
-		return nil, errors.Wrapf(errEnvelopeScope, "channel %q does not match %q", chdr.GetChannelId(), expected)
+		return nil, time.Time{}, errors.Wrapf(errEnvelopeScope,
+			"channel %q does not match %q", chdr.GetChannelId(), expected)
 	}
 	if len(parsed.payloadData) != 0 {
-		return nil, errors.Wrapf(errEnvelopeScope,
+		return nil, time.Time{}, errors.Wrapf(errEnvelopeScope,
 			"authentication envelope must carry an empty payload, got %d bytes", len(parsed.payloadData))
 	}
 
 	if err := validateTimestamp(chdr.GetTimestamp(), s.config.EnvelopeFreshnessWindow, now); err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
 	// The token binds to the certificate on the connection, and the envelope must claim exactly that one:
 	// a hash without a certificate, or a certificate without its hash, is refused rather than left unbound.
 	if !bytes.Equal(chdr.GetTlsCertHash(), certHash) {
-		return nil, errCertBindingMismatch
+		return nil, time.Time{}, errCertBindingMismatch
 	}
 
 	signedData := parsed.signedData
 	identity, err := bundle.MSPManager().DeserializeIdentity(signedData.Identity)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to deserialize identity")
+		return nil, time.Time{}, errors.Wrap(err, "failed to deserialize identity")
 	}
 	if err = identity.Validate(); err != nil {
-		return nil, errors.Wrap(err, "identity is not valid")
+		return nil, time.Time{}, errors.Wrap(err, "identity is not valid")
+	}
+	// Validate ignores certificate expiry, so it is checked here.
+	expiresAt := identity.ExpiresAt()
+	if !expiresAt.IsZero() && !now.Before(expiresAt) {
+		return nil, time.Time{}, errors.Newf("identity expired at %s", expiresAt)
 	}
 	if err = identity.Verify(signedData.Data, signedData.Signature); err != nil {
-		return nil, errors.Wrap(err, "signature verification failed")
+		return nil, time.Time{}, errors.Wrap(err, "signature verification failed")
 	}
 
-	return signedData.Identity, nil
+	return signedData.Identity, expiresAt, nil
 }
 
 // parseSignedEnvelope unpacks the envelope into the pieces verifyEnvelope inspects. The nonce comes from
@@ -397,8 +411,8 @@ func validateTimestamp(ts *timestamppb.Timestamp, window time.Duration, now time
 	return nil
 }
 
-// normalizeScope trims and de-duplicates a requested scope of gRPC full-method names, refusing any entry that
-// is not a protected RPC.
+// normalizeScope trims and de-duplicates a requested scope of gRPC full-method names, refusing an empty scope
+// and any entry that is not a protected RPC.
 func normalizeScope(requested []string, protected map[string]bool) ([]string, error) {
 	var normalized []string
 	for _, entry := range requested {
@@ -407,9 +421,12 @@ func normalizeScope(requested []string, protected map[string]bool) ([]string, er
 			continue
 		}
 		if !protected[entry] {
-			return nil, errUnknownScope
+			return nil, errors.Wrapf(errUnknownScope, "%q", entry)
 		}
 		normalized = append(normalized, entry)
+	}
+	if len(normalized) == 0 {
+		return nil, errEmptyScope
 	}
 	return normalized, nil
 }

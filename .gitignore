@@ -32,7 +32,6 @@ docker/runner/out
 .idea
 .vscode
 .build
-.bob/
 .claude/settings.local.json
 
 *coverage.profile

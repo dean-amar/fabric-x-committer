@@ -33,6 +33,8 @@ Actual requirements should be validated through benchmarking with your workload 
 
 The following topology is a reference starting point based on micro-benchmarks, not a prescription. Adjust based on benchmarking with your actual workload.
 
+For a deployment of about 500,000 tx/s, see [A Starting Point for Large Deployments](performance-tuning.md#11-a-starting-point-for-large-deployments) in the Performance Tuning Guide.
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                       Ordering Service                       │
